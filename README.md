@@ -65,7 +65,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
-| `GAIN_PER_BLOCK` | 0.05 | 每下降 1 格加多少水平速度 |
+| `GAIN_PER_BLOCK` | 0.08 | 每下降 1 格加多少水平速度 |
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.985 | 滑行动量每 tick 保留比例（半衰期 ≈ 2.29 秒）＝ 有效摩擦力 |
 | `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 |
@@ -84,7 +84,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 常量 | 当前值 | 作用 |
 |---|---|---|
-| `ADD` | 0.35 | 每次右键在"当前速度"之上抬高多少 |
+| `ADD` | 0.1 | 每次右键在"当前速度"之上抬高多少 |
 | `MIN_PEAK` | 0.45 | 起步速度下限（站着撑着也能冲出去） |
 | `DURATION_TICKS` | 60 | 冲刺持续 3 秒后回到原速 |
 | `CURVE` | 1.0 | 衰减曲线（1.0 = 线性匀速缓降，越大越"先猛后缓"） |
@@ -96,8 +96,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|---|
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_STANCE_DEGREES` | `SkiStance` | 18 | 单板：鸭子站姿外撇角度 |
-| `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：整组（板+板头+鞋）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直），-90 = 板头朝另一侧（腿位常量要同步翻） |
-| `TRAVEL_YAW_DEGREES` | `SnowboardInputMixin` | 90 | 单板**手感**：滑行方向相对视线转过的角度 —— 90 = 横着滑（W 往身体右侧/板头方向），45/30 = 打斜 carve，0 = 正常前进。**建议与 `BOARD_YAW_DEGREES` 保持一致**，否则“板头指向”和“滑出去的方向”会矛盾 |
+| `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：整组（板+板头+鞋）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧（腿位常量要同步翻） |
 | `BOARD_FRONT_LEG_X/Z`、`BOARD_BACK_LEG_X/Z` | `SkiStance` | -5.5/-1.9、2.5/1.9 | 单板：两条腿在**模型坐标**里的位置（板上坐标按 90° 映射 `(x,z)→(z,-x)` 换算，保证腿落在板上与鞋重合） |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
@@ -124,7 +123,6 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
-| `client/SnowboardInputMixin.java` | 单板滑行手感：把 `ClientInput#getMoveVector()` 的输入向量转过一个角度（默认 90° = 横着滑） |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |

@@ -21,7 +21,7 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class SkiBoost {
 	/** 每次右键在“当前速度”之上抬高的量（格/tick）。 */
-	private static final double ADD = 0.35D;
+	private static final double ADD = 0.1D;
 	/** 起步速度下限：站着原地撑也能冲出去。 */
 	private static final double MIN_PEAK = 0.45D;
 	/** 冲刺持续 tick 数（60 tick = 3 秒，后段缓慢减速）。 */
