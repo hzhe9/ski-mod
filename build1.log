@@ -1,0 +1,49 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.7.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as no cached configuration is available for tasks: build
+
+> Configure project :
+Fabric Loom: 1.18.3
+
+> Task :validateAccessWidener NO-SOURCE
+> Task :processTestResources NO-SOURCE
+> Task :processIncludeJars
+> Task :processClientResources
+> Task :sourcesJar
+> Task :processResources
+
+> Task :compileJava FAILED
+D:\hermes\item\game\ski-mod-push\src\main\java\com\hermes\skis\item\SkiPoleItem.java:4: 错误: 程序包com.hermes.skis.client不存在
+import com.hermes.skis.client.SkiState;
+                             ^
+D:\hermes\item\game\ski-mod-push\src\main\java\com\hermes\skis\item\SkiPoleItem.java:39: 错误: 找不到符号
+			SkiState.triggerSwing(player.getId());
+			^
+  符号:   变量 SkiState
+  位置: 类 SkiPoleItem
+2 个错误
+
+[Incubating] Problems report is available at: file:///D:/hermes/item/game/ski-mod-push/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugin').
+> Compilation failed; see the compiler output below.
+  D:\hermes\item\game\ski-mod-push\src\main\java\com\hermes\skis\item\SkiPoleItem.java:39: 错误: 找不到符号
+  			SkiState.triggerSwing(player.getId());
+  			^
+    符号:   变量 SkiState
+    位置: 类 SkiPoleItem
+  D:\hermes\item\game\ski-mod-push\src\main\java\com\hermes\skis\item\SkiPoleItem.java:4: 错误: 程序包com.hermes.skis.client不存在
+  import com.hermes.skis.client.SkiState;
+                               ^
+  2 个错误
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 11s
+5 actionable tasks: 5 executed
+Configuration cache entry stored.
