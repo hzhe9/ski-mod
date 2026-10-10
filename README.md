@@ -7,7 +7,7 @@
 | id | 名称 | 槽位 | 说明 |
 |---|---|---|---|
 | `skis:modern_ski` | 现代滑雪板（双板） | 脚部（靴子） | 两块平行的板，两腿各向外平移 0.9 单位 |
-| `skis:snowboard` | 现代滑雪单板 | 脚部（靴子） | 一只板（宽 9、长 24 单位），双脚横跨、鸭子站姿外撇 18°、前后错开 |
+| `skis:snowboard` | 现代滑雪单板 | 脚部（靴子） | 一只板（宽 9、长 24 单位），双脚横跨、鸭子站姿外撇 18°、前后错开；**操控与双板不同**（见下「单板操控」） |
 | `skis:ski_pole` | 滑雪杖 | 手 | 右键撑杖 → 一次摆臂 + 一段逐渐衰减的冲刺（`main` 分支） |
 
 配方：双板 = 铁锭×2 + 木板×3（`I I` / `PPP`）；单板 = 木板×5 + 铁锭×1（`PPP` / `PIP`）；滑雪杖 = 铁粒×1 + 木棍×2（`I` / `S` / `S`，一次出 2 根）。
@@ -78,7 +78,25 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `MAX_GLIDE_SPEED` | 1.4 格/tick（≈100 km/h） | 滑行/冲刺速度上限（1 格 = 1 米，格/tick × 72 = km/h） |
 | `STEER_MAX_HEIGHT` | 1.0 格 | 脚底离地不超过这个高度才允许转向，再高锁死方向 |
-| `STEER_RATE` | 0.2 | 每 tick 朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°） |
+| `STEER_RATE` | 0.2 | 每 tick 朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）；**单板不走这条**，按键方向直接生效 |
+
+### 单板操控 `SnowboardControl.java`
+
+单板滑行时**人 + 板固定成一个朝向**（= 开始滑行那一刻的朝向），鼠标转视角不参与移动方向：
+
+| 按键 | 行为 |
+|---|---|
+| A / D | 沿**身体左右**平移 —— 板头指向哪一侧就往哪一侧滑，所以板永远「正对着滑行方向」 |
+| W | 前倾：每 tick 沿身体前方补一点推进（「稍微往前」） |
+| S | 后倾：**不**给推进，靠动量自己衰减 |
+| 鼠标 | 只负责看，不影响方向和板 |
+
+换基准方向 = 把板脱下来再穿上（重新锁定）。双板的操控仍是原来的「按键方向渐变转向」。
+
+| 常量 | 当前值 | 作用 |
+|---|---|---|
+| `SIDE_MIN_SPEED` | 0.30 格/tick | 横移起步速度：站着不动按一下 A/D 就立刻滑出去（不用先攒速度） |
+| `TILT_PUSH` | 0.03 | 前倾（W）每 tick 补的推进量，要「更用力往前」就加大 |
 
 ### 冲刺 `SkiBoost.java`（仅 `main`）
 
@@ -102,6 +120,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
+| `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.25 / 0.15 | 单板滑行时**空着的那只手**的固定前抬角 / 外张角（不复用会走原版走路摆臂） |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |
 
 ### 模型几何
@@ -118,7 +137,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `item/SkiPoleItem.java` | 滑雪杖右键行为（客户端摆臂 + 服务端冲刺） |
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进 |
-| `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限 |
+| `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板走 `SnowboardControl` 那套） |
+| `SnowboardControl.java` | 单板专属操控：锁定身体朝向、A/D 横移、W 前倾推进的常量与方向换算 |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |

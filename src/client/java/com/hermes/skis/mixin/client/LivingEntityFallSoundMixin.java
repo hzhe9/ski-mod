@@ -18,7 +18,7 @@ public abstract class LivingEntityFallSoundMixin {
 	private void skis$silenceLanding(CallbackInfo ci) {
 		LivingEntity self = (LivingEntity) (Object) this;
 		if (self instanceof Player player
-				&& player.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.MODERN_SKI) {
+				&& SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			ci.cancel();
 		}
 	}

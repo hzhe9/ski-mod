@@ -33,7 +33,7 @@ public abstract class EntityStepSoundMixin {
 	)
 	private void skis$silenceStepSound(Entity self, BlockPos pos, BlockState state, Operation<Void> original) {
 		if (self instanceof Player player
-				&& player.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.MODERN_SKI) {
+				&& SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			return;
 		}
 		original.call(self, pos, state);

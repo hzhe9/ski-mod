@@ -42,10 +42,21 @@ public final class SkiControl {
 	private SkiControl() {
 	}
 
-	/** 把方向朝玩家按键的方向转一点；没按键或不允许转向时原样返回。 */
+	/**
+	 * 把方向朝玩家按键的方向转一点；没按键或不允许转向时原样返回。
+	 *
+	 * <p>单板例外：它是「人板一体固定朝向、只能左右平移」，所以按键方向<b>直接生效</b>、不做渐变转向
+	 * （渐变会让身体/板在横移时慢慢拧过去，正是“板看着歪”的来源）。
+	 */
 	public static Vec3 steer(Vec3 current, ServerPlayer player) {
 		Vec3 desired = desiredDirection(player);
-		return desired == null ? current : current.lerp(desired, STEER_RATE).normalize();
+		if (desired == null) {
+			return current;
+		}
+		if (SnowboardControl.isSnowboard(player)) {
+			return desired;
+		}
+		return current.lerp(desired, STEER_RATE).normalize();
 	}
 
 	/** 玩家按键在世界坐标下的水平方向；没按方向键、离地太高、拿不到输入都返回 null。 */
@@ -56,6 +67,11 @@ public final class SkiControl {
 		Input input = player.getLastClientInput();
 		if (input == null) {
 			return null;
+		}
+		if (SnowboardControl.isSnowboard(player)) {
+			// 单板：只认 A / D，方向以“锁定的身体朝向”为基准 —— 鼠标转视角不参与（往板头指的哪边滑就往哪边）
+			double side = SnowboardControl.sideSign(input);
+			return side == 0.0D ? null : SnowboardControl.left(player).scale(side);
 		}
 		double forward = (input.forward() ? 1.0D : 0.0D) - (input.backward() ? 1.0D : 0.0D);
 		double strafe = (input.left() ? 1.0D : 0.0D) - (input.right() ? 1.0D : 0.0D);
@@ -73,7 +89,8 @@ public final class SkiControl {
 		return direction.lengthSqr() > 1.0E-4D ? direction.normalize() : null;
 	}
 
-	private static boolean canSteer(ServerPlayer player) {
+	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格。单板的前倾推进也用它。 */
+	public static boolean canSteer(ServerPlayer player) {
 		return player.onGround() || groundDistance(player) <= STEER_MAX_HEIGHT;
 	}
 

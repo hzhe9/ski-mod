@@ -22,7 +22,7 @@ public abstract class PlayerStepSoundMixin {
 	@Inject(method = "playStepSound", at = @At("HEAD"), cancellable = true)
 	private void skis$silenceStep(BlockPos pos, BlockState state, CallbackInfo ci) {
 		Player self = (Player) (Object) this;
-		if (self.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.MODERN_SKI) {
+		if (SkisMod.isSkiFeet(self.getItemBySlot(EquipmentSlot.FEET))) {
 			ci.cancel();
 		}
 	}

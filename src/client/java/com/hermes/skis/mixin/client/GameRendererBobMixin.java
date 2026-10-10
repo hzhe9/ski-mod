@@ -24,7 +24,7 @@ public abstract class GameRendererBobMixin {
 	@Inject(method = "bobView", at = @At("HEAD"), cancellable = true)
 	private void skis$noWalkBob(CameraRenderState cameraState, PoseStack poseStack, CallbackInfo ci) {
 		LocalPlayer player = Minecraft.getInstance().player;
-		if (player != null && player.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.MODERN_SKI) {
+		if (player != null && SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			ci.cancel();
 		}
 	}
