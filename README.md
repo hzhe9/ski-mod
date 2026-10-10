@@ -96,7 +96,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|---|
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_STANCE_DEGREES` | `SkiStance` | 18 | 单板：鸭子站姿外撇角度 |
-| `BOARD_FRONT_LEG_Z` / `BOARD_BACK_LEG_Z` | `SkiStance` | -5.5 / 2.5 | 单板：前脚/后脚在板上的前后位置 |
+| `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：整组（板+板头+鞋）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直），-90 = 板头朝另一侧（腿位常量要同步翻） |
+| `TRAVEL_YAW_DEGREES` | `SnowboardInputMixin` | 90 | 单板**手感**：滑行方向相对视线转过的角度 —— 90 = 横着滑（W 往身体右侧/板头方向），45/30 = 打斜 carve，0 = 正常前进。**建议与 `BOARD_YAW_DEGREES` 保持一致**，否则“板头指向”和“滑出去的方向”会矛盾 |
+| `BOARD_FRONT_LEG_X/Z`、`BOARD_BACK_LEG_X/Z` | `SkiStance` | -5.5/-1.9、2.5/1.9 | 单板：两条腿在**模型坐标**里的位置（板上坐标按 90° 映射 `(x,z)→(z,-x)` 换算，保证腿落在板上与鞋重合） |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
@@ -121,7 +123,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |
-| `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图） |
+| `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
+| `client/SnowboardInputMixin.java` | 单板滑行手感：把 `ClientInput#getMoveVector()` 的输入向量转过一个角度（默认 90° = 横着滑） |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
