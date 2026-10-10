@@ -59,9 +59,10 @@ public abstract class HumanoidModelMixin {
 		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
 
 		if (state.feetEquipment.getItem() == SkisMod.SNOWBOARD) {
-			// 单板：双脚横跨在同一块板上（不左右拉开），鸭子站姿反向外撇 + 前后错开
-			placeBoardLeg(self.rightLeg, -SkiStance.BASE_LEG_X, SkiStance.BOARD_BACK_LEG_Z, -SkiStance.BOARD_STANCE_RAD);
-			placeBoardLeg(self.leftLeg, SkiStance.BASE_LEG_X, SkiStance.BOARD_FRONT_LEG_Z, SkiStance.BOARD_STANCE_RAD);
+			// 单板：板横在脚下（与视线垂直），双脚横跨在板上、前后错开、鸭子站姿
+			float yaw = SkiStance.BOARD_YAW_RAD;
+			placeBoardLeg(self.rightLeg, SkiStance.BOARD_BACK_LEG_X, SkiStance.BOARD_BACK_LEG_Z, yaw - SkiStance.BOARD_STANCE_RAD);
+			placeBoardLeg(self.leftLeg, SkiStance.BOARD_FRONT_LEG_X, SkiStance.BOARD_FRONT_LEG_Z, yaw + SkiStance.BOARD_STANCE_RAD);
 		} else {
 			// 双板：两腿只横向拉开、保持平行
 			placeLeg(self.rightLeg, -SkiStance.legOffsetX());
