@@ -62,6 +62,13 @@ public abstract class HumanoidModelMixin {
 	 * 右臂取 +、左臂取 -，于是两只手对称地离开身体侧面。0.28 rad ≈ 16°，微微抬起。
 	 */
 	private static final float FREE_ARM_ROLL = 0.28F;
+	/**
+	 * <b>双板</b>空手（没拿滑雪杖）时两臂**向前微微抬起**的角度（弧度）——
+	 * 负值 = 向前抬（与 {@link #ARM_TOP} 同一个方向约定）。0.25 rad ≈ 14°。
+	 */
+	private static final float SKI_FREE_ARM_XROT = -0.25F;
+	/** 双板空手时两臂**向两侧微微抬起**的角度（弧度，右臂 + / 左臂 -）。 */
+	private static final float SKI_FREE_ARM_ROLL = 0.28F;
 
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
@@ -110,14 +117,14 @@ public abstract class HumanoidModelMixin {
 			// 手端稍稍向外（正负对称）→ 垂下来的杖是平行线，不会向内倾、穿到腿上
 			if (state.rightHandItemStack.getItem() == SkisMod.SKI_POLE) {
 				poseArm(self.rightArm, armRot, ARM_OUTWARD_ROLL);
-			} else if (board) {
-				// 单板：没拿杖的手也要固定住，否则会走原版的走路摆臂（看起来像在走路）
-				poseArm(self.rightArm, FREE_ARM_XROT, FREE_ARM_ROLL);
+			} else {
+				// 没拿杖的手：抬起（双板＝向前 + 向两侧，单板＝只向两侧），否则会走原版的走路摆臂
+				poseArm(self.rightArm, freeArmXrot(board), freeArmRoll(board));
 			}
 			if (state.leftHandItemStack.getItem() == SkisMod.SKI_POLE) {
 				poseArm(self.leftArm, armRot, -ARM_OUTWARD_ROLL);
-			} else if (board) {
-				poseArm(self.leftArm, FREE_ARM_XROT, -FREE_ARM_ROLL);
+			} else {
+				poseArm(self.leftArm, freeArmXrot(board), -freeArmRoll(board));
 			}
 		}
 
@@ -127,6 +134,16 @@ public abstract class HumanoidModelMixin {
 		if (!state.isCrouching) {
 			self.body.xRot = GLIDE_LEAN;
 		}
+	}
+
+	/** 空手时两臂的前后角：单板不前抬（0），双板向前微抬。 */
+	private static float freeArmXrot(boolean board) {
+		return board ? FREE_ARM_XROT : SKI_FREE_ARM_XROT;
+	}
+
+	/** 空手时两臂向两侧抬起的角度（右臂取正、左臂取负）。 */
+	private static float freeArmRoll(boolean board) {
+		return board ? FREE_ARM_ROLL : SKI_FREE_ARM_ROLL;
 	}
 
 	/** 把一条手臂摆成撑杖姿势：xRot 是划动角，zRot 控制手端朝外还是朝内。 */

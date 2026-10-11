@@ -126,20 +126,23 @@ public final class SkiGlide {
 		}
 
 		double accumulated = DESCEND_ACCUM.getOrDefault(id, 0.0D);
-		if (accumulated < STEP_BLOCKS) {
+		boolean board = SnowboardControl.isSnowboard(player);
+		// 结算步长按板取：双板 1.0 格一次，单板 0.1 格一次（开始下坡就立刻有反应）
+		double step = board ? SnowboardControl.descentStepBlocks() : STEP_BLOCKS;
+		if (accumulated < step) {
 			return;
 		}
 
-		double steps = Math.floor(accumulated / STEP_BLOCKS);
-		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
+		double steps = Math.floor(accumulated / step);
+		DESCEND_ACCUM.put(id, accumulated - steps * step);
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
 		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT
 		// 指数 < 1 时才边际递减；现在用户要求先去掉衰减试手感，所以 FALL_GAIN_EXPONENT = 1（线性）。
-		boolean board = SnowboardControl.isSnowboard(player);
+		// ⚠ 乘 step 是为了让“步长细”不等于“给得多”：总量仍是「每下降 1 格 = 基数」。
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
 		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
-		double gain = Math.min(Math.pow(steps, FALL_GAIN_EXPONENT) * base, cap);
+		double gain = Math.min(Math.pow(steps, FALL_GAIN_EXPONENT) * base * step, cap);
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
@@ -236,12 +239,22 @@ public final class SkiGlide {
 		double decay;
 		if (SnowboardControl.isSnowboard(player)) {
 			// ——— 单板 ———
-			if (SnowboardControl.sideSign(keys) != 0.0D) {
-				// 单板的减速就是“横向移动本身”：向左滑时按 D，原版会把人往右挪，速度自然抵消。
-				// 所以这里**不覆盖玩家速度、也不额外扣动量**（S 完全不刹车），
-				// 只把动量对齐到当前实际速度 —— 否则动量会托着旧速度，反着按等于白按。
-				MOMENTUM.put(id, speed);
-				return;
+			double side = SnowboardControl.sideSign(keys);
+			if (side != 0.0D) {
+				// 分“同向 / 反向”两种按法：
+				//   反向（向左滑时按 D）＝刹车 —— 原版横移把人往右挪、速度自然抵消，
+				//   所以这里**不覆盖玩家速度、也不托动量**，只把动量对齐到当前实际速度（否则动量会托着旧速度，反着按等于白按）；
+				//   同向（顺着滑行方向按）＝不与玩家作对，让动量**托住**已有速度 ——
+				//   否则下落加速攒出来的速度每 tick 被地面摩擦（约 ×0.55）吃掉，滑多长都只剩原版横向移动的基础速度
+				//   （用户报：“一直按住 A / D 下坡，速度叠加触发不了，一直是基础速度滑动”）。
+				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+				double along = horizontal.lengthSqr() < 1.0E-6D
+						? 0.0D
+						: horizontal.normalize().dot(SnowboardControl.sideLocked(id, player.getYRot(), 1.0D));
+				if (along * side <= 0.0D) {
+					MOMENTUM.put(id, speed);
+					return;
+				}
 			}
 			momentum = Math.max(momentum, speed);
 			decay = SnowboardControl.momentumDecay();

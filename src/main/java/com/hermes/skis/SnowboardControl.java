@@ -63,6 +63,14 @@ public final class SnowboardControl {
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.997D;   // 用户 2026-10-11 定 0.997（双板仍 0.99）
+	/**
+	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
+	 *
+	 * <p>双板是 1.0（每满 1 格才给一次），单板用 0.1 —— 否则开始下坡时要先攒满一整格才有第一份加速
+	 * （用户报：“一开始没有加速，要下多几格才有”）。每格的<b>总量不变</b>（仍是 {@link #FALL_GAIN_PER_BLOCK} 0.1/格），
+	 * 只是拆成十份、从下坡第一格就开始生效。
+	 */
+	private static final double DESCENT_STEP_BLOCKS = 0.1D;
 	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
 	private static final double VEER_SMOOTHING = 0.35D;
 	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
@@ -171,6 +179,11 @@ public final class SnowboardControl {
 	/** 单板：动量衰减（越接近 1 越滑）。 */
 	public static double momentumDecay() {
 		return MOMENTUM_DECAY;
+	}
+
+	/** 单板：下落加速每累计这么多格结算一次（比双板的 1.0 格细）。 */
+	public static double descentStepBlocks() {
+		return DESCENT_STEP_BLOCKS;
 	}
 
 	/**
