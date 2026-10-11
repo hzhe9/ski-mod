@@ -225,11 +225,10 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板：只有真的往左 / 往右在动时才给方向（按下 A / D），否则 null ＝ 不加力。
-			// 视角朝向、身体前方都不能当兜底 —— 那会让静止的人自己往前滑。
-			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			return side == 0.0D ? null
-					: SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
+			// 单板：**不在这里改方向** —— 没有速度就返回 null（不加力），有速度就走上面的“沿当前方向”。
+			// 这样 A / D 和 W / S 的“方向变化”是同一套机制：都靠 carve 的每 tick 旋转，
+			// 而不是按 A / D 时把速度一下子拨到侧向、按 W / S 时却慢慢转（用户反馈“两边不一样”）。
+			return null;
 		}
 		Vec3 look = player.getLookAngle();
 		Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);
