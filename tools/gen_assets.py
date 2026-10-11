@@ -18,8 +18,10 @@
 
 ski_board.png 用的是 CubeListBuilder 的自动 UV 布局，所以各面落在固定位置：
   雪鞋 box(4,6,4) @texOffs(0,0)    -> 占 (0,0)-(16,10)
-  板身 box(3,1,22) @texOffs(20,0)  -> 占 (20,0)-(70,23)，其中板面=up(42,0,3x22)、板底=down(45,0,3x22)、侧面=第 22 行
-  板头 box(3,1,2) @texOffs(20,24)  -> 占 (20,24)-(30,28)
+  板身 box(3,1,24) @texOffs(20,0)  -> 占 (20,0)-(76,25)，其中板面=up(44,0,3x24)、板底=down(47,0,3x24)、侧面=第 24 行
+  板头 box(3,1,2) @texOffs(20,26)  -> 占 (20,26)-(30,30)
+  ⚠ 板身长度一改，上面这几个数字全都要重算（宽 = 2×长 + 2×宽、板面列 = 20+长 …），
+     并且板头区不能压到「侧面那一行」，否则两处抢同一批像素。
 
 脚部护甲层贴图以原版 iron.png 的靴子像素为模板（只保留靴子用到的 texel 再重上色）。
 
@@ -123,17 +125,17 @@ def ski_board():
         put(img, x, 4, BOOT_BUCKLE)
         put(img, x + 1, 4, BOOT_BUCKLE)
 
-    # 板身：box(3,1,22) @texOffs(20,0) -> up(42,0,3x22) / down(45,0,3x22) / 侧面在第 22 行
-    fill(img, 42, 0, 45, 22, BODY)           # 板面（up）
-    fill(img, 42, 0, 45, 5, TIP)             # 前段板头区
-    fill(img, 43, 5, 44, 22, ACCENT)         # 板面中线
-    fill(img, 45, 0, 48, 22, BASE)           # 板底（down）
-    fill(img, 20, 22, 70, 23, BASE)          # 板侧一圈
-    fill(img, 20, 22, 42, 23, TIP)           # 前段侧面
+    # 板身：box(3,1,24) @texOffs(20,0) -> up(44,0,3x24) / down(47,0,3x24) / 侧面在第 24 行
+    fill(img, 44, 0, 47, 24, BODY)           # 板面（up）
+    fill(img, 44, 0, 47, 5, TIP)             # 前段板头区
+    fill(img, 45, 5, 46, 24, ACCENT)         # 板面中线
+    fill(img, 47, 0, 50, 24, BASE)           # 板底（down）
+    fill(img, 20, 24, 76, 25, BASE)          # 板侧一圈
+    fill(img, 20, 24, 44, 25, TIP)           # 前段侧面
 
-    # 板头上翘：box(3,1,2) @texOffs(20,24) -> (20,24)-(30,28)
-    fill(img, 20, 24, 30, 28, TIP)
-    fill(img, 22, 24, 25, 26, ACCENT)
+    # 板头上翘：box(3,1,2) @texOffs(20,26) -> (20,26)-(30,30)
+    fill(img, 20, 26, 30, 30, TIP)
+    fill(img, 22, 26, 25, 28, ACCENT)
     return img
 
 

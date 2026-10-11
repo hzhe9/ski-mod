@@ -48,13 +48,13 @@ public class SkiBoardModel extends Model<HumanoidRenderState> {
 		ski.addOrReplaceChild("boot_" + side,
 				CubeListBuilder.create().texOffs(0, 0).addBox(-2.0F, 18.0F, -2.0F, 4.0F, 6.0F, 4.0F),
 				PartPose.ZERO);
-		// 板身：宽 3、厚 1、长 22；靴子在中点偏后（前 12.5 / 后 9.5 ≈ 前 57%，贴近现实安装位置）
+		// 板身：宽 3、厚 1、长 24 单位（= 150 cm，成人全能板区间内）；靴子居中（前 12 / 后 12）
 		ski.addOrReplaceChild("board_" + side,
-				CubeListBuilder.create().texOffs(20, 0).addBox(-1.5F, BOARD_TOP, -12.5F, 3.0F, 1.0F, 22.0F),
+				CubeListBuilder.create().texOffs(20, 0).addBox(-1.5F, BOARD_TOP, -12.0F, 3.0F, 1.0F, 24.0F),
 				PartPose.ZERO);
-		// 板头上翘
+		// 板头上翘（含翘头总长 26 单位 = 162.5 cm）
 		ski.addOrReplaceChild("tip_" + side,
-				CubeListBuilder.create().texOffs(20, 24).addBox(-1.5F, 22.3F, -14.5F, 3.0F, 1.0F, 2.0F),
+				CubeListBuilder.create().texOffs(20, 26).addBox(-1.5F, 22.3F, -14.0F, 3.0F, 1.0F, 2.0F),
 				PartPose.ZERO);
 	}
 }
