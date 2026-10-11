@@ -1,6 +1,7 @@
 package com.hermes.skis.client;
 
 import com.hermes.skis.SkisMod;
+import com.hermes.skis.SkisControl;
 import com.hermes.skis.SnowboardControl;
 import com.hermes.skis.SwingHooks;
 import net.fabricmc.api.ClientModInitializer;
@@ -37,20 +38,30 @@ public class SkisClient implements ClientModInitializer {
 			}
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
 			for (Player player : client.level.players()) {
-				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {   // 单板 / 双板都算
+				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
 					SnowboardControl.forget(player.getId());
+					SkisControl.forget(player.getId());
 					continue;
 				}
-				SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+				// 单板 / 双板各自一套，互不干涉
+				float yaw;
 				if (SnowboardControl.isSnowboard(player)) {
-					// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
+					// ——— 单板：carve（前倾 + 横移 → 身体朝向持续转），与服务端同一套规则 ———
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					Input keys = player == client.player && client.player != null
 							? client.player.input.keyPresses : null;
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
+					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
+				} else {
+					// ——— 双板：锁定朝向 + A / D 转向（与服务端同一套规则，这样模型转起来才跟手）———
+					SkisControl.ensureLocked(player.getId(), player.getYRot());
+					Input keys = player == client.player && client.player != null
+							? client.player.input.keyPresses : null;
+					SkisControl.steer(player, keys);
+					yaw = SkisControl.heading(player.getId(), player.getYRot());
 				}
-				// 单板 & 双板都一样：把身体（连带板）锁到锁定朝向 —— 转视角只转头，
-			// 不写这一句双板的身体/板就会被原版拉着跟视角转（用户报的正是这个）。
-				float yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
+				// 两个板都一样：把身体（连带板）写成锁定朝向 —— 转视角只转头，
+				// 不写这一句，模型的朝向就会被原版拉着跟视角转。
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向
 			}

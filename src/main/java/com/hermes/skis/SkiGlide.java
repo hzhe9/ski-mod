@@ -36,21 +36,8 @@ public final class SkiGlide {
 
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
-	/** 双板：每下落 1 格加多少水平速度（0.18 被用户判“太快”，定在 0.10）。 */
-	private static final double GAIN_PER_BLOCK = 0.08D;
-	/** 单板：同样下落，单板只取左右分量、体感明显更弱，所以给更大的系数（用户：“单板下落加速太慢”）。 */
-	private static final double BOARD_GAIN_PER_BLOCK = 0.12D;
-	/** 双板单 tick 上限（防止悬崖一瞬间给爆）。 */
-	private static final double MAX_GAIN_PER_TICK = 0.3D;
-	/** 单板单 tick 上限。 */
-	private static final double BOARD_MAX_GAIN_PER_TICK = 0.5D;
-
-	/** 动量每 tick 保留的比例：越接近 1 越滑、越慢停（0.985 ≈ 2 秒掉一半）。 */
-	private static final double MOMENTUM_DECAY = 0.985D;
-	/** 单板专用（更滑）：转向时是在“切雪”，速度不该被地面摩擦一点点啃掉（0.996 ≈ 3 秒掉 1%）。 */
-	private static final double BOARD_MOMENTUM_DECAY = 0.996D;
-	/** 双板按 S 时的额外衰减系数（刹车）：0.90 ≈ 每 tick 掉 10%，按住约半秒就能停。 */
-	private static final double BRAKE_DECAY = 0.90D;
+	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
+	// 两边完全独立，调一个不会动到另一个。这里只留两板共用的“物理骨架”常量。
 	/** 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。 */
 	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
 	/** 动量低于这个值就丢掉。 */
@@ -74,15 +61,17 @@ public final class SkiGlide {
 				if (!isSkiing(player)) {
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId());
+					SkisControl.forget(player.getId());
 					continue;
 				}
 				if (SnowboardControl.isSnowboard(player)) {
-					SnowboardControl.ensureLocked(player.getId(), player.getYRot());   // 单板：锁住身体朝向
+					// ——— 单板 ———
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					carve(player);
 				} else {
-					// 双板：锁住朝向，A / D 直接转这个朝向 —— 模型（连带板）跟着转，视角不参与
-					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
-					steerSkis(player);
+					// ——— 双板 ———
+					SkisControl.ensureLocked(player.getId(), player.getYRot());
+					SkisControl.steer(player, player.getLastClientInput());   // A / D 转锁定朝向，模型连带板一起转
 				}
 				trackDescent(player);
 				applyMomentum(player);
@@ -125,10 +114,11 @@ public final class SkiGlide {
 		double steps = Math.floor(accumulated / STEP_BLOCKS);
 		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
 
+		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
 		boolean board = SnowboardControl.isSnowboard(player);
-		double gain = board
-				? Math.min(steps * BOARD_GAIN_PER_BLOCK, BOARD_MAX_GAIN_PER_TICK)
-				: Math.min(steps * GAIN_PER_BLOCK, MAX_GAIN_PER_TICK);
+		double rate = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
+		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
+		double gain = Math.min(steps * rate, cap);
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
@@ -159,15 +149,21 @@ public final class SkiGlide {
 		double speed = motion.horizontalDistance();
 
 		double momentum = MOMENTUM.getOrDefault(id, 0.0D);
-		if (!SnowboardControl.isSnowboard(player)) {
-			momentum = Math.max(momentum, speed);   // 双板照旧：把当前速度纳入动量
-		} else if (SnowboardControl.sideSign(player.getLastClientInput()) != 0.0D) {
-			momentum = Math.max(momentum, speed);   // 单板只在真的按 A / D 横移时跟随
-		}
-		double decay = SnowboardControl.isSnowboard(player) ? BOARD_MOMENTUM_DECAY : MOMENTUM_DECAY;
 		Input keys = player.getLastClientInput();
-		if (!SnowboardControl.isSnowboard(player) && keys != null && keys.backward()) {
-			decay *= BRAKE_DECAY;   // 双板按 S（后倾）＝刹车：持续减速，松开后也不会被动量拉回原速
+		double decay;
+		if (SnowboardControl.isSnowboard(player)) {
+			// ——— 单板 ———
+			if (SnowboardControl.sideSign(keys) != 0.0D) {
+				momentum = Math.max(momentum, speed);   // 只在真的按 A / D 横移时跟随
+			}
+			decay = SnowboardControl.momentumDecay();
+		} else {
+			// ——— 双板 ———
+			momentum = Math.max(momentum, speed);
+			decay = SkisControl.momentumDecay();
+			if (keys != null && keys.backward()) {
+				decay *= SkisControl.brakeDecay();   // 按 S ＝刹车：持续减速，松开后也不会被动量拉回原速
+			}
 		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
@@ -196,16 +192,6 @@ public final class SkiGlide {
 	 * 单板 carve：前倾（W）＋ 横移（A / D）→ 身体朝向朝那一侧持续转（{@link SnowboardControl#applyCarve}），
 	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
 	 */
-	/** 双板左右转向：转的是**锁定朝向**（模型 / 板跟着一起转），视角不参与。A 往左、D 往右。 */
-	private static void steerSkis(ServerPlayer player) {
-		double side = SnowboardControl.sideSign(player.getLastClientInput());
-		if (side == 0.0D) {
-			return;
-		}
-		// ⚠️ MC 里 yaw 增大＝往右转，所以“按 A（side=+1）往左”要减 yaw
-		SnowboardControl.turnBody(player.getId(), (float) (-side * SnowboardControl.skiTurnRateDegrees()));
-	}
-
 	private static void carve(ServerPlayer player) {
 		// 注意：腾空时也允许“转”（从高处落下时前后倾要能带着速度拐弯），
 		// 只有“前冲”那一口力限制在贴地时给。

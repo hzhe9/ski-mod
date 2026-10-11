@@ -173,6 +173,16 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
 - 双板：**按 S（后倾）＝刹车**，`applyMomentum` 里对动量额外乘 `BRAKE_DECAY`；只靠原版后退只能“短暂停一下”，松手动量就把速度托回去了。
 
+## 代码结构：单板与双板彻底分开
+
+| 归属 | 类 | 内容 |
+|---|---|---|
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.12 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
+| **双板** | `SkisControl` | 锁定朝向表 `HEADING`、`steer`（A/D 转向）、`front`/`left`、**双板专属数值**（`TURN_RATE_DEGREES` 3 / `FALL_GAIN_PER_BLOCK` 0.08 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90） |
+| 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
+
+- **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
+
 ## 双板 vs 单板（现行为）
 
 | | 双板 | 单板 |

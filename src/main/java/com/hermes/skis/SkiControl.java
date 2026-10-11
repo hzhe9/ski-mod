@@ -73,7 +73,7 @@ public final class SkiControl {
 		if (forward == 0.0D) {
 			return null;
 		}
-		Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot());
+		Vec3 front = SkisControl.front(player.getId(), player.getYRot());
 		return forward > 0.0D ? front : front.scale(-1.0D);
 	}
 

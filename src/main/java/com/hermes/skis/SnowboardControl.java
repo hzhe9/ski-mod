@@ -48,8 +48,12 @@ public final class SnowboardControl {
 	private static final float TURN_RATE_DEGREES = 2.0F;
 	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
-	/** 双板：按 A / D 时锁定朝向每 tick 转多少度（双板只有 A / D 能操控转向，视角不参与）。 */
-	private static final float SKI_TURN_RATE_DEGREES = 3.0F;
+	/** 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大；用户定案 0.12）。 */
+	private static final double FALL_GAIN_PER_BLOCK = 0.12D;
+	/** 单板：单 tick 下落加速上限。 */
+	private static final double FALL_GAIN_PER_TICK_MAX = 0.5D;
+	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
+	private static final double MOMENTUM_DECAY = 0.996D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -136,6 +140,21 @@ public final class SnowboardControl {
 		return TILT_DEGREES;
 	}
 
+	/** 单板：每下落 1 格加多少水平速度。 */
+	public static double fallGainPerBlock() {
+		return FALL_GAIN_PER_BLOCK;
+	}
+
+	/** 单板：单 tick 下落加速上限。 */
+	public static double fallGainPerTickMax() {
+		return FALL_GAIN_PER_TICK_MAX;
+	}
+
+	/** 单板：动量衰减（越接近 1 越滑）。 */
+	public static double momentumDecay() {
+		return MOMENTUM_DECAY;
+	}
+
 	/**
 	 * <b>carve 一步（只转向、不加力）</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并让
 	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）。
@@ -203,16 +222,6 @@ public final class SnowboardControl {
 		double z = horizontal.z * cos + horizontal.x * sin;
 		entity.setDeltaMovement(x, motion.y, z);
 		entity.hurtMarked = true;
-	}
-
-	/** 转锁定朝向（双板的 A / D 转向用）。 */
-	public static void turnBody(int entityId, float degrees) {
-		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + degrees);
-	}
-
-	/** 双板 A/D 转向速率（度/tick）。 */
-	public static float skiTurnRateDegrees() {
-		return SKI_TURN_RATE_DEGREES;
 	}
 
 	/** 玩家当前按的左右：+1 = 身体左侧，-1 = 身体右侧，0 = 没按。 */
