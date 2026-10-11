@@ -126,12 +126,14 @@ def ski_board():
         put(img, x + 1, 4, BOOT_BUCKLE)
 
     # 板身：box(3,1,24) @texOffs(20,0) -> up(44,0,3x24) / down(47,0,3x24) / 侧面在第 24 行
+    # ⚠ v 轴与板的前后方向相反：v=0 在**板尾**端。所以「板头那一段」要画在 v 的高端（17..24）。
     fill(img, 44, 0, 47, 24, BODY)           # 板面（up）
-    fill(img, 44, 0, 47, 5, TIP)             # 前段板头区
-    fill(img, 45, 5, 46, 24, ACCENT)         # 板面中线
+    fill(img, 44, 17, 47, 24, TIP)           # 板头那一段白（v 高端 = 板头侧）
+    fill(img, 45, 0, 46, 17, ACCENT)         # 板面中线（板尾到白段之前）
     fill(img, 47, 0, 50, 24, BASE)           # 板底（down）
-    fill(img, 20, 24, 76, 25, BASE)          # 板侧一圈
-    fill(img, 20, 24, 44, 25, TIP)           # 前段侧面
+    fill(img, 20, 24, 74, 25, BASE)          # 板侧一圈
+    fill(img, 39, 24, 44, 25, TIP)           # 两条长边上靠板头那一段也留白（u 高端＝板头侧）
+    fill(img, 47, 24, 52, 25, TIP)           # 另一条长边（它的 u 低端是板头）
 
     # 板头上翘：box(3,1,2) @texOffs(20,26) -> (20,26)-(30,30)
     fill(img, 20, 26, 30, 30, TIP)
