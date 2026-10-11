@@ -37,9 +37,9 @@ public final class SkiGlide {
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
 	/** 双板：每下落 1 格加多少水平速度（0.18 被用户判“太快”，定在 0.10）。 */
-	private static final double GAIN_PER_BLOCK = 0.10D;
+	private static final double GAIN_PER_BLOCK = 0.08D;
 	/** 单板：同样下落，单板只取左右分量、体感明显更弱，所以给更大的系数（用户：“单板下落加速太慢”）。 */
-	private static final double BOARD_GAIN_PER_BLOCK = 0.15D;
+	private static final double BOARD_GAIN_PER_BLOCK = 0.12D;
 	/** 双板单 tick 上限（防止悬崖一瞬间给爆）。 */
 	private static final double MAX_GAIN_PER_TICK = 0.3D;
 	/** 单板单 tick 上限。 */
@@ -80,9 +80,8 @@ public final class SkiGlide {
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());   // 单板：锁住身体朝向
 					carve(player);
 				} else {
-					// 双板：也锁住朝向 —— 转视角不再带动板转，只有 A / D 能操控转向
+					// 双板：也锁住朝向（转视角不再带动板）；左右转向走 SkiControl 的方向渐变那套
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
-					steerSkis(player);
 				}
 				trackDescent(player);
 				applyMomentum(player);
@@ -196,16 +195,6 @@ public final class SkiGlide {
 	 * 单板 carve：前倾（W）＋ 横移（A / D）→ 身体朝向朝那一侧持续转（{@link SnowboardControl#applyCarve}），
 	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
 	 */
-	/** 双板转向：A 往左转、D 往右转（转的是锁定的朝向），视角不参与。 */
-	private static void steerSkis(ServerPlayer player) {
-		double side = SnowboardControl.sideSign(player.getLastClientInput());
-		if (side == 0.0D) {
-			return;
-		}
-		// ⚠️ MC 里 yaw 增大是“往右转”（yaw=0 朝 +z，yaw=90 朝 -x）—— 按 A（side=+1，想左转）必须减 yaw
-		SnowboardControl.turnBody(player.getId(), (float) (-side * SnowboardControl.skiTurnRateDegrees()));
-	}
-
 	private static void carve(ServerPlayer player) {
 		// 注意：腾空时也允许“转”（从高处落下时前后倾要能带着速度拐弯），
 		// 只有“前冲”那一口力限制在贴地时给。
