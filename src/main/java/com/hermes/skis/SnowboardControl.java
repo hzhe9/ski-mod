@@ -36,6 +36,16 @@ public final class SnowboardControl {
 	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 90} 度，加起来 180 —— 扭不到背后去。 */
 	public static final float VIEW_LIMIT_DEGREES = 90.0F;
 
+	/**
+	 * <b>carve（切雪转向）</b>：前倾（W）＋ 横移（A / D）同时按住时，身体朝向每 tick 朝那一侧转多少度。
+	 * 2.0 度/tick ＝ 180 度/秒 —— 一直按着就会在雪地上画圈。
+	 */
+	private static final float TURN_RATE_DEGREES = 2.0F;
+	/** carve 时每 tick 沿身体前方补多少“前冲力”（这就是“向前的动量”，与横移合成出右前方 / 左前方）。 */
+	private static final double CARVE_PUSH = 0.02D;
+	/** carve 前冲的速度上限：滑到这么快就不再补，免得按着 W + D 一路飙到极速（格/tick）。 */
+	private static final double CARVE_MAX_SPEED = 0.5D;
+
 	private SnowboardControl() {
 	}
 
@@ -100,6 +110,33 @@ public final class SnowboardControl {
 
 	public static float tiltDegrees() {
 		return TILT_DEGREES;
+	}
+
+	/**
+	 * <b>carve 转向</b>：前倾（W）＋ 横移（A / D）→ 把锁定的身体朝向朝那一侧转一个 tick 的量。
+	 * 服务端与客户端每 tick 各跑一次同样的规则，两边朝向保持一致（客户端管相机与模型、服务端管力）。
+	 *
+	 * @return 本 tick 转过的角度（0 表示没在 carve）
+	 */
+	public static float applyCarve(int entityId, Input input, float fallbackYaw) {
+		if (input == null || !input.forward()) {
+			return 0.0F;
+		}
+		double side = sideSign(input);   // +1 左 / -1 右
+		if (side == 0.0D) {
+			return 0.0F;
+		}
+		float delta = (float) (side * TURN_RATE_DEGREES);   // 往左滑就左转（yaw 增大），往右滑右转
+		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
+		return delta;
+	}
+
+	public static double carvePush() {
+		return CARVE_PUSH;
+	}
+
+	public static double carveMaxSpeed() {
+		return CARVE_MAX_SPEED;
 	}
 
 	/** 玩家当前按的左右：+1 = 身体左侧，-1 = 身体右侧，0 = 没按。 */

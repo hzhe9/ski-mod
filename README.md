@@ -90,7 +90,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
 | W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
-| 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（90°），合计 180 —— 扭不到背后（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw） |
+| **W + A/D（carve）** | **切雪转弯**：前倾与横移同时按住时，身体朝向每 tick 朝那一侧转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），同时沿身体前方补一点前冲（`CARVE_PUSH`，速度到 `CARVE_MAX_SPEED` 就停）—— 与横移合成出**右前方 / 左前方**，一直按着就在雪地上画圈 |
+| 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（90°），合计 180 —— 扭不到背后（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw；carve 转动身体后客户端 tick 也会把视角拉回限制内） |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
@@ -121,6 +122,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
 | `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 90.0 度 | 头（视角）相对锁定身体朝向的最大偏转，左右各一份 |
+| `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |
+| `CARVE_PUSH` | `SnowboardControl` | 0.02 | carve 时每 tick 沿身体前方补的前冲力 |
+| `CARVE_MAX_SPEED` | `SnowboardControl` | 0.5 格/tick | carve 前冲的速度上限（≈36 km/h），到了就不再补 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
@@ -145,7 +149,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进 |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
-| `SnowboardControl.java` | 单板状态：锁住身体朝向（`yBodyRot` 每 tick 写回）；输入改写与「站定」由 `ClientInputMixin` + `SkisClient` 的 tick 负责 |
+| `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量、取消 `makeJump` |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
@@ -169,6 +173,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 肢体 `zRot` 符号：-x 侧肢体正 zRot = 末端向外；搞反会让垂在身侧的长物品内倾穿模
 - 渲染状态每帧重建，**不要**把跨帧状态挂在它上面（用静态表 + 实体 id）
 - **改完 Mixin 要自己跑一次启动自检**：注入目标写错＝启动即崩（本项目被 `Camera#setup` 这个不存在的方法名坑过一次）。用 PCL 导出的启动脚本 bat 拉真实客户端，看 `logs/latest.log` 出现 `[skis] … 已加载` + `Sound engine started`、且无 `MixinApplyError` 才算过。
+- **carve（转向）必须服务端 + 客户端各跑一遍同一套转向规则**：客户端管相机/模型（它有自己的朝向表）、服务端管力（下落加速、carve 前冲的方向），两边只靠“读同一份输入、算同一个 `applyCarve`”保持同步；只在一侧转会让模型与受力方向分家。
 - **单板不能有任何“自动推力”**：排查“莫名往前”要同时看三条 —— `glidePush` 雪面推进、下落加速的方向兜底（没输入时用身体前方＝静止的人自己往前滑，应返回 `null`＝不加力）、动量把玩家走路/落地残留的速度一直托住。
 - **下落加速的方向要跟着玩家的横向输入**：单板静止/低速下落时先用 `sideSign(按键)` → `sideLocked()`（往左滑就加左边），没按才退到 `frontLocked()`（身体前方）。只写“身体前方”会被用户判为“下落增加的速度是向前，不对”。
 - **相机的倾斜偏移方向必须用「锁定的身体朝向」`frontLocked()`，不能用 `player.getYRot()`（视角 yaw）**：用视角的话玩家一转视野偏移就跟着转，相机绕人转圈、甩到身体外面去（用户原话：“转动轴没有跟着移动…视野跑偏到整个身体之外”）。倾斜是身体的事，方向基准只能是不动的那个。

@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 
@@ -41,6 +42,10 @@ public class SkisClient implements ClientModInitializer {
 					continue;
 				}
 				SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+				// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
+				Input keys = player == client.player && client.player != null
+						? client.player.input.keyPresses : null;
+				SnowboardControl.applyCarve(player.getId(), keys, player.getYRot());
 				float yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向
@@ -54,6 +59,13 @@ public class SkisClient implements ClientModInitializer {
 					Input keys = self.input.keyPresses;
 					int tilt = keys == null ? 0 : (keys.forward() ? 1 : (keys.backward() ? -1 : 0));
 					SnowboardControl.setTilt(self.getId(), tilt);
+					// 身体被 carve 转了之后，视角要跟着被拉回「新朝向 ± 限制」之内（不然会甩过 180 度）
+					float head = SnowboardControl.bodyYaw(self.getId(), self.getYRot());
+					float off = Mth.wrapDegrees(self.getYRot() - head);
+					float limit = SnowboardControl.VIEW_LIMIT_DEGREES;
+					if (Math.abs(off) > limit) {
+						self.setYRot(head + Mth.clamp(off, -limit, limit));
+					}
 				}
 			}
 		});

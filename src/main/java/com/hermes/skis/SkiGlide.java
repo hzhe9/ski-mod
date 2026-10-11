@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -69,6 +70,7 @@ public final class SkiGlide {
 				}
 				if (SnowboardControl.isSnowboard(player)) {
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());   // 单板：锁住身体朝向
+					carve(player);
 				} else {
 					SnowboardControl.forget(player.getId());
 				}
@@ -169,6 +171,25 @@ public final class SkiGlide {
 			direction = new Vec3(motion.x, 0.0D, motion.z).normalize();   // 没输入就沿原方向托
 		}
 		player.setDeltaMovement(direction.x * momentum, motion.y, direction.z * momentum);
+		player.hurtMarked = true;
+	}
+
+	/**
+	 * 单板 carve：前倾（W）＋ 横移（A / D）→ 身体朝向朝那一侧持续转（{@link SnowboardControl#applyCarve}），
+	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
+	 */
+	private static void carve(ServerPlayer player) {
+		Input input = player.getLastClientInput();
+		if (SnowboardControl.applyCarve(player.getId(), input, player.getYRot()) == 0.0F) {
+			return;
+		}
+		if (player.getDeltaMovement().horizontalDistance() >= SnowboardControl.carveMaxSpeed()) {
+			return;   // 已经够快，不再补
+		}
+		player.addDeltaMovement(SnowboardControl.frontLocked(player.getId(), player.getYRot())
+				.scale(SnowboardControl.carvePush()));
+		MOMENTUM.merge(player.getId(), player.getDeltaMovement().horizontalDistance(), Math::max);
+		clampToMaxSpeed(player);
 		player.hurtMarked = true;
 	}
 
