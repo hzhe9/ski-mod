@@ -9,7 +9,8 @@
 		"LivingEntityFallSoundMixin",
 		"PlayerStepSoundMixin",
 		"ClientInputMixin",
-		"EntityTiltMixin"
+		"EntityTiltMixin",
+		"CameraTiltMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -49,7 +49,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `textures/item/modern_ski.png` | 16×16 | 双板物品图标 |
 | `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区） |
-| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖**物品栏图标**（`pole_icon()` 画的斜杖，GUI 用） |
+| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖**物品栏图标**（`pole_icon()` 画的竖直杖，GUI 用） |
 | `textures/item/snowboard.png` | 16×16 | 单板物品图标 |
 | `textures/entity/ski_board.png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头） |
 | `textures/entity/snowboard.png` | 128×32 | 单板脚上模型 |
@@ -88,8 +88,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 操作 | 行为 |
 |---|---|
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
-| W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），另沿身体前方每 tick 补一点点推进（`TILT_PUSH`，「稍微往前」）—— 不改变朝向、不参与横移 |
-| S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，不给推进 |
+| W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**视角（相机俯仰）也倾同样角度**，另沿身体前方每 tick 补一点点推进（`TILT_PUSH`，「稍微往前」）—— 不改变朝向、不参与横移 |
+| S | **后倾**：同样整个人 + 板 + 视角一起向后仰 `TILT_DEGREES`，不给推进 |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
@@ -119,7 +119,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
 | `BOARD_LEG_SPREAD` | `SkiStance` | 4.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值 |
 | `TILT_PUSH` | `SnowboardControl` | 0.010 格/tick | 单板按 W（前倾）时每 tick 沿身体前方补的推进量 |
-| `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**绕脚底倾斜的角度（`EntityTiltMixin` 转 poseStack） |
+| `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板 + 视角**的倾斜角（`EntityTiltMixin` 转模型 poseStack、`CameraTiltMixin` 转相机俯仰，共用这一个值） |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
@@ -152,6 +152,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟） |
+| `mixin/client/CameraTiltMixin.java` | 单板 W / S 时给 `Camera#setRotation` 的 xRot 加同一个倾角 —— 视角跟着倾 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
@@ -165,6 +166,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 持续施加速度后要置 `player.hurtMarked = true`，否则服务端不同步、客户端会和你抢速度
 - 肢体 `zRot` 符号：-x 侧肢体正 zRot = 末端向外；搞反会让垂在身侧的长物品内倾穿模
 - 渲染状态每帧重建，**不要**把跨帧状态挂在它上面（用静态表 + 实体 id）
+- **「视角跟着倾」= 改 `Camera#setRotation` 的第二个参数**（xRot，与身体倾斜同轴）：`@ModifyVariable(..., argsOnly = true, index = 2)`；模型倾、视角不倾的话看着像“人歪了而镜头没歪”。
 - **「整个人 + 脚上的板一起动」的姿态必须在渲染 poseStack 层做**：板是 Fabric `ArmorRenderer` 独立提交的模型，只改 `HumanoidModel` 的部件它不会跟。`LivingEntityRenderer#setupRotations` 的 TAIL 是安全注入点（poseStack 原点＝实体脚底、朝向已转好，模型与所有 RenderLayer 共用它）
 - **GUI 里只显示模型 y 0~16**：长物品（杖/枪）在物品栏会被裁掉下半截；用 `display_context` 分流一个 2D 图标模型是正解，**长模型自己也留一份 GUI 缩放兜底**（select 没命中时不会只剩半截）
 - 同一个 mod id 的 jar 不能共存，用 `.jar.disabled` 切换
