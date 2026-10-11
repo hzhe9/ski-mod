@@ -20,7 +20,8 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>W 前倾 / S 后倾</b>：整个人连同脚上的板绕脚底一起倾（{@link #tiltDegrees()}，渲染层见
  *       {@code EntityTiltMixin}），相机位置也跟着（{@code CameraTiltMixin}）；倾斜是<b>渐进</b>的
  *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
- *   <li><b>carve</b>：前倾或后倾 ＋ A / D → 身体朝向持续转（{@link #applyCarve}）＋ 沿身体前方补前冲。</li>
+ *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 沿身体前方补前冲；
+ *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反）。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -49,6 +50,8 @@ public final class SnowboardControl {
 	private static final double CARVE_PUSH = 0.02D;
 	/** carve 前冲的速度上限：滑到这么快就不再补，免得按着 W + D 一路飙到极速（格/tick）。 */
 	private static final double CARVE_MAX_SPEED = 0.5D;
+	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
+	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
 	private static final float TILT_LERP = 0.25F;
 	/** 与目标的差距小于它就当作到位。 */
@@ -134,20 +137,30 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>carve 转向</b>：前倾（W）＋ 横移（A / D）→ 把锁定的身体朝向朝那一侧转一个 tick 的量。
+	 * <b>carve 转向</b>：A / D 的侧压决定往哪转；<b>没按 A / D 时，只要滑动速度够，光前 / 后倾也能转</b>
+	 * （前倾走一边、后倾走另一边）。<b>后倾＝后刃</b>：同样的侧压，转向与前倾相反。
 	 * 服务端与客户端每 tick 各跑一次同样的规则，两边朝向保持一致（客户端管相机与模型、服务端管力）。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
-	public static float applyCarve(int entityId, Input input) {
-		if (input == null || (!input.forward() && !input.backward())) {
-			return 0.0F;   // 前倾（W）或后倾（S）都算，配上 A / D 就切雪
+	public static float applyCarve(int entityId, Input input, double speed) {
+		if (input == null) {
+			return 0.0F;
 		}
-		double side = sideSign(input);   // +1 左 / -1 右
+		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
+		if (side == 0.0D) {
+			// 没按左右：只要滑得够快，光前 / 后倾也能压刃转向 —— 前倾走一边，后倾走另一边
+			if (speed < CARVE_MIN_SPEED) {
+				return 0.0F;
+			}
+			side = input.forward() ? 1.0D : (input.backward() ? -1.0D : 0.0D);
+		} else if (input.backward()) {
+			side = -side;   // 后倾＝后刃：同样的侧压，转向与前倾相反（“S 应该是向后”）
+		}
 		if (side == 0.0D) {
 			return 0.0F;
 		}
-		float delta = (float) (side * TURN_RATE_DEGREES);   // 往左滑就左转（yaw 增大），往右滑右转
+		float delta = (float) (side * TURN_RATE_DEGREES);   // +＝左转（yaw 增大），-＝右转
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		return delta;
 	}

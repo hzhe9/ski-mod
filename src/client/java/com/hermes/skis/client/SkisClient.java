@@ -45,7 +45,7 @@ public class SkisClient implements ClientModInitializer {
 				// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
 				Input keys = player == client.player && client.player != null
 						? client.player.input.keyPresses : null;
-				SnowboardControl.applyCarve(player.getId(), keys);
+				SnowboardControl.applyCarve(player.getId(), keys, player.getDeltaMovement().horizontalDistance());
 				float yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向

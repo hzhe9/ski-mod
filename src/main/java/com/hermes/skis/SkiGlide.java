@@ -180,7 +180,7 @@ public final class SkiGlide {
 	 */
 	private static void carve(ServerPlayer player) {
 		Input input = player.getLastClientInput();
-		if (SnowboardControl.applyCarve(player.getId(), input) == 0.0F) {
+		if (SnowboardControl.applyCarve(player.getId(), input, player.getDeltaMovement().horizontalDistance()) == 0.0F) {
 			return;
 		}
 		if (player.getDeltaMovement().horizontalDistance() >= SnowboardControl.carveMaxSpeed()) {

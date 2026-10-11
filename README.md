@@ -90,7 +90,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
 | W | **前倾**（**渐进**到位，不瞬跳）：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
-| **W/S + A/D（carve）** | **切雪转弯**：**前倾或后倾**与横移同时按住时，身体朝向每 tick 朝那一侧转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），同时沿身体前方补一点前冲（`CARVE_PUSH`，速度到 `CARVE_MAX_SPEED` 就停）—— 与横移合成出**右前方 / 左前方**，一直按着就在雪地上画圈 |
+| **carve（切雪转弯）** | 身体朝向每 tick 转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），同时沿身体前方补前冲（`CARVE_PUSH`，到 `CARVE_MAX_SPEED` 停）—— 一直按着就在雪地上画圈。<br>转向由 **A/D 侧压**决定；**后倾（S）＝后刃**，同样的侧压转向与前倾相反；**没按 A/D 时，只要滑速超过 `CARVE_MIN_SPEED`，光前/后倾也能转** |
 | 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（90°），合计 180 —— 扭不到背后（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw；carve 转动身体后客户端 tick 也会把视角拉回限制内） |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
@@ -126,6 +126,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |
 | `CARVE_PUSH` | `SnowboardControl` | 0.02 | carve 时每 tick 沿身体前方补的前冲力 |
 | `CARVE_MAX_SPEED` | `SnowboardControl` | 0.5 格/tick | carve 前冲的速度上限（≈36 km/h），到了就不再补 |
+| `CARVE_MIN_SPEED` | `SnowboardControl` | 0.05 格/tick | 没按 A/D 时，光靠前/后倾触发 carve 所需的最低滑速 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
