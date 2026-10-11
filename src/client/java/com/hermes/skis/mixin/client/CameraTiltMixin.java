@@ -87,18 +87,4 @@ public abstract class CameraTiltMixin {
 		double[] offset = this.skis$eyeOffset();
 		return offset == null ? pos : pos.add(offset[0], offset[1], offset[2]);
 	}
-
-	/** 视线也和头一起倾（xRot 为正＝低头）：位置 + 朝向都跟，才算“挂在头上”。 */
-	@ModifyArg(
-			method = "alignWithEntity",
-			at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Camera;setRotation(FF)V"),
-			index = 1
-	)
-	private float skis$tiltView(float xRot) {
-		if (!(this.entity instanceof Player player) || !SnowboardControl.isSnowboard(player)) {
-			return xRot;
-		}
-		int tilt = SnowboardControl.tilt(player.getId());
-		return tilt == 0 ? xRot : xRot + tilt * SnowboardControl.tiltDegrees();
-	}
 }

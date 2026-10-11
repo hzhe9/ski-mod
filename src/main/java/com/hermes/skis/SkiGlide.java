@@ -180,7 +180,12 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板静止时沿锁定的身体前方，而不是视线（视角可以随便转）
+			// 单板静止时：先看 A / D —— 往哪边滑，下落加速就往哪边加；没按才退到身体前方。
+			// （视角朝向不能用：那是鼠标方向，转一下就变。）
+			double side = SnowboardControl.sideSign(player.getLastClientInput());
+			if (side != 0.0D) {
+				return SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
+			}
 			return SnowboardControl.frontLocked(player.getId(), player.getYRot());
 		}
 		Vec3 look = player.getLookAngle();

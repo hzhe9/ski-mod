@@ -10,7 +10,8 @@
 		"PlayerStepSoundMixin",
 		"ClientInputMixin",
 		"EntityTiltMixin",
-		"CameraTiltMixin"
+		"CameraTiltMixin",
+		"SnowboardHeadLimitMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

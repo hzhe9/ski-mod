@@ -7,6 +7,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -32,6 +33,8 @@ public final class SnowboardControl {
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
+	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 90} 度，加起来 180 —— 扭不到背后去。 */
+	public static final float VIEW_LIMIT_DEGREES = 90.0F;
 
 	private SnowboardControl() {
 	}
@@ -97,5 +100,19 @@ public final class SnowboardControl {
 
 	public static float tiltDegrees() {
 		return TILT_DEGREES;
+	}
+
+	/** 玩家当前按的左右：+1 = 身体左侧，-1 = 身体右侧，0 = 没按。 */
+	public static double sideSign(Input input) {
+		if (input == null) {
+			return 0.0D;
+		}
+		return (input.left() ? 1.0D : 0.0D) - (input.right() ? 1.0D : 0.0D);
+	}
+
+	/** 沿<b>锁定的身体朝向</b>的左 / 右方向（sign 见 {@link #sideSign}）—— 下落加速跟左右走时用。 */
+	public static Vec3 sideLocked(int entityId, float fallbackYaw, double sign) {
+		float rad = bodyYaw(entityId, fallbackYaw) * Mth.DEG_TO_RAD;
+		return new Vec3(Mth.cos(rad) * sign, 0.0D, Mth.sin(rad) * sign);
 	}
 }
