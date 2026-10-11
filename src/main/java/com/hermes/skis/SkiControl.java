@@ -39,6 +39,11 @@ public final class SkiControl {
 	 */
 	public static final double MAX_GLIDE_SPEED = 1.4D;
 
+	/** 速度上限按板分开：单板 {@code SnowboardControl.maxSpeed()}、双板 {@code SkisControl.maxSpeed()}。 */
+	public static double maxGlideSpeed(ServerPlayer player) {
+		return SnowboardControl.isSnowboard(player) ? SnowboardControl.maxSpeed() : SkisControl.maxSpeed();
+	}
+
 	private SkiControl() {
 	}
 

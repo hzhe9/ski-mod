@@ -12,11 +12,19 @@ package com.hermes.skis;
  */
 public final class SkisControl {
 
-	/** 每下落 1 格加多少水平速度（用户 2026-10 定案：0.18 → 0.10 → 0.08 → 0.05）。 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.05D;
+	/**
+	 * 下落加速的基数：每下落 1 格加多少（用户 2026-10 定案 0.08）。
+	 *
+	 * <p>注意实际增量是 {@code 基数 × √(累计下落格数)}（见 {@link SkiGlide}）——
+	 * <b>越掉越快不起来</b>：掉得越多，每多掉 1 格带来的增量越小（用户要求“增长量反而越来越小”）。
+	 */
+	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
 
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
+
+	/** 双板速度上限（格/tick）：1.4 ≈ 100 km/h，仍是最快的那个。 */
+	private static final double MAX_SPEED = 1.4D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.985D;
@@ -37,6 +45,11 @@ public final class SkisControl {
 	/** 双板：每下落 1 格加多少水平速度。 */
 	public static double fallGainPerBlock() {
 		return FALL_GAIN_PER_BLOCK;
+	}
+
+	/** 双板：速度上限（格/tick）。 */
+	public static double maxSpeed() {
+		return MAX_SPEED;
 	}
 
 	/** 双板：单 tick 下落加速上限。 */

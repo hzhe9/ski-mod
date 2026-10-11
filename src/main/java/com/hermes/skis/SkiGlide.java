@@ -113,9 +113,14 @@ public final class SkiGlide {
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
 		boolean board = SnowboardControl.isSnowboard(player);
-		double rate = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
-		double gain = Math.min(steps * rate, cap);
+		double gain;
+		if (board) {
+			gain = Math.min(steps * SnowboardControl.fallGainPerBlock(), cap);   // 单板：线性
+		} else {
+			// 双板：基数 × √(累计格数) —— 边际递减，掉得越多每格给的越少（用户：“增长量反而越来越小”）
+			gain = Math.min(Math.sqrt(steps) * SkisControl.fallGainPerBlock(), cap);
+		}
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
@@ -128,10 +133,12 @@ public final class SkiGlide {
 
 	/** 把水平速度压到 {@link SkiControl#MAX_GLIDE_SPEED} 以内（垂直分量不动）。 */
 	private static void clampToMaxSpeed(ServerPlayer player) {
+		// 上限按板取（单板 / 双板各自一个值）
 		Vec3 motion = player.getDeltaMovement();
 		double speed = motion.horizontalDistance();
-		if (speed > SkiControl.MAX_GLIDE_SPEED) {
-			double keep = SkiControl.MAX_GLIDE_SPEED / speed;
+		double max = SkiControl.maxGlideSpeed(player);
+		if (speed > max) {
+			double keep = max / speed;
 			player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
 		}
 	}
@@ -163,7 +170,7 @@ public final class SkiGlide {
 			}
 		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
-		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
+		momentum = Math.min(momentum, SkiControl.maxGlideSpeed(player));   // 速度上限（按板）
 
 		if (momentum < MOMENTUM_MIN) {
 			MOMENTUM.remove(id);

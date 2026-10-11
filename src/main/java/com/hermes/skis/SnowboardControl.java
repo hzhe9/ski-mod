@@ -48,7 +48,16 @@ public final class SnowboardControl {
 	private static final float TURN_RATE_DEGREES = 2.0F;
 	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
-	/** 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大；用户定案 0.12）。 */
+	/**
+	 * 单板速度上限（格/tick）。
+	 *
+	 * <p>现实参照（1 格 = 1 米，格/tick × 72 = km/h）：原版步行 4.317 m/s ≈ 0.216 格/tick、
+	 * 疾跑 5.612 m/s ≈ 0.281、飞行 10.89 ≈ 0.545、疾跑飞行 21.78 ≈ 1.089。
+	 * 单板是横着切雪、可控性最差的那种，所以压到 <b>0.55</b>（≈ 11 m/s ≈ 40 km/h，比疾跑快一倍、仍低于创造飞行）。
+	 */
+	private static final double MAX_SPEED = 0.55D;
+
+	/** 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大；用户定案）。 */
 	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.5D;
@@ -138,6 +147,11 @@ public final class SnowboardControl {
 
 	public static float tiltDegrees() {
 		return TILT_DEGREES;
+	}
+
+	/** 单板：速度上限（格/tick）。 */
+	public static double maxSpeed() {
+		return MAX_SPEED;
 	}
 
 	/** 单板：每下落 1 格加多少水平速度。 */
