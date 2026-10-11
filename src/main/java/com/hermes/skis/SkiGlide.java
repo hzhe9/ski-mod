@@ -43,6 +43,8 @@ public final class SkiGlide {
 
 	/** 动量每 tick 保留的比例：越接近 1 越滑、越慢停（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.985D;
+	/** 单板专用（更滑）：转向时是在“切雪”，速度不该被地面摩擦一点点啃掉（0.996 ≈ 3 秒掉 1%）。 */
+	private static final double BOARD_MOMENTUM_DECAY = 0.996D;
 	/** 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。 */
 	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
 	/** 动量低于这个值就丢掉。 */
@@ -120,9 +122,6 @@ public final class SkiGlide {
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
 		}
-		if (SnowboardControl.isSnowboard(player) && !SkiControl.canSteer(player)) {
-			return;   // 单板：腾空掉落时不给水平加速（跳下高处不该一路往前飘）
-		}
 		player.addDeltaMovement(direction.scale(gain));
 		MOMENTUM.merge(id, player.getDeltaMovement().horizontalDistance(), Math::max);   // 让加速出来的速度被动量托住
 		clampToMaxSpeed(player);
@@ -154,7 +153,8 @@ public final class SkiGlide {
 		} else if (SnowboardControl.sideSign(player.getLastClientInput()) != 0.0D) {
 			momentum = Math.max(momentum, speed);   // 单板只在真的按 A / D 横移时跟随
 		}
-		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : MOMENTUM_DECAY;
+		double decay = SnowboardControl.isSnowboard(player) ? BOARD_MOMENTUM_DECAY : MOMENTUM_DECAY;
+		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
 
 		if (momentum < MOMENTUM_MIN) {
@@ -221,7 +221,7 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板只看**当前移动方向**：没在动就没有方向（不加），不管下落本身朝哪
+			// 单板只看**当前移动方向**：没在动就没有方向（不加），不管下落本身朝哪、也不管是不是在空中
 			return null;
 		}
 		return steerDirection(player);
