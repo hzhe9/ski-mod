@@ -1,29 +1,27 @@
-"""生成 skis 模组的全部贴图与模型贴图。
+"""生成 skis 模组的全部贴图与模型贴图（6 种款式）。
 
-产物：
-  assets/skis/textures/item/modern_ski.png                      物品图标（滑雪板，平面 16x16）
-  assets/skis/textures/item/ski_pole.png                        滑雪杖 3D 模型贴图（64x64，三个 UV 分区）
-  assets/skis/textures/item/ski_pole_icon.png                   滑雪杖物品栏图标（16x16，GUI 用）
-  assets/skis/textures/entity/ski_board.png                     脚上模型贴图：雪鞋 + 板身 + 板头（128x32）
-  assets/skis/textures/entity/snowboard.png                     单板脚上模型贴图：雪鞋 + 单板板身 + 板头（128x32）
-  assets/skis/textures/item/snowboard.png                       单板物品图标（16x16）
-  assets/skis/textures/entity/equipment/humanoid/modern_ski.png 原版护甲层贴图（备用，128x32 的旧方案）
-  assets/skis/icon.png                                          mod 图标
+产物（`<v>` = 款式 key：wood / graphite / topo / brushed / neon / leopard；
+       **wood 是基础款，文件不带后缀**）：
+  assets/skis/textures/item/modern_ski[_<v>].png       高山滑雪板物品图标（16x16）
+  assets/skis/textures/item/snowboard[_<v>].png        滑雪单板物品图标（16x16）
+  assets/skis/textures/entity/ski_board[_<v>].png      双板脚上模型贴图（128x32）
+  assets/skis/textures/entity/snowboard[_<v>].png      单板脚上模型贴图（128x32）
+  assets/skis/textures/item/ski_pole.png               滑雪杖 3D 模型贴图（64x64）
+  assets/skis/textures/item/ski_pole_icon.png          滑雪杖物品栏图标（16x16）
+  assets/skis/textures/entity/equipment/humanoid/modern_ski.png 备用护甲层（旧方案）
+  assets/skis/icon.png                                 mod 图标
 
-模型 UV 约定：模型 JSON / CubeListBuilder 里的 uv 以 16 为单位（与原版一致），
-64x64 贴图上一个 UV 单位 = 4 像素。滑雪杖三个分区：
-  杖身 u 0-4   v 0-8      -> 像素 (0,0)-(16,32)
-  握把 u 6-10  v 0-4      -> 像素 (24,0)-(40,16)
-  挡雪盘 u 12-16 v 0-4    -> 像素 (48,0)-(64,16)
+UV 约定（CubeListBuilder 自动布局；⚠ 板面 v 轴与板的前后方向**相反**，v=0 在板尾，
+所以「板头那一段」画在 v 的高端）：
+  双板 板身 box(3,1,24) @texOffs(20,0) -> 占 (20,0)-(74,25)：板面 up=(44,0)3x24、板底 down=(47,0)3x24、侧面=第 24 行
+       板头 box(3,1,2) @texOffs(20,26)  -> 占 (20,26)-(30,30)
+       雪鞋 box(4,6,4) @texOffs(0,0)    -> 占 (0,0)-(16,10)
+  单板 板身 box(4,1,22) @texOffs(20,0) -> 占 (20,0)-(72,23)：板面 up=(42,0)4x22、板底 down=(46,0)4x22、侧面=第 22 行
+       板头 box(4,1,2) @texOffs(90,0)  -> (90,0)-(102,3)｜板尾 box(4,1,2) @texOffs(90,4) -> (90,4)-(102,7)
+  ⚠ 改板身尺寸（长/宽）会整体挪动上面所有 u 数字，必须同步改；小件的新区域不能压到「侧面那一行」。
 
-ski_board.png 用的是 CubeListBuilder 的自动 UV 布局，所以各面落在固定位置：
-  雪鞋 box(4,6,4) @texOffs(0,0)    -> 占 (0,0)-(16,10)
-  板身 box(3,1,24) @texOffs(20,0)  -> 占 (20,0)-(76,25)，其中板面=up(44,0,3x24)、板底=down(47,0,3x24)、侧面=第 24 行
-  板头 box(3,1,2) @texOffs(20,26)  -> 占 (20,26)-(30,30)
-  ⚠ 板身长度一改，上面这几个数字全都要重算（宽 = 2×长 + 2×宽、板面列 = 20+长 …），
-     并且板头区不能压到「侧面那一行」，否则两处抢同一批像素。
-
-脚部护甲层贴图以原版 iron.png 的靴子像素为模板（只保留靴子用到的 texel 再重上色）。
+滑雪杖贴图 64x64：杖身 u0-4 / 握把 u6-10 / 挡雪盘 u12-16（一个 UV 单位 = 4 像素）。
+备用护甲层以原版 iron.png 的靴子像素为模板（只保留靴子用到的 texel 再重上色）。
 
 用法: python tools/gen_assets.py
 """
@@ -40,30 +38,78 @@ TEX_ENTITY = os.path.join(ASSETS, "textures", "entity")
 TEX_ARMOR = os.path.join(TEX_ENTITY, "equipment", "humanoid")
 ICON = os.path.join(ASSETS, "icon.png")
 
-# loom 缓存的 26.2 客户端 jar —— 里面有人形护甲层贴图可作模板
 VANILLA_JAR = os.path.join(
     os.path.expanduser("~"), ".gradle", "caches", "fabric-loom", "26.2", "minecraft-client.jar"
 )
 
-# 配色
-BODY = (32, 40, 48, 255)          # 石墨黑
-ACCENT = (41, 196, 255, 255)      # 现代青
-TIP = (240, 248, 255, 255)        # 板头白
-BINDING = (200, 210, 218, 255)
-BASE = (228, 236, 244, 255)       # 板底
-SHAFT = (198, 208, 216, 255)      # 铝合金杖身
+# 与款式无关的固定配色（杖、备用护甲层）
+SHAFT = (198, 208, 216, 255)
 SHAFT_HI = (235, 242, 249, 255)
 GRIP = (36, 40, 45, 255)
 GRIP_HI = (86, 94, 104, 255)
 BASKET = (255, 138, 40, 255)
 BASKET_DK = (196, 90, 16, 255)
-BOOT = (26, 38, 54, 255)          # 雪鞋
-BOOT_HI = (58, 88, 120, 255)
-BOOT_BUCKLE = (206, 214, 222, 255)
 ARMOR_DARK = (30, 44, 62, 255)
 ARMOR_MID = (46, 74, 104, 255)
 ARMOR_BOARD = (226, 238, 248, 255)
 ARMOR_ACCENT = (41, 196, 255, 255)
+
+# ---------------------------------------------------------------- 款式表
+# ops = [(l0, l1, w0, w1, color)]：l=1 是板头侧、w=0/1 是板的两侧；按顺序覆盖，后者优先。
+# 靴子跟着款式走：boot = 鞋身、boot_hi = 鞋口/脚踝、buckle = 卡扣。
+VARIANTS = [
+    dict(key="wood", zh="木纹", en="Wood Grain",
+         top=(150, 102, 58),
+         ops=[(0.0, 1.0, 0.24, 0.38, (104, 68, 36)), (0.0, 1.0, 0.64, 0.78, (104, 68, 36)),
+              (0.80, 0.86, 0.0, 1.0, (240, 240, 240)), (0.86, 1.0, 0.0, 1.0, (30, 30, 32))],
+         base=(54, 40, 28), side=(120, 82, 46), nose_side=(30, 30, 32),
+         tip=(30, 30, 32), tip_up=(150, 102, 58),
+         boot=(78, 54, 32), boot_hi=(150, 102, 58), buckle=(240, 240, 240),
+         icon=dict(main=(150, 102, 58), accent=(104, 68, 36), tip=(30, 30, 32), binding=(240, 240, 240))),
+    dict(key="graphite", zh="石墨", en="Graphite",
+         top=(32, 40, 48),
+         ops=[(0.0, 0.74, 0.34, 0.66, (41, 196, 255)), (0.74, 1.0, 0.0, 1.0, (240, 248, 255))],
+         base=(228, 236, 244), side=(228, 236, 244), nose_side=(240, 248, 255),
+         tip=(240, 248, 255), tip_up=(41, 196, 255),
+         boot=(26, 38, 54), boot_hi=(58, 88, 120), buckle=(206, 214, 222),
+         icon=dict(main=(32, 40, 48), accent=(41, 196, 255), tip=(240, 248, 255), binding=(206, 214, 222))),
+    dict(key="topo", zh="等高线", en="Topo",
+         top=(216, 222, 216),
+         ops=[(0.0, 1.0, 0.45, 0.55, (150, 164, 156)),
+              (0.16, 0.21, 0.0, 1.0, (110, 124, 118)), (0.40, 0.45, 0.0, 1.0, (110, 124, 118)),
+              (0.62, 0.67, 0.0, 1.0, (110, 124, 118)), (0.86, 0.94, 0.0, 1.0, (232, 110, 40))],
+         base=(54, 60, 64), side=(54, 60, 64), nose_side=(232, 110, 40),
+         tip=(232, 110, 40), tip_up=(54, 60, 64),
+         boot=(58, 66, 64), boot_hi=(108, 124, 118), buckle=(232, 110, 40),
+         icon=dict(main=(216, 222, 216), accent=(110, 124, 118), tip=(232, 110, 40), binding=(54, 60, 64))),
+    dict(key="brushed", zh="拉丝", en="Brushed",
+         top=(196, 204, 212),
+         ops=[(0.0, 1.0, 0.30, 0.70, (30, 58, 102)),
+              (0.78, 0.80, 0.0, 1.0, (216, 60, 60)), (0.80, 1.0, 0.0, 1.0, (30, 58, 102))],
+         base=(30, 58, 102), side=(168, 178, 188), nose_side=(216, 60, 60),
+         tip=(30, 58, 102), tip_up=(216, 60, 60),
+         boot=(44, 56, 70), boot_hi=(168, 178, 188), buckle=(216, 60, 60),
+         icon=dict(main=(196, 204, 212), accent=(30, 58, 102), tip=(216, 60, 60), binding=(168, 178, 188))),
+    dict(key="neon", zh="霓虹", en="Neon",
+         top=(86, 44, 140),
+         ops=[(0.04, 0.18, 0.0, 1.0, (232, 60, 140)), (0.24, 0.36, 0.0, 1.0, (255, 138, 40)),
+              (0.44, 0.56, 0.0, 1.0, (190, 230, 60)), (0.62, 0.74, 0.0, 1.0, (41, 196, 255)),
+              (0.84, 1.0, 0.0, 1.0, (255, 240, 80))],
+         base=(26, 20, 40), side=(232, 60, 140), nose_side=(255, 240, 80),
+         tip=(255, 240, 80), tip_up=(232, 60, 140),
+         boot=(60, 32, 84), boot_hi=(232, 60, 140), buckle=(190, 230, 60),
+         icon=dict(main=(86, 44, 140), accent=(232, 60, 140), tip=(255, 240, 80), binding=(190, 230, 60))),
+    dict(key="leopard", zh="豹纹", en="Leopard",
+         top=(226, 206, 166),
+         ops=[(0.10, 0.20, 0.0, 0.55, (40, 36, 32)), (0.26, 0.36, 0.45, 1.0, (40, 36, 32)),
+              (0.42, 0.52, 0.0, 0.55, (40, 36, 32)), (0.58, 0.68, 0.45, 1.0, (40, 36, 32)),
+              (0.74, 0.84, 0.0, 0.55, (40, 36, 32)), (0.90, 1.0, 0.45, 1.0, (40, 36, 32))],
+         base=(40, 36, 32), side=(40, 36, 32), nose_side=(226, 206, 166),
+         tip=(226, 206, 166), tip_up=(40, 36, 32),
+         boot=(48, 44, 40), boot_hi=(226, 206, 166), buckle=(40, 36, 32),
+         icon=dict(main=(226, 206, 166), accent=(40, 36, 32), tip=(226, 206, 166), binding=(40, 36, 32))),
+]
+BASE_KEY = "wood"      # 基础款：注册 id 的默认模型 / 贴图不带后缀
 
 
 def blank(w=16, h=16):
@@ -71,6 +117,8 @@ def blank(w=16, h=16):
 
 
 def put(img, x, y, color):
+    if len(color) == 3:
+        color = color + (255,)
     if 0 <= x < img.size[0] and 0 <= y < img.size[1]:
         img.putpixel((x, y), color)
 
@@ -81,20 +129,93 @@ def fill(img, x0, y0, x1, y1, color):
             put(img, x, y, color)
 
 
-def modern_ski():
-    """物品图标：一对平行斜放的滑雪板，板身青色条纹，板头白色。"""
+def paint_top(img, rect, variant, twin):
+    """按款式的 ops 画板面。l=1 在板头（v 高端）；twin=True 时 l 取对称值（单板两头镜像）。"""
+    x0, y0, x1, y1 = rect
+    wpx, hpx = x1 - x0, y1 - y0
+    for y in range(y0, y1):
+        l = (y - y0) / max(1, hpx - 1)
+        if twin:
+            l = abs(2.0 * l - 1.0)
+        for x in range(x0, x1):
+            w = (x - x0) / max(1, wpx - 1)
+            color = variant["top"]
+            for (l0, l1, w0, w1, c) in variant["ops"]:
+                if l0 <= l <= l1 and w0 <= w <= w1:
+                    color = c
+            put(img, x, y, color)
+
+
+def draw_boot(img, v):
+    """雪鞋：鞋身用该款深色、鞋口/脚踝用亮色、卡扣用点缀色。"""
+    fill(img, 0, 0, 16, 10, v["boot"])
+    fill(img, 0, 1, 16, 3, v["boot_hi"])
+    fill(img, 0, 7, 16, 9, v["boot_hi"])
+    for x in range(1, 16, 5):
+        put(img, x, 4, v["buckle"])
+        put(img, x + 1, 4, v["buckle"])
+
+
+def ski_board(v):
+    """双板脚上模型贴图（128x32）：雪鞋 + 板身 box(3,1,24) + 板头 box(3,1,2)。"""
+    img = blank(128, 32)
+    draw_boot(img, v)
+    paint_top(img, (44, 0, 47, 24), v, twin=False)     # 板面
+    fill(img, 47, 0, 50, 24, v["base"])                # 板底
+    fill(img, 20, 24, 74, 25, v["side"])               # 板侧一圈
+    fill(img, 39, 24, 44, 25, v["nose_side"])          # 西长边靠板头（它的 u 高端＝板头侧）
+    fill(img, 47, 24, 52, 25, v["nose_side"])          # 东长边（它的 u 低端是板头）
+    fill(img, 20, 26, 30, 30, v["tip"])                # 板头上翘
+    fill(img, 22, 26, 25, 28, v["tip_up"])
+    return img
+
+
+def snowboard_sheet(v):
+    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(4,1,22) + 板头/板尾 box(4,1,2) 各一（twin-tip）。"""
+    img = blank(128, 32)
+    draw_boot(img, v)
+    paint_top(img, (42, 0, 46, 22), v, twin=True)      # 板面（两头镜像）
+    fill(img, 46, 0, 50, 22, v["base"])                # 板底
+    fill(img, 20, 22, 72, 23, v["side"])               # 板侧一圈
+    for y0 in (0, 4):                                  # 板头 / 板尾同款
+        fill(img, 90, y0, 102, y0 + 3, v["tip"])
+        fill(img, 92, y0, 96, y0 + 2, v["tip_up"])
+    return img
+
+
+def ski_icon(v):
+    """高山滑雪板物品图标：一对平行斜放的板（板头用 tip 色、板面主色 + 中线点缀）。"""
+    c = v["icon"]
     img = blank()
     length = 11
     for offset in (0, 3):
         x0, y0 = 2 + offset, 14
         for t in range(length):
             x, y = x0 + t, y0 - t
-            color = TIP if t >= length - 2 else BODY
+            color = c["tip"] if t >= length - 2 else c["main"]
             put(img, x, y, color)
             put(img, x, y + 1, color)
-            if t in (2, 6) and color is BODY:
-                put(img, x, y, ACCENT)
-        put(img, x0 + 5, y0 - 5, BINDING)
+            if t in (2, 6) and color == c["main"]:
+                put(img, x, y, c["accent"])
+        put(img, x0 + 5, y0 - 5, c["binding"])
+    return img
+
+
+def snowboard_icon(v):
+    """滑雪单板物品图标：斜放的窄板（twin-tip 两头同色）+ 两道固定器横带。"""
+    c = v["icon"]
+    img = blank()
+    length = 13
+    x0, y0 = 1, 14
+    for t in range(length):
+        x, y = x0 + t, y0 - t
+        color = c["tip"] if (t < 2 or t >= length - 2) else c["main"]
+        for w in range(2):
+            put(img, x + w, y, color)
+            put(img, x + w, y + 1, color)
+        if t in (4, 5, 8, 9):
+            for w in range(2):
+                put(img, x + w, y, c["binding"])
     return img
 
 
@@ -113,107 +234,17 @@ def pole_texture():
     return img
 
 
-def ski_board():
-    """脚上模型贴图（128x32）：雪鞋 + 板身 + 上翘板头，按 CubeListBuilder 自动 UV 分区。"""
-    img = blank(128, 32)
-
-    # 雪鞋：box(4,6,4) @texOffs(0,0) -> (0,0)-(16,10)
-    fill(img, 0, 0, 16, 10, BOOT)
-    fill(img, 0, 1, 16, 3, BOOT_HI)          # 鞋口一圈
-    fill(img, 0, 7, 16, 9, BOOT_HI)          # 脚踝处
-    for x in range(1, 16, 5):                # 卡扣
-        put(img, x, 4, BOOT_BUCKLE)
-        put(img, x + 1, 4, BOOT_BUCKLE)
-
-    # 板身：box(3,1,24) @texOffs(20,0) -> up(44,0,3x24) / down(47,0,3x24) / 侧面在第 24 行
-    # ⚠ v 轴与板的前后方向相反：v=0 在**板尾**端。所以「板头那一段」要画在 v 的高端（17..24）。
-    fill(img, 44, 0, 47, 24, BODY)           # 板面（up）
-    fill(img, 44, 17, 47, 24, TIP)           # 板头那一段白（v 高端 = 板头侧）
-    fill(img, 45, 0, 46, 17, ACCENT)         # 板面中线（板尾到白段之前）
-    fill(img, 47, 0, 50, 24, BASE)           # 板底（down）
-    fill(img, 20, 24, 74, 25, BASE)          # 板侧一圈
-    fill(img, 39, 24, 44, 25, TIP)           # 两条长边上靠板头那一段也留白（u 高端＝板头侧）
-    fill(img, 47, 24, 52, 25, TIP)           # 另一条长边（它的 u 低端是板头）
-
-    # 板头上翘：box(3,1,2) @texOffs(20,26) -> (20,26)-(30,30)
-    fill(img, 20, 26, 30, 30, TIP)
-    fill(img, 22, 26, 25, 28, ACCENT)
-    return img
-
-
 def pole_icon():
-    """物品栏图标：一根竖直的滑雪杖（握把在上、杖身居中、挡雪盘在下）。"""
+    """滑雪杖物品栏图标：握把在上、杖身居中、挡雪盘靠近杖尖。"""
     img = blank()
-    # 杖身（竖直，贯穿上下）
     fill(img, 7, 1, 9, 15, SHAFT)
-    fill(img, 7, 1, 8, 15, SHAFT_HI)          # 左半高光
-    outline = (120, 132, 144, 255)
-    fill(img, 9, 1, 10, 15, outline)          # 右缘描边，让细杆更清楚
-    # 握把（顶部，比杖身略粗、更深）
+    fill(img, 7, 1, 8, 15, SHAFT_HI)
+    fill(img, 9, 1, 10, 15, (120, 132, 144, 255))
     fill(img, 6, 0, 10, 4, GRIP)
     fill(img, 6, 0, 10, 1, GRIP_HI)
-    # 挡雪盘（靠近杖尖：距底 2 像素）
     fill(img, 4, 12, 12, 14, BASKET)
     fill(img, 4, 13, 12, 14, BASKET_DK)
-    # 杖尖
     fill(img, 7, 14, 9, 16, SHAFT)
-    return img
-
-
-def snowboard_item():
-    """物品图标：一块斜放的滑雪单板（twin-tip：两头一样白、比双板宽，两道固定器横带）。"""
-    img = blank()
-    length = 13
-    x0, y0 = 1, 14
-    for t in range(length):
-        x, y = x0 + t, y0 - t
-        color = TIP if (t < 2 or t >= length - 2) else BODY   # 两端都白（双翘对称）
-        for w in range(2):                                    # 窄板：宽 ≈ 长的 1/6（现实板腰 25 : 板长 150）
-            put(img, x + w, y, color)
-            put(img, x + w, y + 1, color)
-        if t in (4, 5, 8, 9):
-            for w in range(2):
-                put(img, x + w, y, BINDING)
-    return img
-
-
-def snowboard_sheet():
-    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(4,1,22) + 板头/板尾两块上翘 box(4,1,2)。
-
-    twin-tip：板身前后各 11、宽 4 单位（= 25 cm，现实板腰宽度），两端各接一块翘头，
-    **板面花纹左右（前后）对称** —— 两端各一段白 + 中间石墨黑底 + 青中线。
-    ⚠ 板身宽度一改，下面所有 u 数字都要重算（宽 = 2×长 + 2×宽）。
-
-    CubeListBuilder 自动 UV 布局：
-      雪鞋 box(4,6,4) @texOffs(0,0)   -> (0,0)-(16,10)
-      板身 box(4,1,22) @texOffs(20,0) -> 占 (20,0)-(72,23)；板面 up=(42,0)-(46,22)、板底 down=(46,0)-(50,22)、侧面=第 22 行
-      板头 box(4,1,2) @texOffs(90,0)  -> 占 (90,0)-(102,3)
-      板尾 box(4,1,2) @texOffs(90,4)  -> 占 (90,4)-(102,7)
-    """
-    img = blank(128, 32)
-
-    # 雪鞋（两只共用同一 UV 区）
-    fill(img, 0, 0, 16, 10, BOOT)
-    fill(img, 0, 1, 16, 3, BOOT_HI)
-    fill(img, 0, 7, 16, 9, BOOT_HI)
-    for x in range(1, 16, 5):
-        put(img, x, 4, BOOT_BUCKLE)
-        put(img, x + 1, 4, BOOT_BUCKLE)
-
-    # 板面（twin-tip：两端白段对称，中间黑底 + 青色中线），v 轴两端各占 5
-    fill(img, 42, 0, 46, 22, BODY)
-    fill(img, 42, 0, 46, 5, TIP)
-    fill(img, 42, 17, 46, 22, TIP)
-    fill(img, 43, 5, 45, 17, ACCENT)
-    # 板底
-    fill(img, 46, 0, 50, 22, BASE)
-    # 板侧一圈（整圈同色 —— 对称）
-    fill(img, 20, 22, 72, 23, BASE)
-
-    # 上翘板头 / 板尾：两块同款（白底 + 中间青条，青条落在各自的“板面”UV 区里）
-    for y0 in (0, 4):
-        fill(img, 90, y0, 102, y0 + 3, TIP)
-        fill(img, 93, y0, 95, y0 + 2, ACCENT)
     return img
 
 
@@ -223,7 +254,6 @@ def armor_layer():
         data = jar.read("assets/minecraft/textures/entity/equipment/humanoid/iron.png")
     vanilla = Image.open(io.BytesIO(data)).convert("RGBA")
     vpx = vanilla.load()
-
     img = blank(64, 32)
     for y in range(16, 32):
         for x in range(0, 16):
@@ -242,14 +272,15 @@ def armor_layer():
 
 
 def mod_icon():
-    """128x128 mod 图标：深色渐变底 + 放大的滑雪板。"""
+    """128x128 mod 图标：深色渐变底 + 石墨款滑雪板。"""
     size = 128
     icon = Image.new("RGBA", (size, size), (18, 28, 40, 255))
     for y in range(size):
         shade = 18 + int(28 * (y / size))
         for x in range(size):
             icon.putpixel((x, y), (shade // 2, shade, min(255, shade + 40), 255))
-    icon.alpha_composite(modern_ski().resize((96, 96), Image.NEAREST), (16, 16))
+    graphite = next(v for v in VARIANTS if v["key"] == "graphite")
+    icon.alpha_composite(ski_icon(graphite).resize((96, 96), Image.NEAREST), (16, 16))
     return icon
 
 
@@ -257,18 +288,20 @@ def main():
     for d in (TEX_ITEM, TEX_ENTITY, TEX_ARMOR):
         os.makedirs(d, exist_ok=True)
     outputs = {
-        os.path.join(TEX_ITEM, "modern_ski.png"): modern_ski(),
         os.path.join(TEX_ITEM, "ski_pole.png"): pole_texture(),
         os.path.join(TEX_ITEM, "ski_pole_icon.png"): pole_icon(),
-        os.path.join(TEX_ITEM, "snowboard.png"): snowboard_item(),
-        os.path.join(TEX_ENTITY, "ski_board.png"): ski_board(),
-        os.path.join(TEX_ENTITY, "snowboard.png"): snowboard_sheet(),
         os.path.join(TEX_ARMOR, "modern_ski.png"): armor_layer(),
         ICON: mod_icon(),
     }
+    for v in VARIANTS:
+        sfx = "" if v["key"] == BASE_KEY else "_" + v["key"]
+        outputs[os.path.join(TEX_ENTITY, f"ski_board{sfx}.png")] = ski_board(v)
+        outputs[os.path.join(TEX_ENTITY, f"snowboard{sfx}.png")] = snowboard_sheet(v)
+        outputs[os.path.join(TEX_ITEM, f"modern_ski{sfx}.png")] = ski_icon(v)
+        outputs[os.path.join(TEX_ITEM, f"snowboard{sfx}.png")] = snowboard_icon(v)
     for path, image in outputs.items():
         image.save(path)
-        print("written:", path, image.size)
+        print("written:", os.path.relpath(path, ROOT), image.size)
 
 
 if __name__ == "__main__":

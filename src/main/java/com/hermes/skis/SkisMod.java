@@ -7,6 +7,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvents;
@@ -45,6 +46,25 @@ public class SkisMod implements ModInitializer {
 
 	private static final Identifier SKI_ARMOR_MODIFIER_ID = Identifier.fromNamespaceAndPath(MOD_ID, "ski_armor");
 	private static final Identifier SKI_SPEED_MODIFIER_ID = Identifier.fromNamespaceAndPath(MOD_ID, "ski_speed");
+
+	/**
+	 * 6 种外观款式（纯装饰，数值一律相同）。顺序即创造栏顺序：
+	 * 木纹（基础款）→ 石墨 / 等高线 / 拉丝（现代）→ 霓虹 / 豹纹（图案）。
+	 * 成品只带两个组件：{@code minecraft:item_model}（换图标与脚上贴图）与
+	 * {@code minecraft:custom_name}（翻译键，中英各自显示）。基础款不带 item_model，走物品默认模型。
+	 */
+	public static final String[] VARIANTS = {"wood", "graphite", "topo", "brushed", "neon", "leopard"};
+
+	/** 造一个指定款式的成品（创造栏用；合成表里由配方的 components 实现同样效果）。 */
+	private static ItemStack variantStack(Item item, String base, String variant) {
+		ItemStack stack = new ItemStack(item);
+		if (!"wood".equals(variant)) {
+			stack.set(DataComponents.ITEM_MODEL,
+					Identifier.fromNamespaceAndPath(MOD_ID, "item/" + base + "_" + variant));
+		}
+		stack.set(DataComponents.CUSTOM_NAME, Component.translatable("item.skis." + base + "." + variant));
+		return stack;
+	}
 
 	public static final Item MODERN_SKI = registerItem(MODERN_SKI_KEY, new Item(new Item.Properties()
 			.stacksTo(1)
@@ -86,8 +106,10 @@ public class SkisMod implements ModInitializer {
 		SkiBoost.register();
 
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES).register(output -> {
-			output.accept(new ItemStack(MODERN_SKI), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
-			output.accept(new ItemStack(SNOWBOARD), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+			for (String variant : VARIANTS) {
+				output.accept(variantStack(MODERN_SKI, "modern_ski", variant), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+				output.accept(variantStack(SNOWBOARD, "snowboard", variant), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+			}
 			output.accept(new ItemStack(SKI_POLE), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
 		});
 

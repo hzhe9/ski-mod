@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    {
+      "item": "skis:snowboard"
+    },
+    {
+      "item": "minecraft:magenta_dye"
+    },
+    {
+      "item": "minecraft:orange_dye"
+    },
+    {
+      "item": "minecraft:lime_dye"
+    }
+  ],
+  "result": {
+    "id": "skis:snowboard",
+    "components": {
+      "minecraft:item_model": "skis:item/snowboard_neon",
+      "minecraft:custom_name": {
+        "translate": "item.skis.snowboard.neon"
+      }
+    }
+  }
+}

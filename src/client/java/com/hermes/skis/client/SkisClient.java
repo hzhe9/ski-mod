@@ -24,12 +24,14 @@ public class SkisClient implements ClientModInitializer {
 		ModelLayerRegistry.registerModelLayer(SnowboardModel.LAYER, SnowboardModel::createLayerDefinition);
 		ArmorRenderer.register(
 				context -> new BoardArmorRenderer(
-						new SkiBoardModel(context.bakeLayer(SkiBoardModel.LAYER)), SkiBoardModel.TEXTURE),
+						new SkiBoardModel(context.bakeLayer(SkiBoardModel.LAYER)), SkiBoardModel.TEXTURE,
+						"item/modern_ski", "ski_board"),
 				SkisMod.MODERN_SKI
 		);
 		ArmorRenderer.register(
 				context -> new BoardArmorRenderer(
-						new SnowboardModel(context.bakeLayer(SnowboardModel.LAYER)), SnowboardModel.TEXTURE),
+						new SnowboardModel(context.bakeLayer(SnowboardModel.LAYER)), SnowboardModel.TEXTURE,
+						"item/snowboard", "snowboard"),
 				SkisMod.SNOWBOARD
 		);
 

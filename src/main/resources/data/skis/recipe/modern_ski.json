@@ -2,14 +2,20 @@
   "type": "minecraft:crafting_shaped",
   "category": "equipment",
   "key": {
-    "P": "#minecraft:planks",
-    "I": "minecraft:iron_ingot"
+    "L": "minecraft:leather",
+    "P": "#minecraft:planks"
   },
   "pattern": [
-    "I I",
-    "PPP"
+    "L L",
+    "P P",
+    "P P"
   ],
   "result": {
-    "id": "skis:modern_ski"
+    "id": "skis:modern_ski",
+    "components": {
+      "minecraft:custom_name": {
+        "translate": "item.skis.modern_ski.wood"
+      }
+    }
   }
 }

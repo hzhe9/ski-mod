@@ -3,7 +3,7 @@
 	"id": "skis",
 	"version": "${version}",
 	"name": "Modern Skis",
-	"description": "现代滑雪板与滑雪杖：右键起滑冲刺、撑杖推进。简易测试版。",
+	"description": "Alpine skis, a snowboard and a ski pole with real glide physics — carve down slopes, hold momentum, brake on your edges. 6 cosmetic styles, craftable from wood, leather and a few materials.",
 	"authors": [
 		"Hermes"
 	],

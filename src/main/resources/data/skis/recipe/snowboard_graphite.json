@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    {
+      "item": "skis:snowboard"
+    },
+    {
+      "item": "minecraft:coal"
+    },
+    {
+      "item": "minecraft:iron_ingot"
+    }
+  ],
+  "result": {
+    "id": "skis:snowboard",
+    "components": {
+      "minecraft:item_model": "skis:item/snowboard_graphite",
+      "minecraft:custom_name": {
+        "translate": "item.skis.snowboard.graphite"
+      }
+    }
+  }
+}
