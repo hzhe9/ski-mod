@@ -19,9 +19,6 @@ public final class SkiStance {
 	 */
 	public static final float LEG_SPREAD = 0.9F;
 
-	/** 单板：双脚横跨在同一块板上，按鸭子站姿（duck stance）反向外撇的角度。 */
-	public static final float BOARD_STANCE_DEGREES = 18.0F;
-	public static final float BOARD_STANCE_RAD = BOARD_STANCE_DEGREES * (float) Math.PI / 180.0F;
 	/**
 	 * 单板：整组（板身 + 板头 + 两只固定器 + 鞋）绕 Y 轴转这个角度。
 	 *
@@ -30,17 +27,14 @@ public final class SkiStance {
 	 */
 	public static final float BOARD_YAW_DEGREES = 90.0F;
 	public static final float BOARD_YAW_RAD = BOARD_YAW_DEGREES * (float) Math.PI / 180.0F;
-	/** 单板：固定器在“板上坐标”（未旋转）里的前后位置——只有 {@code SnowboardModel} 内部用。 */
-	public static final float BOARD_BINDING_FRONT_Z = -5.5F;
-	public static final float BOARD_BINDING_BACK_Z = 2.5F;
 	/**
-	 * 单板：两条腿在<b>玩家模型坐标</b>里的位置 = 板上坐标 {@code (x = ±BASE_LEG_X, z = 固定器位置)}
-	 * 经上面 90° 旋转换算得到（{@code (x,z) → (z,-x)}），所以腿一定落在板上、与鞋重合。
+	 * 单板：两条腿（以及它们在板上的雪鞋）在<b>玩家模型坐标</b>里的横向偏移 ——
+	 * 两腿<b>平行并列、向外岔开</b>，不做鸭子站姿、不前后错位。
+	 *
+	 * <p>腿位与 {@code SnowboardModel} 的鞋位必须用同一个值；鞋直接建在模型根节点下（与腿同一坐标系），
+	 * 不放进转了 90° 的板组里 —— 否则鞋与腿朝向差 90°，看起来就是“脚歪了”。
 	 */
-	public static final float BOARD_FRONT_LEG_X = -5.5F;
-	public static final float BOARD_FRONT_LEG_Z = -1.9F;
-	public static final float BOARD_BACK_LEG_X = 2.5F;
-	public static final float BOARD_BACK_LEG_Z = 1.9F;
+	public static final float BOARD_LEG_SPREAD = 4.0F;
 
 	private SkiStance() {
 	}

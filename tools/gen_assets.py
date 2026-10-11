@@ -3,6 +3,7 @@
 产物：
   assets/skis/textures/item/modern_ski.png                      物品图标（滑雪板，平面 16x16）
   assets/skis/textures/item/ski_pole.png                        滑雪杖 3D 模型贴图（64x64，三个 UV 分区）
+  assets/skis/textures/item/ski_pole_icon.png                   滑雪杖物品栏图标（16x16，GUI 用）
   assets/skis/textures/entity/ski_board.png                     脚上模型贴图：雪鞋 + 板身 + 板头（128x32）
   assets/skis/textures/entity/snowboard.png                     单板脚上模型贴图：雪鞋 + 单板板身 + 板头（128x32）
   assets/skis/textures/item/snowboard.png                       单板物品图标（16x16）
@@ -136,6 +137,25 @@ def ski_board():
     return img
 
 
+def pole_icon():
+    """物品栏图标：一根斜放的滑雪杖（握把在右上、挡雪盘在左下）。"""
+    img = blank()
+    length = 14
+    x0, y0 = 1, 14
+    for t in range(length):
+        x, y = x0 + t, y0 - t
+        put(img, x, y, SHAFT)
+        put(img, x, y + 1, SHAFT_HI)
+    for t in range(4):
+        x, y = 11 + t, 4 - t
+        put(img, x, y, GRIP)
+        put(img, x, y + 1, GRIP_HI)
+    for x in range(0, 5):
+        put(img, x, 14, BASKET)
+        put(img, x, 15, BASKET_DK)
+    return img
+
+
 def snowboard_item():
     """物品图标：一块斜放的滑雪单板（比双板宽，两道固定器横带）。"""
     img = blank()
@@ -229,6 +249,7 @@ def main():
     outputs = {
         os.path.join(TEX_ITEM, "modern_ski.png"): modern_ski(),
         os.path.join(TEX_ITEM, "ski_pole.png"): pole_texture(),
+        os.path.join(TEX_ITEM, "ski_pole_icon.png"): pole_icon(),
         os.path.join(TEX_ITEM, "snowboard.png"): snowboard_item(),
         os.path.join(TEX_ENTITY, "ski_board.png"): ski_board(),
         os.path.join(TEX_ENTITY, "snowboard.png"): snowboard_sheet(),

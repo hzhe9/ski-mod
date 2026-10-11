@@ -3,6 +3,8 @@ package com.hermes.skis.mixin.client;
 import com.hermes.skis.SnowboardControl;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.ClientInput;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -11,18 +13,35 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 穿着单板时「完全站定」：移动向量一律清零（前后左右都没反应），空格也不能跳。
+ * 单板的输入改写：
  *
- * <p>掐的是客户端输入本身（{@code ClientInput#getMoveVector} 的返回值），
- * 所以原版走路 / 疾跑 / 潜行加速全都不发生 —— 比在服务端压制速度干净，也不会和客户端移动预测互抢。
+ * <ul>
+ *   <li><b>A / D</b>：沿<b>身体朝向</b>的左右平移 —— 把「左右输入」绕视角旋转 (身体朝向 − 视角) 后交回原版，
+ *       原版再按视角解释它，结果就是沿身体左右走；身体朝向不会因此改变（原版侧移不改 yRot）。</li>
+ *   <li><b>W / S</b>：一律没反应（前后分量直接丢掉）。</li>
+ *   <li><b>空格</b>：不能跳。</li>
+ * </ul>
+ *
+ * <p>改输入而不是改速度：原版走路 / 服务端同步全走同一条路，不会和客户端移动预测互抢。
  */
 @Mixin(ClientInput.class)
 public abstract class ClientInputMixin {
 	@Inject(method = "getMoveVector", at = @At("RETURN"), cancellable = true)
-	private void skis$freezeMovement(CallbackInfoReturnable<Vec2> cir) {
-		if (SnowboardControl.isSnowboard(Minecraft.getInstance().player)) {
-			cir.setReturnValue(Vec2.ZERO);
+	private void skis$boardMove(CallbackInfoReturnable<Vec2> cir) {
+		LocalPlayer player = Minecraft.getInstance().player;
+		if (!SnowboardControl.isSnowboard(player)) {
+			return;
 		}
+		Vec2 move = cir.getReturnValue();
+		if (move == null || move.x == 0.0F) {
+			cir.setReturnValue(Vec2.ZERO);   // 前后（以及没按方向键）一律不动
+			return;
+		}
+		// L(身体朝向) = cos δ·L(视角) + sin δ·F(视角)，δ = 身体朝向 − 视角；
+		// 所以把输入写成 (x·cos δ, x·sin δ)，原版就会把「按 A/D」解释成沿身体左右。
+		float delta = (SnowboardControl.bodyYaw(player.getId(), player.getYRot()) - player.getYRot())
+				* Mth.DEG_TO_RAD;
+		cir.setReturnValue(new Vec2(move.x * Mth.cos(delta), move.x * Mth.sin(delta)));
 	}
 
 	@Inject(method = "makeJump", at = @At("HEAD"), cancellable = true)

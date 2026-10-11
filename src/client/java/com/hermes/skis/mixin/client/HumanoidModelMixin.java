@@ -64,10 +64,10 @@ public abstract class HumanoidModelMixin {
 
 		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
 		if (board) {
-			// 单板：板横在脚下（与视线垂直），双脚横跨在板上、前后错开、鸭子站姿
-			float yaw = SkiStance.BOARD_YAW_RAD;
-			placeBoardLeg(self.rightLeg, SkiStance.BOARD_BACK_LEG_X, SkiStance.BOARD_BACK_LEG_Z, yaw - SkiStance.BOARD_STANCE_RAD);
-			placeBoardLeg(self.leftLeg, SkiStance.BOARD_FRONT_LEG_X, SkiStance.BOARD_FRONT_LEG_Z, yaw + SkiStance.BOARD_STANCE_RAD);
+			// 单板：与双板一样「两腿平行、向外岔开」——不做鸭子站姿、不前后错位
+			// （横向偏移与 SnowboardModel 的鞋位同值，否则脚会与鞋错开）
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD);
 		} else {
 			// 双板：两腿只横向拉开、保持平行
 			placeLeg(self.rightLeg, -SkiStance.legOffsetX());
@@ -129,13 +129,4 @@ public abstract class HumanoidModelMixin {
 		leg.zRot = 0.0F;
 	}
 
-	/** 单板站姿：腿横跨在板上，带前后错位与鸭子站姿的偏转（与 SnowboardModel 的鞋位一致）。 */
-	private static void placeBoardLeg(ModelPart leg, float x, float z, float yRot) {
-		leg.x = x;
-		leg.y = LEG_PIVOT_Y;
-		leg.z = z;
-		leg.xRot = GLIDE_KNEE_BEND;
-		leg.yRot = yRot;
-		leg.zRot = 0.0F;
-	}
 }
