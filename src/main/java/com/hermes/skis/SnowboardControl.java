@@ -144,7 +144,8 @@ public final class SnowboardControl {
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
 	public static float applyCarve(int entityId, Input input, double speed) {
-		if (input == null) {
+		if (input == null || (!input.forward() && !input.backward())) {
+			// 只在“压刃”时切雪：光按 A / D 是纯横移，不加前冲、也不转向
 			return 0.0F;
 		}
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
@@ -153,7 +154,7 @@ public final class SnowboardControl {
 			if (speed < CARVE_MIN_SPEED) {
 				return 0.0F;
 			}
-			side = input.forward() ? 1.0D : (input.backward() ? -1.0D : 0.0D);
+			side = input.forward() ? 1.0D : -1.0D;
 		} else if (input.backward()) {
 			side = -side;   // 后倾＝后刃：同样的侧压，转向与前倾相反（“S 应该是向后”）
 		}

@@ -120,6 +120,9 @@ public final class SkiGlide {
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
 		}
+		if (SnowboardControl.isSnowboard(player) && !SkiControl.canSteer(player)) {
+			return;   // 单板：腾空掉落时不给水平加速（跳下高处不该一路往前飘）
+		}
 		player.addDeltaMovement(direction.scale(gain));
 		MOMENTUM.merge(id, player.getDeltaMovement().horizontalDistance(), Math::max);   // 让加速出来的速度被动量托住
 		clampToMaxSpeed(player);
@@ -179,6 +182,9 @@ public final class SkiGlide {
 	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
 	 */
 	private static void carve(ServerPlayer player) {
+		if (!SkiControl.canSteer(player)) {
+			return;   // 腾空时不切雪（跳下悬崖不该还在转 / 还在往前冲）
+		}
 		Input input = player.getLastClientInput();
 		if (SnowboardControl.applyCarve(player.getId(), input, player.getDeltaMovement().horizontalDistance()) == 0.0F) {
 			return;
