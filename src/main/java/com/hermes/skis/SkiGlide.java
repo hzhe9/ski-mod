@@ -37,7 +37,7 @@ public final class SkiGlide {
 	private static final double GLIDE_PUSH = 0.055D;
 
 	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
-	private static final double FALL_GAIN_EXPONENT = 0.8D;
+	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性（用户要求先去掉衰减，试手感）
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
@@ -125,8 +125,8 @@ public final class SkiGlide {
 		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
-		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT —— 边际递减，掉得越多每格给的越少
-		// （用户：“下落得越多加速的增长量反而越来越小”，随后两次要求衰减更缓：0.5 → 0.7 → 0.8）
+		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT
+		// 指数 < 1 时才边际递减；现在用户要求先去掉衰减试手感，所以 FALL_GAIN_EXPONENT = 1（线性）。
 		boolean board = SnowboardControl.isSnowboard(player);
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
 		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
