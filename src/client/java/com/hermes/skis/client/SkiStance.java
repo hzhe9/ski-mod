@@ -34,7 +34,7 @@ public final class SkiStance {
 	 * <p>腿位与 {@code SnowboardModel} 的鞋位必须用同一个值；鞋直接建在模型根节点下（与腿同一坐标系），
 	 * 不放进转了 90° 的板组里 —— 否则鞋与腿朝向差 90°，看起来就是“脚歪了”。
 	 */
-	public static final float BOARD_LEG_SPREAD = 4.0F;
+	public static final float BOARD_LEG_SPREAD = 2.0F;
 
 	private SkiStance() {
 	}

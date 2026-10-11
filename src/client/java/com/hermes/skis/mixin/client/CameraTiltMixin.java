@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
  * 于是“人倾了、镜头还留在原地”。这里在 {@code Camera#setup} 里把眼高那一段换成旋转后的向量，
  * 与 {@code EntityTiltMixin} 用同一个角度常量。
  *
- * <p>注意：只动位置，不动朝向 —— 视角（鼠标看的那个方向）不受影响。
+ * <p>位置与朝向一起跟着头走：只动位置的话前移 0.4 格几乎看不出来，必须连视线俯仰一起跟上。
  */
 @Mixin(Camera.class)
 public abstract class CameraTiltMixin {
@@ -47,5 +47,25 @@ public abstract class CameraTiltMixin {
 		double dy = eye * (Math.cos(rad) - 1.0D);    // 高度略降
 		Vec3 front = SnowboardControl.front(player.getId(), player.getYRot());   // 沿锁定的身体朝向
 		return pos.add(front.x * forward, dy, front.z * forward);
+	}
+
+	/**
+	 * 视角的<b>朝向</b>也跟着倾：头随身体前倾 θ，视线同样前倾 θ（xRot 为正＝低头）。
+	 * 与上面的位置偏移合起来，等于把相机整块挂到了倾斜后的头上。
+	 */
+	@ModifyArg(
+			method = "alignWithEntity",
+			at = @At(
+					value = "INVOKE",
+					target = "Lnet/minecraft/client/Camera;setRotation(FF)V"
+			),
+			index = 1
+	)
+	private float skis$tiltView(float xRot) {
+		if (!(this.entity instanceof Player player) || !SnowboardControl.isSnowboard(player)) {
+			return xRot;
+		}
+		int tilt = SnowboardControl.tilt(player.getId());
+		return tilt == 0 ? xRot : xRot + tilt * SnowboardControl.tiltDegrees();
 	}
 }

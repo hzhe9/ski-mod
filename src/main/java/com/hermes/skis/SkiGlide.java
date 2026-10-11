@@ -8,7 +8,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -24,8 +23,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * </ul>
  *
  * <p><b>单板共用这套滑行物理</b>（下落加速 / 低摩擦动量 / 雪面推进），但方向来源不同：
- * 它不读按键转向（A / D 是横移），只沿当前运动方向走、静止时沿锁定的身体前方；
- * 另外按 W（前倾）会额外给一点点前推（{@link #tiltPush}）。
+ * 它不读按键转向（A / D 是横移），只沿当前运动方向走、静止时沿锁定的身体前方。
+ * W / S 只改姿态（前倾 / 后倾）与相机，<b>不给任何推进</b>。
  *
  * <p>不需要药水效果。
  */
@@ -75,9 +74,6 @@ public final class SkiGlide {
 				}
 				trackDescent(player);
 				applyMomentum(player);
-				if (SnowboardControl.isSnowboard(player)) {
-					tiltPush(player);   // 单板：W 前倾额外给一点点前推
-				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
 				}
@@ -172,21 +168,6 @@ public final class SkiGlide {
 			player.addDeltaMovement(direction.scale(GLIDE_PUSH));
 			player.hurtMarked = true;
 		}
-	}
-
-	/**
-	 * 单板「前倾」（W）：每 tick 沿锁定的身体前方补一点点推进（“稍微往前”）；按 S（后倾）不推。
-	 * 只加力、不改朝向，也不参与 A / D 的横移。
-	 */
-	private static void tiltPush(ServerPlayer player) {
-		Input input = player.getLastClientInput();
-		if (input == null || !input.forward() || !SkiControl.canSteer(player)) {
-			return;
-		}
-		player.addDeltaMovement(SnowboardControl.front(player.getId(), player.getYRot())
-				.scale(SnowboardControl.tiltPush()));
-		clampToMaxSpeed(player);
-		player.hurtMarked = true;
 	}
 
 	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）。 */

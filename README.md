@@ -88,8 +88,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 操作 | 行为 |
 |---|---|
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
-| W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机跟着倾斜后的头部（眼睛）位置一起前移**（朝向不变），另沿身体前方每 tick 补一点点推进（`TILT_PUSH`，「稍微往前」）—— 不改变朝向、不参与横移 |
-| S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机跟着后移，不给推进 |
+| W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机整块挂到倾斜后的头上**（位置前移 + 视线俯仰同角度），**不给任何推进**（不会自动往前滑） |
+| S | **后倾**：同样整个人 + 板 + 相机一起向后仰 `TILT_DEGREES`，不给推进 |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
@@ -117,8 +117,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|---|
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
-| `BOARD_LEG_SPREAD` | `SkiStance` | 4.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值 |
-| `TILT_PUSH` | `SnowboardControl` | 0.010 格/tick | 单板按 W（前倾）时每 tick 沿身体前方补的推进量 |
+| `BOARD_LEG_SPREAD` | `SkiStance` | 2.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一个角度把相机位置沿旋转后的眼高向量前移） |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
@@ -152,7 +151,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟） |
-| `mixin/client/CameraTiltMixin.java` | 单板 W / S 时在 `Camera#setup` 里把眼高向量换成绕脚底旋转后的那一份 —— 相机跟着倾斜后的头走（只动位置、不动朝向） |
+| `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机整块挂到倾斜后的头上：`alignWithEntity` 里 `setPosition` 的参数换成绕脚底旋转后的眼高向量、`setRotation` 的 xRot 加同一个倾角 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
@@ -167,6 +166,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 肢体 `zRot` 符号：-x 侧肢体正 zRot = 末端向外；搞反会让垂在身侧的长物品内倾穿模
 - 渲染状态每帧重建，**不要**把跨帧状态挂在它上面（用静态表 + 实体 id）
 - **改完 Mixin 要自己跑一次启动自检**：注入目标写错＝启动即崩（本项目被 `Camera#setup` 这个不存在的方法名坑过一次）。用 PCL 导出的启动脚本 bat 拉真实客户端，看 `logs/latest.log` 出现 `[skis] … 已加载` + `Sound engine started`、且无 `MixinApplyError` 才算过。
+- **相机要“整块挂到倾斜后的头上”＝位置 + 朝向两个参数都改**：只改位置（前移 `眼高·sinθ`≈0.42 格）用户会说“视角不会跟着头动”；只改朝向会说“不是要倾斜”。两个 `@ModifyArg` 都在 `alignWithEntity` 上（`setPosition(Vec3)` 取 index 0、`setRotation(FF)` 取 index 1）。
 - **26.2 里相机算位置的方法叫 `alignWithEntity`（private，被 `update` 调用），没有 `setup`**：jump 到旧版本记忆里的方法名会直接崩在启动阶段。
 - **「相机跟着头走」= 改相机的位置，不是朝向**：人绕脚底倾斜后眼睛从竖直的 `(0, 眼高, 0)` 转成 `(前移 眼高·sinθ, 眼高·cosθ)`，而原版相机的眼高永远竖直 —— 在 `Camera#setup` 里 `@ModifyArg` 它调 `setPosition(Vec3)` 的那个参数，加上旋转后的偏移即可（`Camera.entity` 是私有字段且无 getter，得 `@Shadow`）。
 - **「整个人 + 脚上的板一起动」的姿态必须在渲染 poseStack 层做**：板是 Fabric `ArmorRenderer` 独立提交的模型，只改 `HumanoidModel` 的部件它不会跟。`LivingEntityRenderer#setupRotations` 的 TAIL 是安全注入点（poseStack 原点＝实体脚底、朝向已转好，模型与所有 RenderLayer 共用它）
