@@ -45,6 +45,8 @@ public final class SkiGlide {
 	private static final double MOMENTUM_DECAY = 0.985D;
 	/** 单板专用（更滑）：转向时是在“切雪”，速度不该被地面摩擦一点点啃掉（0.996 ≈ 3 秒掉 1%）。 */
 	private static final double BOARD_MOMENTUM_DECAY = 0.996D;
+	/** 双板按 S 时的额外衰减系数（刹车）：0.90 ≈ 每 tick 掉 10%，按住约半秒就能停。 */
+	private static final double BRAKE_DECAY = 0.90D;
 	/** 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。 */
 	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
 	/** 动量低于这个值就丢掉。 */
@@ -154,6 +156,10 @@ public final class SkiGlide {
 			momentum = Math.max(momentum, speed);   // 单板只在真的按 A / D 横移时跟随
 		}
 		double decay = SnowboardControl.isSnowboard(player) ? BOARD_MOMENTUM_DECAY : MOMENTUM_DECAY;
+		Input keys = player.getLastClientInput();
+		if (!SnowboardControl.isSnowboard(player) && keys != null && keys.backward()) {
+			decay *= BRAKE_DECAY;   // 双板按 S（后倾）＝刹车：持续减速，松开后也不会被动量拉回原速
+		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
 
@@ -213,18 +219,30 @@ public final class SkiGlide {
 	 * 有横向速度 → 沿当前移动方向；按着 A / D → 沿那一侧；都没有 → 沿身体前方。
 	 * 保证“只要在往下掉就总有方向可加”，不然一停下来就完全不加速。
 	 */
+	/**
+	 * 下落加速的方向。
+	 *
+	 * <p><b>单板只有左右</b>（它是一维的横向运动）：把当前移动方向<b>投影到身体横轴</b>上，只取左右分量 ——
+	 * 绝不给“往前”的加速；几乎没有左右分量时不加（宁可不动，也不要莫名往前）。
+	 *
+	 * <p>双板照旧：有横向速度就沿当前移动方向，否则按按键 / 视线定方向。
+	 */
 	private static Vec3 descentDirection(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
-		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
-			return new Vec3(motion.x, 0.0D, motion.z).normalize();
-		}
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板也要“总有方向”，否则一静止就完全不加（双板那条永远有方向，一对比就看出来）
-			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			if (side != 0.0D) {
-				return SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);   // 按着 A / D：沿那一侧
+			Vec3 axis = SnowboardControl.sideLocked(player.getId(), player.getYRot(), 1.0D);   // 身体左侧单位向量
+			double along = horizontal.lengthSqr() < 1.0E-6D ? 0.0D : horizontal.normalize().dot(axis);
+			if (Math.abs(along) >= 0.1D) {
+				return along > 0.0D ? axis : axis.scale(-1.0D);   // 正在往左 / 往右滑
 			}
-			return SnowboardControl.frontLocked(player.getId(), player.getYRot());           // 都没有：沿身体前方
+			double side = SnowboardControl.sideSign(player.getLastClientInput());
+			return side == 0.0D ? null : axis.scale(side);        // 没滑但按着 A / D 也算有左右
+		}
+
+		if (horizontal.lengthSqr() > MIN_MOTION_SQR) {
+			return horizontal.normalize();
 		}
 		return steerDirection(player);
 	}

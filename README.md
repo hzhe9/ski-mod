@@ -70,6 +70,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.985 | 滑行动量每 tick 保留比例（半衰期 ≈ 2.29 秒）＝ 有效摩擦力（双板） |
 | `BOARD_MOMENTUM_DECAY` | 0.996 | 单板专用、更滑：切雪转向时速度不该被地面摩擦一点点啃掉 |
+| `BRAKE_DECAY` | 0.90 | **双板按 S＝刹车**：动量每 tick 再乘这个系数（≈半秒停住），松开后不会被动量拉回原速 |
 | `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 |
 | `MOMENTUM_MIN` | 0.02 | 动量低于它就丢掉 |
 | `GLIDE_PUSH` / `REFRESH_INTERVAL_TICKS` | 0.055 / 10 | 雪/冰面上每 0.5 秒沿移动方向补一点推进 |
@@ -96,7 +97,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
-| 滑行物理 | **只保留下落加速**：每降 1 格 +`GAIN_PER_BLOCK`（0.10，与双板同一套数据），方向优先级 —— 有横向速度→沿当前移动方向；按着 A/D→沿那一侧；都没有→沿身体前方（保证“只要在掉就总有加速”，与双板一致）。空中也照样给。不做雪面推进、动量也不捕获玩家自己走出来的速度 —— 否则平地走路 / 站坡上都会“莫名往前” |
+| 滑行物理 | **只保留下落加速**：每降 1 格 +`GAIN_PER_BLOCK`（0.10，与双板同一套数据）。方向按 **单板只有左右**：把当前移动方向**投影到身体横轴**，只取左右分量（绝不给“往前”的加速），没左右分量又不按 A/D 就不加。空中也照样给。不做雪面推进、动量也不捕获玩家自己走出来的速度 —— 否则平地走路 / 站坡上都会“莫名往前” |
 | 点杖冲刺 | 单板时不给冲刺（`SkiBoost.burst` 直接 return） |
 | 换朝向 | 把板脱下来再穿上（重新锁定） |
 
@@ -162,6 +163,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `mixin/client/SnowboardHeadLimitMixin.java` | 单板时在 `Entity#turn` 末尾把视角 yaw 夹到「锁定身体朝向 ± `VIEW_LIMIT_DEGREES`」 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
+
+- 双板：**按 S（后倾）＝刹车**，`applyMomentum` 里对动量额外乘 `BRAKE_DECAY`；只靠原版后退只能“短暂停一下”，松手动量就把速度托回去了。
 
 ## 约定与坑（细节见 Hermes 技能）
 
