@@ -27,7 +27,7 @@ public abstract class CameraTiltMixin {
 	private Entity entity;
 
 	@ModifyArg(
-			method = "setup",
+			method = "alignWithEntity",
 			at = @At(
 					value = "INVOKE",
 					target = "Lnet/minecraft/client/Camera;setPosition(Lnet/minecraft/world/phys/Vec3;)V"
