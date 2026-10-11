@@ -38,8 +38,8 @@ public final class SnowboardControl {
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
-	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 90} 度，加起来 180 —— 扭不到背后去。 */
-	public static final float VIEW_LIMIT_DEGREES = 90.0F;
+	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 135} 度，合计 270 —— 扭不到背后去。 */
+	public static final float VIEW_LIMIT_DEGREES = 135.0F;
 
 	/**
 	 * <b>carve（切雪转向）</b>：前倾（W）＋ 横移（A / D）同时按住时，身体朝向每 tick 朝那一侧转多少度。

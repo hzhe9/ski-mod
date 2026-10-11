@@ -105,7 +105,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | W | **前倾**（**渐进**到位，不瞬跳；W 与 S 同按判中立，避免快速切换时跳成前倾）：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
 | **carve（切雪转弯）：W/S 只转向、不加力** | **前提是压刃**：必须按着 W 或 S，**光按 A/D 只是纯横移**。触发后身体朝向每 tick 转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），**速度的方向跟着转同样的角度**（`rotateVelocity`，大小不变）—— 朝向转多少速度方向转多少，带惯性的路线慢慢弯过去，全程**不补任何推力**（W/S 只改方向）。<br>转向方向：按 A/D 时由侧压决定，没按 A/D 时只要滑速 ≥ `CARVE_MIN_SPEED` 就前倾/后倾各走一边；**后倾（S）＝后刃**，转向与前倾相反。腾空也能转 |
-| 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（90°），合计 180 —— 扭不到背后（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw；carve 转动身体后客户端 tick 也会把视角拉回限制内） |
+| 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（135°），合计 270 —— 只剩背后 90° 是禁区（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw；carve 转动身体后客户端 tick 也会把视角拉回限制内） |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
@@ -136,7 +136,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.8 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
 | `TILT_LERP` | `SnowboardControl` | 0.25 | 俯仰姿态每 tick 向目标靠拢的比例（≈10 tick 到位）—— 倾斜是渐进的 |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
-| `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 90.0 度 | 头（视角）相对锁定身体朝向的最大偏转，左右各一份 |
+| `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 135.0 度 | 视角相对锁定身体朝向的最大偏转，左右各一份（合计 270°；留 90° 背后视线禁区） |
 | `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |
 | `CARVE_MIN_SPEED` | `SnowboardControl` | 0.05 格/tick | 没按 A/D 时，光靠前/后倾触发 carve 所需的最低滑速 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
@@ -192,8 +192,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
-| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.997 / `DESCENT_STEP_BLOCKS` 0.1） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
@@ -202,7 +202,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | | 双板 | 单板 |
 |---|---|---|
-| 朝向 | **不锁** —— 视角转多少人就朝哪走（用户 2026-10 定案：回到最开始的状态） | 锁定（穿上板那一刻），视角可自由转 ±90° |
+| 朝向 | **不锁** —— 视角转多少人就朝哪走（用户 2026-10 定案：回到最开始的状态） | 锁定（穿上板那一刻），视角可自由转 ±135° |
 | 转向 | 视角（不用键盘转）| 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
 | 前进 | W / S（原版移动） | W/S 只做前倾 / 后倾（**不加推力**） |
 | 左右 | A / D 原版横移（视角为基准） | A / D 沿身体左右**平移** |
