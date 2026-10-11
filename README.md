@@ -67,9 +67,10 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
 | `GAIN_PER_BLOCK` | 0.10 | **双板**每下降 1 格加多少水平速度（试过 0.18，用户判“太快”） |
-| `BOARD_GAIN_PER_BLOCK` | 0.22 | **单板**同项：只取左右分量、体感更弱，所以给更大的系数 |
+| `BOARD_GAIN_PER_BLOCK` | 0.15 | **单板**同项：只取左右分量、体感更弱，所以给更大的系数 |
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.985 | 滑行动量每 tick 保留比例（半衰期 ≈ 2.29 秒）＝ 有效摩擦力（双板） |
+| `ADD` / `MIN_PEAK` | 0.06 / 0.32 | 滑雪杖助推（原 0.1 / 0.45，用户要“慢一点”） |
 | `BOARD_MOMENTUM_DECAY` | 0.996 | 单板专用、更滑：切雪转向时速度不该被地面摩擦一点点啃掉 |
 | `BRAKE_DECAY` | 0.90 | **双板按 S＝刹车**：动量每 tick 再乘这个系数（≈半秒停住），松开后不会被动量拉回原速 |
 | `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 |
@@ -165,6 +166,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
+- ⚠️ **MC 里 yaw 增大是「往右转」**（yaw=0 朝 +z，yaw=90 朝 -x）：所以“按 A 往左”要 `-yaw`。双板 `steerSkis` 与单板 carve 的侧压符号都按这条写，写反了就是“按左往右转”。
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。

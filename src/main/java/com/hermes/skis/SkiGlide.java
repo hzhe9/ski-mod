@@ -39,7 +39,7 @@ public final class SkiGlide {
 	/** 双板：每下落 1 格加多少水平速度（0.18 被用户判“太快”，定在 0.10）。 */
 	private static final double GAIN_PER_BLOCK = 0.10D;
 	/** 单板：同样下落，单板只取左右分量、体感明显更弱，所以给更大的系数（用户：“单板下落加速太慢”）。 */
-	private static final double BOARD_GAIN_PER_BLOCK = 0.22D;
+	private static final double BOARD_GAIN_PER_BLOCK = 0.15D;
 	/** 双板单 tick 上限（防止悬崖一瞬间给爆）。 */
 	private static final double MAX_GAIN_PER_TICK = 0.3D;
 	/** 单板单 tick 上限。 */
@@ -202,7 +202,8 @@ public final class SkiGlide {
 		if (side == 0.0D) {
 			return;
 		}
-		SnowboardControl.turnBody(player.getId(), (float) (side * SnowboardControl.skiTurnRateDegrees()));
+		// ⚠️ MC 里 yaw 增大是“往右转”（yaw=0 朝 +z，yaw=90 朝 -x）—— 按 A（side=+1，想左转）必须减 yaw
+		SnowboardControl.turnBody(player.getId(), (float) (-side * SnowboardControl.skiTurnRateDegrees()));
 	}
 
 	private static void carve(ServerPlayer player) {
