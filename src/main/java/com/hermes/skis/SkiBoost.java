@@ -81,6 +81,9 @@ public final class SkiBoost {
 
 	/** 右键一次：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。 */
 	public static void burst(Player player) {
+		if (SnowboardControl.isSnowboard(player)) {
+			return;   // 单板站定：撑杖也不给冲刺
+		}
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double current = horizontal.length();

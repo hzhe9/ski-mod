@@ -7,7 +7,8 @@
 		"EntityStepSoundMixin",
 		"GameRendererBobMixin",
 		"LivingEntityFallSoundMixin",
-		"PlayerStepSoundMixin"
+		"PlayerStepSoundMixin",
+		"ClientInputMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

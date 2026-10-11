@@ -8,7 +8,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -23,9 +22,8 @@ import net.minecraft.world.level.block.state.BlockState;
  *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。</li>
  * </ul>
  *
- * <p><b>单板另有一套操控</b>（{@link SnowboardControl}）：滑行时人板固定成一个朝向，A / D 往身体左右平移
- * （带 {@link SnowboardControl#sideMinSpeed()} 的起步速度，站着按一下就能滑出去），W 前倾给一点推进
- * （{@link #tiltPush}），鼠标转视角不参与方向。
+ * <p><b>单板不参与这套物理</b>：穿上单板 = 人板一体、完全站定（见 {@link SnowboardControl}），
+ * 这里只负责给它锁住身体朝向；动量 / 下落加速 / 雪面推进一律不施加。
  *
  * <p>不需要药水效果。
  */
@@ -64,20 +62,18 @@ public final class SkiGlide {
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 				if (!isSkiing(player)) {
-					forget(player.getId());
+					forgetPhysics(player.getId());
+					SnowboardControl.forget(player.getId());
 					continue;
 				}
-				boolean board = SnowboardControl.isSnowboard(player);
-				if (board) {
-					SnowboardControl.ensureLocked(player);   // 单板：开始滑行时锁定身体朝向
-				} else {
-					SnowboardControl.forget(player.getId());
+				if (SnowboardControl.isSnowboard(player)) {
+					// 单板：人板一体、完全站定 —— 不施加任何滑行物理，只锁住朝向
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+					forgetPhysics(player.getId());
+					continue;
 				}
 				trackDescent(player);
 				applyMomentum(player);
-				if (board) {
-					tiltPush(player);
-				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
 				}
@@ -144,10 +140,6 @@ public final class SkiGlide {
 		double speed = motion.horizontalDistance();
 
 		double momentum = Math.max(MOMENTUM.getOrDefault(id, 0.0D), speed);
-		if (SnowboardControl.isSnowboard(player) && SnowboardControl.strafing(player.getLastClientInput())) {
-			// 单板横移：别要求先攒速度——站着按一下 A / D 就该往那一侧滑出去
-			momentum = Math.max(momentum, SnowboardControl.sideMinSpeed());
-		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : MOMENTUM_DECAY;
 		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
 
@@ -162,20 +154,6 @@ public final class SkiGlide {
 		}
 		Vec3 direction = steerDirection(player);   // 托速度时也允许用 WASD 转向，不然会像被锁住一样
 		player.setDeltaMovement(direction.x * momentum, motion.y, direction.z * momentum);
-		player.hurtMarked = true;
-	}
-
-	/**
-	 * 单板「前倾」（W）：每 tick 沿<b>锁定的身体前方</b>补一点推进（“稍微往前”）；
-	 * 松开 W 或按 S（后倾）完全不推，靠动量自己衰减。
-	 */
-	private static void tiltPush(ServerPlayer player) {
-		Input input = player.getLastClientInput();
-		if (!SnowboardControl.tilting(input) || !SkiControl.canSteer(player)) {
-			return;
-		}
-		player.addDeltaMovement(SnowboardControl.front(player).scale(SnowboardControl.tiltPush()));
-		clampToMaxSpeed(player);
 		player.hurtMarked = true;
 	}
 
@@ -217,11 +195,10 @@ public final class SkiGlide {
 		return level.getBlockState(standing).is(BlockTags.SNOW);
 	}
 
-	private static void forget(int id) {
-		LAST_Y.remove(id);
-		DESCEND_ACCUM.remove(id);
-		MOMENTUM.remove(id);
-		SnowboardControl.forget(id);
+	private static void forgetPhysics(int id) {
+	LAST_Y.remove(id);
+	DESCEND_ACCUM.remove(id);
+	MOMENTUM.remove(id);
 	}
 
 	private static void forgetAll() {
