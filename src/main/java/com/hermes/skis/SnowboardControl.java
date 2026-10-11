@@ -62,7 +62,7 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
-	private static final double MOMENTUM_DECAY = 0.997D;   // 用户 2026-10-11 定 0.997（双板仍 0.99）
+	private static final double MOMENTUM_DECAY = 0.99D;   // 用户 2026-10-11 定 0.99（与双板同值）
 	/**
 	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
 	 *

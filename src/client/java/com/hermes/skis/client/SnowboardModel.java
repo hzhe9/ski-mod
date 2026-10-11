@@ -45,13 +45,13 @@ public class SnowboardModel extends Model<HumanoidRenderState> {
 		PartDefinition board = root.addOrReplaceChild("snowboard",
 				CubeListBuilder.create(), PartPose.rotation(0.0F, SkiStance.BOARD_YAW_RAD, 0.0F));
 
-		// 板身（板上坐标：宽沿 x、长沿 z）
+		// 板身（板上坐标：宽沿 x、长沿 z）—— 前后各 12，人物正好站在板的几何正中
 		board.addOrReplaceChild("deck",
-				CubeListBuilder.create().texOffs(20, 0).addBox(-4.5F, BOARD_TOP, -14.0F, 9.0F, 1.0F, 24.0F),
+				CubeListBuilder.create().texOffs(20, 0).addBox(-4.5F, BOARD_TOP, -12.0F, 9.0F, 1.0F, 24.0F),
 				PartPose.ZERO);
-		// 上翘板头（-z 端 = 板的板头）
+		// 上翘板头（-z 端 = 板的板头），接在板身前缘之外
 		board.addOrReplaceChild("tip",
-				CubeListBuilder.create().texOffs(90, 0).addBox(-4.5F, 22.3F, -16.0F, 9.0F, 1.0F, 2.0F),
+				CubeListBuilder.create().texOffs(90, 0).addBox(-4.5F, 22.3F, -14.0F, 9.0F, 1.0F, 2.0F),
 				PartPose.ZERO);
 		// 两只鞋：建在根节点下、平行并列向外岔开（与腿同一坐标系、同一横向偏移）
 		addBoot(root, "left", SkiStance.BOARD_LEG_SPREAD);
