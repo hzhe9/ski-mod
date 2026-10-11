@@ -43,7 +43,7 @@ public final class SkiBoost {
 	 * <p>动画总长 {@code SkiState.SWING_TICKS} = 12 tick，举起占 25%、下摆约到 70% ——
 	 * “杖点下去”大约在第 7 tick，所以这里也等 7 tick 再给速度，动作和发力才对得上。
 	 */
-	private static final int DELAY_TICKS = 7;
+	private static final int DELAY_TICKS = 5;
 
 	/** direction 是当前冲刺方向（水平单位向量）；from 是右键当时的速度（要回到的目标）；peak 是抬到多快。 */
 	private record Boost(Vec3 direction, double from, double peak, int ticksLeft) {

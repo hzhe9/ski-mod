@@ -251,7 +251,7 @@ public final class SkiGlide {
 				momentum = Math.max(momentum, speed);
 			}
 			if (braking) {
-				momentum = Math.max(0.0D, momentum - SnowboardControl.brakeStep());
+				momentum *= SnowboardControl.brakeRetain();   // 比例衰减：不会把速度一口气压到 0
 			}
 			decay = SnowboardControl.momentumDecay();
 		} else {

@@ -67,8 +67,14 @@ public final class SnowboardControl {
 	private static final double VEER_SMOOTHING = 0.35D;
 	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
 	private static final double VEER_MAX_DEGREES = 4.0D;
-	/** 单板刹车：每 tick 从动量里扣掉这么多（按反方向的 A / D，或按 S）。0.05 ≈ 0.3 秒停住。 */
-	private static final double BRAKE_STEP = 0.05D;
+	/**
+	 * 单板刹车：每 tick 把动量<b>乘以</b>这个系数（比例衰减，而不是每 tick 硬扣一个固定量）。
+	 *
+	 * <p>原来写的是固定扣 0.05/tick，速度只有 0.3 时 6 tick 就归零 —— 于是“向后转动（按 S）”这种
+	 * 同时会刹车、又同时会转向的操作，就会出现<b>突然停住</b>（用户实测到）。改成比例后，
+	 * 刹车力度与当时的速度成正比：0.98/tick ≈ 1 秒掉三成，永远压不死。
+	 */
+	private static final double BRAKE_RETAIN = 0.98D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -170,9 +176,9 @@ public final class SnowboardControl {
 		return FALL_GAIN_PER_TICK_MAX;
 	}
 
-	/** 单板：刹车每 tick 从动量里扣掉的量。 */
-	public static double brakeStep() {
-		return BRAKE_STEP;
+	/** 单板：刹车每 tick 的动量保留系数（越接近 1 越柔）。 */
+	public static double brakeRetain() {
+		return BRAKE_RETAIN;
 	}
 
 	/** 单板：动量衰减（越接近 1 越滑）。 */
