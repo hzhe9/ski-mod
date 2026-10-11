@@ -62,7 +62,7 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
-	private static final double MOMENTUM_DECAY = 0.99D;   // 与双板一致（用户定 0.99）
+	private static final double MOMENTUM_DECAY = 0.97D;   // 用户 2026-10-11 定 0.97（双板仍 0.99）
 	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
 	private static final double VEER_SMOOTHING = 0.35D;
 	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
