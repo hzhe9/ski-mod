@@ -159,29 +159,33 @@ def pole_icon():
 
 
 def snowboard_item():
-    """物品图标：一块斜放的滑雪单板（比双板宽，两道固定器横带）。"""
+    """物品图标：一块斜放的滑雪单板（twin-tip：两头一样白、比双板宽，两道固定器横带）。"""
     img = blank()
     length = 13
     x0, y0 = 1, 14
     for t in range(length):
         x, y = x0 + t, y0 - t
-        color = TIP if t >= length - 2 else BODY
+        color = TIP if (t < 2 or t >= length - 2) else BODY   # 两端都白（双翘对称）
         for w in range(3):
             put(img, x + w, y, color)
             put(img, x + w, y + 1, color)
-        if t in (3, 4, 8, 9):
+        if t in (4, 5, 8, 9):
             for w in range(3):
                 put(img, x + w, y, BINDING)
     return img
 
 
 def snowboard_sheet():
-    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(9,1,24) + 上翘板头 box(9,1,2)。
+    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(9,1,22) + 板头/板尾两块上翘 box(9,1,2)。
+
+    twin-tip：板身前后各 11，两端各接一块翘头，**板面花纹左右（前后）对称** ——
+    两端各一段白 + 中间石墨黑底 + 青色中线。
 
     CubeListBuilder 自动 UV 布局：
       雪鞋 box(4,6,4) @texOffs(0,0)   -> (0,0)-(16,10)
-      板身 box(9,1,24) @texOffs(20,0) -> 占 (20,0)-(86,25)；板面 up=(44,0)-(53,24)、板底 down=(53,0)-(62,24)、侧面=第 24 行
+      板身 box(9,1,22) @texOffs(20,0) -> 占 (20,0)-(82,24)；板面 up=(42,0)-(51,22)、板底 down=(51,0)-(60,22)、侧面=第 22 行
       板头 box(9,1,2) @texOffs(90,0)  -> 占 (90,0)-(112,3)
+      板尾 box(9,1,2) @texOffs(90,4)  -> 占 (90,4)-(112,7)
     """
     img = blank(128, 32)
 
@@ -193,19 +197,20 @@ def snowboard_sheet():
         put(img, x, 4, BOOT_BUCKLE)
         put(img, x + 1, 4, BOOT_BUCKLE)
 
-    # 板面：沿板长（v 方向）的中线条纹，前段（v 小）为板头白
-    fill(img, 44, 0, 53, 24, BODY)
-    fill(img, 44, 0, 53, 5, TIP)
-    fill(img, 47, 5, 50, 24, ACCENT)
+    # 板面（twin-tip：两端白段对称，中间黑底 + 青色中线），v 轴两端各占 5
+    fill(img, 42, 0, 51, 22, BODY)
+    fill(img, 42, 0, 51, 5, TIP)
+    fill(img, 42, 17, 51, 22, TIP)
+    fill(img, 45, 5, 48, 17, ACCENT)
     # 板底
-    fill(img, 53, 0, 62, 24, BASE)
-    # 板侧一圈（前段也是白的）
-    fill(img, 20, 24, 86, 25, BASE)
-    fill(img, 20, 24, 44, 25, TIP)
+    fill(img, 51, 0, 60, 22, BASE)
+    # 板侧一圈（整圈同色，不再一侧白 —— 对称）
+    fill(img, 20, 22, 82, 23, BASE)
 
-    # 上翘板头
-    fill(img, 90, 0, 112, 3, TIP)
-    fill(img, 92, 0, 101, 2, ACCENT)
+    # 上翘板头 / 板尾：两块同款（白底 + 中间青条，青条落在各自的“板面”UV 区里）
+    for y0 in (0, 4):
+        fill(img, 90, y0, 112, y0 + 3, TIP)
+        fill(img, 94, y0, 99, y0 + 2, ACCENT)
     return img
 
 
