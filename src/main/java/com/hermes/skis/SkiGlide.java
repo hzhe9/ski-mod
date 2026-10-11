@@ -236,8 +236,22 @@ public final class SkiGlide {
 		double decay;
 		if (SnowboardControl.isSnowboard(player)) {
 			// ——— 单板 ———
-			if (SnowboardControl.sideSign(keys) != 0.0D) {
-				momentum = Math.max(momentum, speed);   // 只在真的按 A / D 横移时跟随
+			double side = SnowboardControl.sideSign(keys);
+			boolean braking = keys != null && keys.backward();   // 按 S 也是刹车
+			if (side != 0.0D) {
+				// 按的那一侧与当前滑行方向相反 → 相当于“给反向速度”，即刹车（用户：向左滑时按 D 就减速）
+				Vec3 axis = SnowboardControl.sideLocked(id, player.getYRot(), side);
+				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+				if (horizontal.lengthSqr() > 1.0E-6D && horizontal.normalize().dot(axis) < 0.0D) {
+					braking = true;
+				} else {
+					momentum = Math.max(momentum, speed);
+				}
+			} else {
+				momentum = Math.max(momentum, speed);
+			}
+			if (braking) {
+				momentum = Math.max(0.0D, momentum - SnowboardControl.brakeStep());
 			}
 			decay = SnowboardControl.momentumDecay();
 		} else {

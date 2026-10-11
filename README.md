@@ -68,6 +68,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
 | `FALL_GAIN_PER_BLOCK` | 0.1 | **双板**下落基数 |
 | `BOARD_GAIN_PER_BLOCK` | 0.1 | **单板**同项（只取左右分量） |
+| `FALL_GAIN_PER_TICK_MAX` | 双板 0.3 / 单板 0.5 | **单 tick 下落加速上限**：一次结算最多加这么多（防止从高处一步把速度给爆） |
 | `FALL_GAIN_EXPONENT` | 1.0 | 两板共用的曲线指数。**当前 1.0 = 线性**（用户要求先去掉衰减试手感）；0.8 = 很缓的边际递减、0.5 = 开方 |
 | `STICK_DOWN` / `STICK_DOWN_MAX` / `STICK_MAX_DROP` | 0.08 / 0.8 / 2.5 | **双板下坡贴地**：没在地面、正在下落、**没按跳跃键**、且**脚底离地 ≤ 1 格**时，每 tick 额外补向下速度（贴坡面滑，不弹跳）。⚠️ 离地更远＝真的在坠落，完全不插手，保留原版重力加速 |
 | `STEP_UP_PENALTY` | 0.04 格/tick | 滑上 1 格台阶扣掉的水平速度（动量一起扣，否则下一步被托回来） |
@@ -78,7 +79,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.99 | 滑行动量每 tick 保留比例 ＝ 有效摩擦力（双板；0.985 太涩 → 0.993 → 用户定 0.99） |
 | `ADD` / `MIN_PEAK` | 0.06 / 0.32 | 滑雪杖助推（原 0.1 / 0.45，用户要“慢一点”） |
-| `BOARD_MOMENTUM_DECAY` | 0.996 | 单板专用、更滑：切雪转向时速度不该被地面摩擦一点点啃掉 |
+| `MOMENTUM_DECAY` | 0.99 | 单板（与双板一致，两板都 0.99） |
+| `BRAKE_STEP` | 0.05 | **单板刹车**：按反方向的 A/D（或按 S）时每 tick 从动量里扣这么多 |
 | `BRAKE_DECAY` | 0.90 | **双板按 S＝刹车**：动量每 tick 再乘这个系数（≈半秒停住），松开后不会被动量拉回原速 |
 | `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 |
 | `MOMENTUM_MIN` | 0.02 | 动量低于它就丢掉 |

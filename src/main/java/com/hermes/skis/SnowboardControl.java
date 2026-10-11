@@ -62,11 +62,13 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.5D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
-	private static final double MOMENTUM_DECAY = 0.996D;
+	private static final double MOMENTUM_DECAY = 0.99D;   // 与双板一致（用户定 0.99）
 	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
 	private static final double VEER_SMOOTHING = 0.35D;
 	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
 	private static final double VEER_MAX_DEGREES = 4.0D;
+	/** 单板刹车：每 tick 从动量里扣掉这么多（按反方向的 A / D，或按 S）。0.05 ≈ 0.3 秒停住。 */
+	private static final double BRAKE_STEP = 0.05D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -166,6 +168,11 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	public static double fallGainPerTickMax() {
 		return FALL_GAIN_PER_TICK_MAX;
+	}
+
+	/** 单板：刹车每 tick 从动量里扣掉的量。 */
+	public static double brakeStep() {
+		return BRAKE_STEP;
 	}
 
 	/** 单板：动量衰减（越接近 1 越滑）。 */
