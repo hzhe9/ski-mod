@@ -76,7 +76,9 @@ public final class SkiGlide {
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());   // 单板：锁住身体朝向
 					carve(player);
 				} else {
-					SnowboardControl.forget(player.getId());
+					// 双板：也锁住朝向 —— 转视角不再带动板转，只有 A / D 能操控转向
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+					steerSkis(player);
 				}
 				trackDescent(player);
 				applyMomentum(player);
@@ -187,6 +189,15 @@ public final class SkiGlide {
 	 * 单板 carve：前倾（W）＋ 横移（A / D）→ 身体朝向朝那一侧持续转（{@link SnowboardControl#applyCarve}），
 	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
 	 */
+	/** 双板转向：A 往左转、D 往右转（转的是锁定的朝向），视角不参与。 */
+	private static void steerSkis(ServerPlayer player) {
+		double side = SnowboardControl.sideSign(player.getLastClientInput());
+		if (side == 0.0D) {
+			return;
+		}
+		SnowboardControl.turnBody(player.getId(), (float) (side * SnowboardControl.skiTurnRateDegrees()));
+	}
+
 	private static void carve(ServerPlayer player) {
 		// 注意：腾空时也允许“转”（从高处落下时前后倾要能带着速度拐弯），
 		// 只有“前冲”那一口力限制在贴地时给。

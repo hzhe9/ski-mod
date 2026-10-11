@@ -164,7 +164,18 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
+- 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
+- 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
 - 双板：**按 S（后倾）＝刹车**，`applyMomentum` 里对动量额外乘 `BRAKE_DECAY`；只靠原版后退只能“短暂停一下”，松手动量就把速度托回去了。
+
+## 双板 vs 单板（现行为）
+
+| | 双板 | 单板 |
+|---|---|---|
+| 朝向 | **锁定**（穿上板那一刻），转视角**不**带动板 | 锁定（穿上板那一刻），视角可自由转 ±90° |
+| 转向 | **只有 A / D**（`SKI_TURN_RATE_DEGREES` 3°/tick），A 左 D 右 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
+| 前进 | W / S（原版移动，沿锁定朝向） | W/S 只做前倾 / 后倾（**不加推力**） |
+| 左右 | A / D 只转向，**不横移** | A / D 沿身体左右**平移** |
 
 ## 约定与坑（细节见 Hermes 技能）
 

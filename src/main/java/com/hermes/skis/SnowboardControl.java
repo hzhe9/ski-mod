@@ -48,6 +48,8 @@ public final class SnowboardControl {
 	private static final float TURN_RATE_DEGREES = 2.0F;
 	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
+	/** 双板：按 A / D 时锁定朝向每 tick 转多少度（双板只有 A / D 能操控转向，视角不参与）。 */
+	private static final float SKI_TURN_RATE_DEGREES = 3.0F;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -145,21 +147,38 @@ public final class SnowboardControl {
 	 */
 	public static float applyCarve(Entity entity, Input input, double speed) {
 		if (input == null || (!input.forward() && !input.backward())) {
-			// 只在“压刃”时切雪：光按 A / D 是纯横移，不加前冲、也不转向
+			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向
 			return 0.0F;
 		}
+		int entityId = entity.getId();
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
-		if (side == 0.0D) {
-			// 没按左右：只要滑得够快，光前 / 后倾也能压刃转向 —— 前倾走一边，后倾走另一边
+		double turn;
+		if (side != 0.0D) {
+			turn = input.backward() ? -side : side;   // 有侧压：后倾＝后刃（反向）
+		} else {
+			// 只用前 / 后倾：把滑行方向朝 **身体前方**（W）/ **身体后方**（S）摆。
+			// 这样“往左滑”和“往右滑”按同一个键效果才一致 —— 之前用固定左 / 右转的符号，
+			// 结果是往左滑按 W 朝前、往右滑按 W 朝后（用户报的正是这个）。
 			if (speed < CARVE_MIN_SPEED) {
 				return 0.0F;
 			}
-			side = input.forward() ? 1.0D : -1.0D;
-		} else if (input.backward()) {
-			side = -side;   // 后倾＝后刃：同样的侧压，转向与前倾相反（“S 应该是向后”）
+			Vec3 motion = entity.getDeltaMovement();
+			Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+			if (horizontal.lengthSqr() < 1.0E-6D) {
+				return 0.0F;
+			}
+			Vec3 front = frontLocked(entityId, entity.getYRot());
+			Vec3 target = input.forward() ? front : front.scale(-1.0D);
+			// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大＝左转
+			double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
+			double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
+			double diff = Mth.wrapDegrees((float) (goal - current));
+			if (Math.abs(diff) < TURN_RATE_DEGREES) {
+				return 0.0F;   // 已经摆到目标方向，别再转
+			}
+			turn = diff > 0.0D ? 1.0D : -1.0D;
 		}
-		int entityId = entity.getId();
-		float delta = (float) (side * TURN_RATE_DEGREES);   // +＝左转（yaw 增大），-＝右转
+		float delta = (float) (turn * TURN_RATE_DEGREES);
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		rotateVelocity(entity, delta);
 		return delta;
@@ -184,6 +203,16 @@ public final class SnowboardControl {
 		double z = horizontal.z * cos + horizontal.x * sin;
 		entity.setDeltaMovement(x, motion.y, z);
 		entity.hurtMarked = true;
+	}
+
+	/** 转锁定朝向（双板的 A / D 转向用）。 */
+	public static void turnBody(int entityId, float degrees) {
+		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + degrees);
+	}
+
+	/** 双板 A/D 转向速率（度/tick）。 */
+	public static float skiTurnRateDegrees() {
+		return SKI_TURN_RATE_DEGREES;
 	}
 
 	/** 玩家当前按的左右：+1 = 身体左侧，-1 = 身体右侧，0 = 没按。 */
