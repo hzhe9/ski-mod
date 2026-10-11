@@ -7,8 +7,8 @@
 | id | 名称 | 槽位 | 说明 |
 |---|---|---|---|
 | `skis:modern_ski` | 现代滑雪板（双板） | 脚部（靴子） | 两块平行的板，两腿各向外平移 0.9 单位 |
-| `skis:snowboard` | 现代滑雪单板 | 脚部（靴子） | 一只板（宽 9、长 24 单位），双脚横跨、鸭子站姿外撇 18°、前后错开；穿上后**完全站定、身体不跟视角转**（见下「单板」） |
-| `skis:ski_pole` | 滑雪杖 | 手 | 右键撑杖 → 一次摆臂 + 一段逐渐衰减的冲刺（`main` 分支） |
+| `skis:snowboard` | 现代滑雪单板 | 脚部（靴子） | 一只板（宽 9、长 24 单位），两脚**平行并列**站在板上；穿上后完全站定、身体不跟视角转，只有 A/D 能沿身体左右平移（见下「单板」） |
+| `skis:ski_pole` | 滑雪杖 | 手 | 右键撑杖 → 一次摆臂 + 一段逐渐衰减的冲刺（`main` 分支）；手上是 3D 长杖，物品栏是标准 2D 图标 |
 
 配方：双板 = 铁锭×2 + 木板×3（`I I` / `PPP`）；单板 = 木板×5 + 铁锭×1（`PPP` / `PIP`）；滑雪杖 = 铁粒×1 + 木棍×2（`I` / `S` / `S`，一次出 2 根）。
 
@@ -49,6 +49,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `textures/item/modern_ski.png` | 16×16 | 双板物品图标 |
 | `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区） |
+| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖**物品栏图标**（`pole_icon()` 画的斜杖，GUI 用） |
 | `textures/item/snowboard.png` | 16×16 | 单板物品图标 |
 | `textures/entity/ski_board.png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头） |
 | `textures/entity/snowboard.png` | 128×32 | 单板脚上模型 |
@@ -80,16 +81,18 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `STEER_MAX_HEIGHT` | 1.0 格 | 脚底离地不超过这个高度才允许转向，再高锁死方向 |
 | `STEER_RATE` | 0.2 | 每 tick 朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）；单板不参与方向 |
 
-### 单板：人板一体、完全站定 `SnowboardControl.java`
+### 单板：人板一体 `SnowboardControl.java`
 
-穿上单板时**模型完全静止**：
+穿上单板时**人板固定成一个朝向**，身体不跟视角转，只能整体左右平移：
 
 | 操作 | 行为 |
 |---|---|
-| WASD | **没有任何反应** —— 客户端 `ClientInputMixin` 把 `ClientInput#getMoveVector` 清零；空格（`makeJump`）同样被取消 |
-| 位置 | 完全锁住：客户端每 tick 把水平速度清零，坡上 / 冰上也不会自己滑 |
+| A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
+| W / S | **没有任何反应**（前后分量直接丢掉） |
+| 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
-| 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
+| 身体状况 | **朝向不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
+| 停住 | 松开 A/D 立刻停：客户端每 tick 把水平速度清零（坡上 / 冰上也不会自己滑） |
 | 滑行物理 | 一律不施加：`SkiGlide` 对单板直接跳过（无动量、无下落加速、无雪面推进） |
 | 点杖冲刺 | 单板时不给冲刺（`SkiBoost.burst` 直接 return） |
 | 换朝向 | 把板脱下来再穿上（重新锁定） |
@@ -111,9 +114,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 常量 | 位置 | 当前值 | 作用 |
 |---|---|---|---|
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
-| `BOARD_STANCE_DEGREES` | `SkiStance` | 18 | 单板：鸭子站姿外撇角度 |
-| `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：整组（板+板头+鞋）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧（腿位常量要同步翻） |
-| `BOARD_FRONT_LEG_X/Z`、`BOARD_BACK_LEG_X/Z` | `SkiStance` | -5.5/-1.9、2.5/1.9 | 单板：两条腿在**模型坐标**里的位置（板上坐标按 90° 映射 `(x,z)→(z,-x)` 换算，保证腿落在板上与鞋重合） |
+| `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
+| `BOARD_LEG_SPREAD` | `SkiStance` | 4.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
@@ -124,8 +126,10 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 ### 模型几何
 
 - 双板 `SkiBoardModel`：板宽 3、厚 1、长 22（前 12.5 / 后 9.5 ≈ 前 57%，贴近现实固定器位置）、板头 box(3,1,2)
-- 单板 `SnowboardModel`：板宽 9、厚 1、长 24（前 14 / 后 10）、板头 box(9,1,2)、两只鞋 box(4,6,4)
-- 滑雪杖 `models/item/ski_pole.json`：杖身总长 24.75 单位（= 初版 15 单位 ×1.65）、挡雪盘随杖尖下移；物品栏用另一套**短模型** `ski_pole_gui.json`（GUI 只显示 y 0~16 这段，长杖会被裁掉，所以按原版三叉戟的做法用 `display_context` 分开）
+- 单板 `SnowboardModel`：板宽 9、厚 1、长 24（前 14 / 后 10）、板头 box(9,1,2)，整组绕 Y 转 90° 横在脚下；两只鞋 box(4,6,4) **建在模型根节点下**（与腿同一坐标系、同一横向偏移 `BOARD_LEG_SPREAD`）—— 放进转了 90° 的板组里会让鞋与腿朝向差 90°，看起来就是“脚歪了”
+- 滑雪杖 `models/item/ski_pole.json`：杖身总长 24.75 单位（= 初版 15 单位 ×1.65）、挡雪盘随杖尖下移。**GUI 只显示模型 y 0~16 这段**，所以：
+  - 物品栏走 `ski_pole_gui.json`（标准 **2D 图标**：`parent: item/generated` + `layer0: skis:item/ski_pole_icon`），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
+  - 长模型自己的 `display.gui` 另给了 `scale 0.55 + translation.y 1.0` 兜底 —— 万一某个上下文没命中 case 落到 fallback，整根杖也能完整落在框内，不会只剩上半截。
 
 ## 架构速览
 
@@ -136,8 +140,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进 |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
-| `SnowboardControl.java` | 单板状态：锁住身体朝向（`yBodyRot` 每 tick 写回）；「不能移动」由客户端 `ClientInputMixin` + `SkisClient` 的 tick 负责 |
-| `mixin/client/ClientInputMixin.java` | 穿单板时清零 `ClientInput#getMoveVector` 与 `makeJump` |
+| `SnowboardControl.java` | 单板状态：锁住身体朝向（`yBodyRot` 每 tick 写回）；输入改写与「站定」由 `ClientInputMixin` + `SkisClient` 的 tick 负责 |
+| `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量、取消 `makeJump` |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |
@@ -156,4 +160,5 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 持续施加速度后要置 `player.hurtMarked = true`，否则服务端不同步、客户端会和你抢速度
 - 肢体 `zRot` 符号：-x 侧肢体正 zRot = 末端向外；搞反会让垂在身侧的长物品内倾穿模
 - 渲染状态每帧重建，**不要**把跨帧状态挂在它上面（用静态表 + 实体 id）
+- **GUI 里只显示模型 y 0~16**：长物品（杖/枪）在物品栏会被裁掉下半截；用 `display_context` 分流一个 2D 图标模型是正解，**长模型自己也留一份 GUI 缩放兜底**（select 没命中时不会只剩半截）
 - 同一个 mod id 的 jar 不能共存，用 `.jar.disabled` 切换
