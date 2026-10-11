@@ -18,7 +18,7 @@ public final class SkisControl {
 	 * <p>注意实际增量是 {@code 基数 × √(累计下落格数)}（见 {@link SkiGlide}）——
 	 * <b>越掉越快不起来</b>：掉得越多，每多掉 1 格带来的增量越小（用户要求“增长量反而越来越小”）。
 	 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
+	private static final double FALL_GAIN_PER_BLOCK = 0.1D;
 
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;

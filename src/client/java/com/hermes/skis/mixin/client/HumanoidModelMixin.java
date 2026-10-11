@@ -46,8 +46,8 @@ public abstract class HumanoidModelMixin {
 	private static final float GLIDE_LEAN = 0.05F;
 	/** 手臂向外的滚转角（正负对称，保证两根滑雪杖平行、不向内倾斜）。 */
 	private static final float ARM_OUTWARD_ROLL = 0.10F;
-	/** 单板滑行时空着的那只手的固定前抬角（弧度）：0 = 垂在身侧，负值 = 向前抬。 */
-	private static final float FREE_ARM_XROT = -0.25F;
+	/** 单板滑行时两只手的固定前抬角（弧度）：0 = 垂在身侧，负值 = 向前抬。微微抬起就够。 */
+	private static final float FREE_ARM_XROT = -0.45F;
 	/** 单板滑行时空着的那只手向外张开的滚转角。 */
 	private static final float FREE_ARM_ROLL = 0.15F;
 
