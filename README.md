@@ -76,7 +76,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `MAX_SPEED`（单板） | 0.55 格/tick | 单板速度上限 ≈ 11 m/s ≈ 40 km/h（参照：原版步行 0.216、疾跑 0.281、创造飞行 0.545 格/tick） |
 | `MAX_SPEED`（双板） | 1.4 格/tick | 双板速度上限 ≈ 100 km/h |
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
-| `MOMENTUM_DECAY` | 0.993 | 滑行动量每 tick 保留比例（半衰期 ≈ 5 秒）＝ 有效摩擦力（双板；原 0.985 太涩） |
+| `MOMENTUM_DECAY` | 0.99 | 滑行动量每 tick 保留比例 ＝ 有效摩擦力（双板；0.985 太涩 → 0.993 → 用户定 0.99） |
 | `ADD` / `MIN_PEAK` | 0.06 / 0.32 | 滑雪杖助推（原 0.1 / 0.45，用户要“慢一点”） |
 | `BOARD_MOMENTUM_DECAY` | 0.996 | 单板专用、更滑：切雪转向时速度不该被地面摩擦一点点啃掉 |
 | `BRAKE_DECAY` | 0.90 | **双板按 S＝刹车**：动量每 tick 再乘这个系数（≈半秒停住），松开后不会被动量拉回原速 |
@@ -138,7 +138,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `CARVE_MIN_SPEED` | `SnowboardControl` | 0.05 格/tick | 没按 A/D 时，光靠前/后倾触发 carve 所需的最低滑速 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
-| `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
+| `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾（单板腿位） |
+| `SKI_LEG_TILT` | `HumanoidModelMixin` | -0.15 | **双板**：腿（身体下半部分）往后倾出去的角度，配合前倾的上身 |
+| `ARM_REST` / `RAISE_FRACTION` | `HumanoidModelMixin` | -0.55 / 0.2 | 持杖静止时手的位置（**不举到最高**，往下放一点）/ 右键动画里“先举到最高”所占比例 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
 | `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | 0.0 / 0.28 | 单板滑行时**两只手**的姿势：`xRot`=0（**不前抬**）、`zRot`=0.28 rad ≈ 16°（**向两侧微微抬起**，左右对称）。不复用会走原版走路摆臂 |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |

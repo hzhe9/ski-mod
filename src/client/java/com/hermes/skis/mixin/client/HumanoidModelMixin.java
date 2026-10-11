@@ -30,14 +30,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class HumanoidModelMixin {
 	/** 屈膝角度（弧度）。 */
 	private static final float GLIDE_KNEE_BEND = 0.08F;
+	/**
+	 * 双板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
+	 * 上半身由 {@link #GLIDE_LEAN} 前倾，合起来就是“上身压在前、下身留在后”的滑行姿势。
+	 */
+	private static final float SKI_LEG_TILT = -0.15F;
 	/** 腿部枢轴的原始高度。 */
 	private static final float LEG_PIVOT_Y = 12.0F;
 	/** 划动中心角度（最高处与最低处由它加减幅度得到）。 */
 	private static final float ROW_CENTER = -0.35F;
 	/** 划动幅度：最高处 = ROW_CENTER - 幅度（前摆到底），最低处 = ROW_CENTER + 幅度（后摆到底）。 */
 	private static final float ROW_AMPLITUDE = 0.95F;
-	/** 最高处：手臂静止时停在的位置（准备撑杖）。 */
+	/** 最高处（举起到底）。 */
 	private static final float ARM_TOP = ROW_CENTER - ROW_AMPLITUDE;
+	/** 静止时手杖停的位置：不要举到最高，往下放一点。 */
+	private static final float ARM_REST = -0.55F;
+	/** 右键动画里“先举到最高”这一段占的比例，剩下的时间才往下摆、再收回。 */
+	private static final float RAISE_FRACTION = 0.2F;
 	/** 最低处：一次撑杖摆到的地方。 */
 	private static final float ARM_BOTTOM = ROW_CENTER + ROW_AMPLITUDE;
 	/** 下摆占整段动画的比例，剩下的时间收回最高处。 */
@@ -69,29 +78,32 @@ public abstract class HumanoidModelMixin {
 		if (board) {
 			// 单板：与双板一样「两腿平行、向外岔开」——不做鸭子站姿、不前后错位
 			// （横向偏移与 SnowboardModel 的鞋位同值，否则脚会与鞋错开）
-			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD);
-			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD);
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, GLIDE_KNEE_BEND);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, GLIDE_KNEE_BEND);
 		} else {
-			// 双板：两腿只横向拉开、保持平行
-			placeLeg(self.rightLeg, -SkiStance.legOffsetX());
-			placeLeg(self.leftLeg, SkiStance.legOffsetX());
+			// 双板：两腿只横向拉开、保持平行；下半身往后倾出去一点（SKI_LEG_TILT）
+			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), SKI_LEG_TILT);
+			placeLeg(self.leftLeg, SkiStance.legOffsetX(), SKI_LEG_TILT);
 		}
 
 		// 手臂：只有拿着滑雪杖的那只手才抬起来摆（左手持杖抬左手、右手持杖抬右手；只穿板不抬）
 		if (!state.isUsingItem) {
-			float armRot = ARM_TOP;
+			float armRot = ARM_REST;   // 默认：杖放低一点（不举到最高）
 			if (state instanceof AvatarRenderState avatar) {
 				int left = SkiState.swingLeft(avatar.id);
 				if (left > 0) {
+					// 一次撑杖：0 → RAISE_FRACTION 先举到最高，然后往下摆，最后收回 ARM_REST
 					float progress = (SkiState.swingTicks() - left) / (float) SkiState.swingTicks();   // 0 → 1
-					if (progress < DOWN_FRACTION) {
-						// 下摆：从最高处一口气压到最后处（先快后慢）
-						float t = progress / DOWN_FRACTION;
-						armRot = Mth.lerp(1.0F - (1.0F - t) * (1.0F - t), ARM_TOP, ARM_BOTTOM);
+					float downEnd = RAISE_FRACTION + (1.0F - RAISE_FRACTION) * DOWN_FRACTION;
+					if (progress < RAISE_FRACTION) {
+						float t = progress / RAISE_FRACTION;
+						armRot = Mth.lerp(t * t * (3.0F - 2.0F * t), ARM_REST, ARM_TOP);   // 举起（平滑）
+					} else if (progress < downEnd) {
+						float t = (progress - RAISE_FRACTION) / (downEnd - RAISE_FRACTION);
+						armRot = Mth.lerp(1.0F - (1.0F - t) * (1.0F - t), ARM_TOP, ARM_BOTTOM);   // 下摆（先快后慢）
 					} else {
-						// 收回：平滑地回到最高处，衔接下一次撑杖
-						float t = (progress - DOWN_FRACTION) / (1.0F - DOWN_FRACTION);
-						armRot = Mth.lerp(t * t * (3.0F - 2.0F * t), ARM_BOTTOM, ARM_TOP);
+						float t = (progress - downEnd) / (1.0F - downEnd);
+						armRot = Mth.lerp(t * t * (3.0F - 2.0F * t), ARM_BOTTOM, ARM_REST);   // 收回
 					}
 				}
 			}
@@ -124,12 +136,12 @@ public abstract class HumanoidModelMixin {
 		arm.zRot = zRot;
 	}
 
-	/** 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）。 */
-	private static void placeLeg(ModelPart leg, float x) {
+	/** 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）；xRot 决定前后倾。 */
+	private static void placeLeg(ModelPart leg, float x, float xRot) {
 		leg.x = x;
 		leg.y = LEG_PIVOT_Y;
 		leg.z = 0.0F;
-		leg.xRot = GLIDE_KNEE_BEND;
+		leg.xRot = xRot;
 		leg.yRot = 0.0F;
 		leg.zRot = 0.0F;
 	}
