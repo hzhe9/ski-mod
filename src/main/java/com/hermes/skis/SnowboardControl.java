@@ -79,10 +79,20 @@ public final class SnowboardControl {
 		return TILT.getOrDefault(entityId, 0);
 	}
 
-	/** 身体前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
+	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
 	public static Vec3 front(int entityId, float yaw) {
 		float rad = yaw * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(rad), 0.0D, Mth.cos(rad));
+	}
+
+	/**
+	 * 沿<b>锁定的身体朝向</b>的前方 —— 倾斜的偏移方向、静止时的滑行方向都用它。
+	 *
+	 * <p><b>别用视角朝向</b>（{@code player.getYRot()}）：那是鼠标看的那个方向，玩家一转视野它就变，
+	 * 偏移会绕着玩家转圈（症状：转视野时相机甩到身体外面去）。身体朝上是锁死的，才是不动的那个基准。
+	 */
+	public static Vec3 frontLocked(int entityId, float fallbackYaw) {
+		return front(entityId, bodyYaw(entityId, fallbackYaw));
 	}
 
 	public static float tiltDegrees() {

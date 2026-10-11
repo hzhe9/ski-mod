@@ -181,7 +181,7 @@ public final class SkiGlide {
 		}
 		if (SnowboardControl.isSnowboard(player)) {
 			// 单板静止时沿锁定的身体前方，而不是视线（视角可以随便转）
-			return SnowboardControl.front(player.getId(), player.getYRot());
+			return SnowboardControl.frontLocked(player.getId(), player.getYRot());
 		}
 		Vec3 look = player.getLookAngle();
 		Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);

@@ -140,15 +140,17 @@ def ski_board():
 def pole_icon():
     """物品栏图标：一根竖直的滑雪杖（握把在上、杖身居中、挡雪盘在下）。"""
     img = blank()
-    # 杖身（竖直居中）
-    fill(img, 7, 2, 9, 14, SHAFT)
-    fill(img, 7, 2, 8, 14, SHAFT_HI)          # 左半高光
-    # 握把（顶部加粗、更深）
-    fill(img, 5, 0, 11, 3, GRIP)
-    fill(img, 5, 0, 11, 1, GRIP_HI)
-    # 挡雪盘（靠近杖尖的一圈）
-    fill(img, 3, 10, 13, 12, BASKET)
-    fill(img, 3, 11, 13, 12, BASKET_DK)
+    # 杖身（竖直，贯穿上下）
+    fill(img, 7, 1, 9, 15, SHAFT)
+    fill(img, 7, 1, 8, 15, SHAFT_HI)          # 左半高光
+    outline = (120, 132, 144, 255)
+    fill(img, 9, 1, 10, 15, outline)          # 右缘描边，让细杆更清楚
+    # 握把（顶部，比杖身略粗、更深）
+    fill(img, 6, 0, 10, 4, GRIP)
+    fill(img, 6, 0, 10, 1, GRIP_HI)
+    # 挡雪盘（靠近杖尖：距底 2 像素）
+    fill(img, 4, 12, 12, 14, BASKET)
+    fill(img, 4, 13, 12, 14, BASKET_DK)
     # 杖尖
     fill(img, 7, 14, 9, 16, SHAFT)
     return img
