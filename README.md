@@ -167,7 +167,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
 - ⚠️ **MC 里 yaw 增大是「往右转」**（yaw=0 朝 +z，yaw=90 朝 -x）：单板 carve 的侧压符号按这条写（`turn = -side` 前倾 / `side` 后倾）。
-- 双板**不要用 `turnBody` 每 tick 转朝向**（试过，用户判“做得很烂”：转向慢且和方向渐变打架）—— A/D 就该走 `desiredDirection` 的方向渐变，只是基准换成锁定朝向。
+- 双板需求拆成两件独立的事：① **视角不影响模型左右朝向** ② **A/D 要转模型朝向**。做法就是 `ensureLocked` + `steerSkis`(turnBody) + `SkisClient` 写 `yBodyRot`；`desiredDirection` 对双板只认 W/S（沿锁定朝向），**不要**把 A/D 当横向分量（那样就成了“只摆滑行方向、模型不动”）。
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
@@ -178,7 +178,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | | 双板 | 单板 |
 |---|---|---|
 | 朝向 | **锁定**（穿上板那一刻），转视角**不**带动板 | 锁定（穿上板那一刻），视角可自由转 ±90° |
-| 转向 | **A / D 直接让滑行方向左右摆**（原版那套：`SkiControl` 方向渐变，`STEER_RATE` 0.2），基准是锁定朝向 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
+| 转向 | **A / D 转锁定朝向本身**（`steerSkis` → `turnBody`，`SKI_TURN_RATE_DEGREES` 3°/tick，A 左 D 右）—— 模型和板跟着一起转 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
 | 前进 | W / S（原版移动，沿锁定朝向） | W/S 只做前倾 / 后倾（**不加推力**） |
 | 左右 | A / D 只转向，**不横移** | A / D 沿身体左右**平移** |
 

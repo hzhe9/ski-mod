@@ -154,8 +154,7 @@ public final class SnowboardControl {
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
 		double turn;
 		if (side != 0.0D) {
-			// yaw 增大＝右转，所以前倾（压板头）时 A（side=+1）要往左转 → 取 -side；后倾（后刃）反过来
-			turn = input.backward() ? side : -side;
+			turn = input.backward() ? -side : side;   // 有侧压：后倾＝后刃（反向）
 		} else {
 			// 只用前 / 后倾：把滑行方向朝 **身体前方**（W）/ **身体后方**（S）摆。
 			// 这样“往左滑”和“往右滑”按同一个键效果才一致 —— 之前用固定左 / 右转的符号，
