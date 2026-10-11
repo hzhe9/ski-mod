@@ -18,7 +18,9 @@ import net.minecraft.world.phys.Vec3;
  *       —— 头（视角）能随便转、身体不跟着转；</li>
  *   <li><b>只能左右平移</b>：A / D 由客户端 {@code ClientInputMixin} 换算到身体左右轴，前后分量一律丢掉；</li>
  *   <li><b>W 前倾 / S 后倾</b>：整个人连同脚上的板绕脚底一起倾（{@link #tiltDegrees()}，渲染层见
- *       {@code EntityTiltMixin}），相机也一起（{@code CameraTiltMixin}）—— 只改姿态，<b>不给推进</b>。</li>
+ *       {@code EntityTiltMixin}），相机位置也跟着（{@code CameraTiltMixin}）；倾斜是<b>渐进</b>的
+ *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
+ *   <li><b>carve</b>：前倾或后倾 ＋ A / D → 身体朝向持续转（{@link #applyCarve}）＋ 沿身体前方补前冲。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -28,8 +30,10 @@ public final class SnowboardControl {
 
 	/** 实体 id → 穿上单板时锁定的身体朝向（度）。 */
 	private static final Map<Integer, Float> BODY_YAW = new ConcurrentHashMap<>();
-	/** 实体 id → 俯仰姿态（+1 前倾 / -1 后倾），客户端每 tick 从按键刷新，供模型姿态读取。 */
-	private static final Map<Integer, Integer> TILT = new ConcurrentHashMap<>();
+	/** 实体 id → 俯仰姿态（当前值，平滑后；正 = 前倾 / 负 = 后倾），供模型与相机读取。 */
+	private static final Map<Integer, Float> TILT_VALUE = new ConcurrentHashMap<>();
+	/** 实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
+	private static final Map<Integer, Integer> TILT_TARGET = new ConcurrentHashMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -45,6 +49,10 @@ public final class SnowboardControl {
 	private static final double CARVE_PUSH = 0.02D;
 	/** carve 前冲的速度上限：滑到这么快就不再补，免得按着 W + D 一路飙到极速（格/tick）。 */
 	private static final double CARVE_MAX_SPEED = 0.5D;
+	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
+	private static final float TILT_LERP = 0.25F;
+	/** 与目标的差距小于它就当作到位。 */
+	private static final float TILT_EPSILON = 0.01F;
 
 	private SnowboardControl() {
 	}
@@ -65,12 +73,14 @@ public final class SnowboardControl {
 
 	public static void forget(int entityId) {
 		BODY_YAW.remove(entityId);
-		TILT.remove(entityId);
+		TILT_VALUE.remove(entityId);
+		TILT_TARGET.remove(entityId);
 	}
 
 	public static void forgetAll() {
 		BODY_YAW.clear();
-		TILT.clear();
+		TILT_VALUE.clear();
+		TILT_TARGET.clear();
 	}
 
 	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
@@ -78,18 +88,29 @@ public final class SnowboardControl {
 		return BODY_YAW.getOrDefault(entityId, fallback);
 	}
 
-	/** 客户端每 tick 记录俯仰姿态：+1 前倾 / 0 无 / -1 后倾。 */
-	public static void setTilt(int entityId, int tilt) {
-		if (tilt == 0) {
-			TILT.remove(entityId);
+	/** 客户端每 tick 记录俯仰姿态<b>目标</b>：+1 前倾 / 0 直立 / -1 后倾。 */
+	public static void setTiltTarget(int entityId, int target) {
+		TILT_TARGET.put(entityId, target);
+	}
+
+	/** 客户端每 tick 推进一步平滑：当前值按 {@link #TILT_LERP} 向目标靠拢（所以倾斜是渐进的）。 */
+	public static void tickTilt(int entityId) {
+		int target = TILT_TARGET.getOrDefault(entityId, 0);
+		float current = TILT_VALUE.getOrDefault(entityId, 0.0F);
+		float next = current + (target - current) * TILT_LERP;
+		if (Math.abs(target - next) < TILT_EPSILON) {
+			next = target;
+		}
+		if (next == 0.0F) {
+			TILT_VALUE.remove(entityId);
 		} else {
-			TILT.put(entityId, tilt);
+			TILT_VALUE.put(entityId, next);
 		}
 	}
 
-	/** 当前俯仰姿态（+1 / 0 / -1），模型姿态用。 */
-	public static int tilt(int entityId) {
-		return TILT.getOrDefault(entityId, 0);
+	/** 当前俯仰姿态（平滑后的浮点值：1 = 完全前倾，-1 = 完全后倾），模型与相机用它。 */
+	public static float tiltValue(int entityId) {
+		return TILT_VALUE.getOrDefault(entityId, 0.0F);
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
@@ -118,9 +139,9 @@ public final class SnowboardControl {
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
-	public static float applyCarve(int entityId, Input input, float fallbackYaw) {
-		if (input == null || !input.forward()) {
-			return 0.0F;
+	public static float applyCarve(int entityId, Input input) {
+		if (input == null || (!input.forward() && !input.backward())) {
+			return 0.0F;   // 前倾（W）或后倾（S）都算，配上 A / D 就切雪
 		}
 		double side = sideSign(input);   // +1 左 / -1 右
 		if (side == 0.0D) {

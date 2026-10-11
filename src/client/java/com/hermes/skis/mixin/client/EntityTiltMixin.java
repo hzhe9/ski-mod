@@ -32,8 +32,8 @@ public abstract class EntityTiltMixin {
 				|| avatar.feetEquipment.getItem() != SkisMod.SNOWBOARD) {
 			return;
 		}
-		int tilt = SnowboardControl.tilt(avatar.id);
-		if (tilt == 0) {
+		float tilt = SnowboardControl.tiltValue(avatar.id);
+		if (tilt == 0.0F) {
 			return;
 		}
 		poseStack.mulPose(Axis.XP.rotationDegrees(-tilt * SnowboardControl.tiltDegrees()));

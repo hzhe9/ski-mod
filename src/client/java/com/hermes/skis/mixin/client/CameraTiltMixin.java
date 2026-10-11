@@ -32,8 +32,8 @@ public abstract class CameraTiltMixin {
 		if (!(this.entity instanceof Player player) || !SnowboardControl.isSnowboard(player)) {
 			return null;
 		}
-		int tilt = SnowboardControl.tilt(player.getId());
-		if (tilt == 0) {
+		float tilt = SnowboardControl.tiltValue(player.getId());
+		if (tilt == 0.0F) {
 			return null;
 		}
 		double eye = player.getEyeHeight();

@@ -88,9 +88,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 操作 | 行为 |
 |---|---|
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
-| W | **前倾**：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
+| W | **前倾**（**渐进**到位，不瞬跳）：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
-| **W + A/D（carve）** | **切雪转弯**：前倾与横移同时按住时，身体朝向每 tick 朝那一侧转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），同时沿身体前方补一点前冲（`CARVE_PUSH`，速度到 `CARVE_MAX_SPEED` 就停）—— 与横移合成出**右前方 / 左前方**，一直按着就在雪地上画圈 |
+| **W/S + A/D（carve）** | **切雪转弯**：**前倾或后倾**与横移同时按住时，身体朝向每 tick 朝那一侧转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），同时沿身体前方补一点前冲（`CARVE_PUSH`，速度到 `CARVE_MAX_SPEED` 就停）—— 与横移合成出**右前方 / 左前方**，一直按着就在雪地上画圈 |
 | 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（90°），合计 180 —— 扭不到背后（`SnowboardHeadLimitMixin` 在 `Entity#turn` 末尾夹住 yaw；carve 转动身体后客户端 tick 也会把视角拉回限制内） |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
@@ -120,6 +120,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
+| `TILT_LERP` | `SnowboardControl` | 0.25 | 俯仰姿态每 tick 向目标靠拢的比例（≈10 tick 到位）—— 倾斜是渐进的 |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
 | `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 90.0 度 | 头（视角）相对锁定身体朝向的最大偏转，左右各一份 |
 | `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |
