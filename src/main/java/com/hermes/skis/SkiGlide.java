@@ -37,7 +37,11 @@ public final class SkiGlide {
 	private static final double GLIDE_PUSH = 0.055D;
 
 	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
-	private static final double FALL_GAIN_EXPONENT = 0.7D;
+	private static final double FALL_GAIN_EXPONENT = 0.8D;
+	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
+	private static final double STEP_UP_PENALTY = 0.04D;
+	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
+	private static final double STEP_UP_MIN_HEIGHT = 0.5D;
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
 	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
@@ -107,6 +111,8 @@ public final class SkiGlide {
 			double down = lastY - y;
 			if (down > 0.0D) {
 				DESCEND_ACCUM.merge(id, down, Double::sum);
+			} else if (-down >= STEP_UP_MIN_HEIGHT && player.onGround()) {
+				stepUpPenalty(player);   // 滑上去一格：按每格 STEP_UP_PENALTY 减速
 			}
 		}
 
@@ -120,7 +126,7 @@ public final class SkiGlide {
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
 		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT —— 边际递减，掉得越多每格给的越少
-		// （用户：“下落得越多加速的增长量反而越来越小”，随后又要求“衰减改小一点点”→ 指数从 0.5 提到 0.7）
+		// （用户：“下落得越多加速的增长量反而越来越小”，随后两次要求衰减更缓：0.5 → 0.7 → 0.8）
 		boolean board = SnowboardControl.isSnowboard(player);
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
 		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
@@ -144,6 +150,28 @@ public final class SkiGlide {
 		AttributeInstance attribute = player.getAttribute(Attributes.STEP_HEIGHT);
 		if (attribute != null) {
 			attribute.setBaseValue(value);
+		}
+	}
+
+	/**
+	 * 滑上一格台阶的减速：每上一格扣 {@link #STEP_UP_PENALTY} 格/tick。
+	 *
+	 * <p>动量要一起扣 —— 不然下一步 {@code applyMomentum} 又用旧的动量把速度托回来，等于没减。
+	 */
+	private static void stepUpPenalty(ServerPlayer player) {
+		Integer id = player.getId();
+		Vec3 motion = player.getDeltaMovement();
+		double speed = motion.horizontalDistance();
+		if (speed > 1.0E-4D) {
+			double factor = Math.max(0.0D, (speed - STEP_UP_PENALTY) / speed);
+			player.setDeltaMovement(motion.x * factor, motion.y, motion.z * factor);
+			player.hurtMarked = true;
+		}
+		double momentum = MOMENTUM.getOrDefault(id, 0.0D) - STEP_UP_PENALTY;
+		if (momentum < MOMENTUM_MIN) {
+			MOMENTUM.remove(id);
+		} else {
+			MOMENTUM.put(id, momentum);
 		}
 	}
 
