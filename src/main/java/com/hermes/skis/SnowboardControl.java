@@ -166,6 +166,26 @@ public final class SnowboardControl {
 		return delta;
 	}
 
+	/**
+	 * 把实体的水平速度绕 Y 轴转 {@code degrees}（与身体朝向同向）——
+	 * 转向时速度要跟着拐，否则“从高处落下来带着的那份速度”不听使唤。
+	 * 服务端与客户端都要调用（本地玩家的位置权威在客户端，光服务端转看不见效果）。
+	 */
+	public static void rotateVelocity(Entity entity, float degrees) {
+		Vec3 motion = entity.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		if (horizontal.lengthSqr() < 1.0E-6D) {
+			return;
+		}
+		double rad = Math.toRadians(degrees);
+		double cos = Math.cos(rad);
+		double sin = Math.sin(rad);
+		double x = horizontal.x * cos - horizontal.z * sin;
+		double z = horizontal.z * cos + horizontal.x * sin;
+		entity.setDeltaMovement(x, motion.y, z);
+		entity.hurtMarked = true;
+	}
+
 	public static double carvePush() {
 		return CARVE_PUSH;
 	}
