@@ -23,6 +23,9 @@ public final class SkisControl {
 	/** 双板锁定朝向：实体 id → yaw（穿板那一刻的值，之后只被 A / D 改）。 */
 	private static final Map<Integer, Float> HEADING = new ConcurrentHashMap<>();
 
+	/** 视角能偏离身体朝向多少度（左右各 90°，一共 180°）。 */
+	public static final float VIEW_LIMIT_DEGREES = 90.0F;
+
 	/** 按 A / D 时锁定朝向每 tick 转多少度。 */
 	private static final float TURN_RATE_DEGREES = 3.0F;
 
