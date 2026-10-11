@@ -2,7 +2,6 @@ package com.hermes.skis.mixin.client;
 
 import com.hermes.skis.SkisMod;
 import com.hermes.skis.client.SkiStance;
-import com.hermes.skis.SnowboardControl;
 import com.hermes.skis.client.SkiState;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelPart;
@@ -107,13 +106,11 @@ public abstract class HumanoidModelMixin {
 			}
 		}
 
-		// 身体前倾（潜行时保持原版的弯腰）；单板按 W / S 再叠加前倾 / 后仰角
+		// 身体前倾（潜行时保持原版的弯腰）。
+		// 单板按 W / S 的“整个人 + 板一起倾”不在模型里做 —— 板是独立提交的模型，只改部件它不跟，
+		// 统一在 EntityTiltMixin 里转整个 poseStack。
 		if (!state.isCrouching) {
-			float lean = GLIDE_LEAN;
-			if (board && state instanceof AvatarRenderState avatar) {
-				lean += SnowboardControl.tilt(avatar.id) * SnowboardControl.tiltLean();
-			}
-			self.body.xRot = lean;
+			self.body.xRot = GLIDE_LEAN;
 		}
 	}
 

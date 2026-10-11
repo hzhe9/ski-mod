@@ -16,8 +16,8 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>身体朝向锁定</b>：穿上那一刻记下，客户端每 tick 写回 {@code yBodyRot} / {@code yBodyRotO}
  *       —— 头（视角）能随便转、身体不跟着转；</li>
  *   <li><b>只能左右平移</b>：A / D 由客户端 {@code ClientInputMixin} 换算到身体左右轴，前后分量一律丢掉；</li>
- *   <li><b>W 前倾 / S 后倾</b>：只是姿态（{@link #tiltLean()}）＋ W 额外给一点点前推（{@link #tiltPush()}），
- *       不改变朝向、也不改变移动基准。</li>
+ *   <li><b>W 前倾 / S 后倾</b>：整个人连同脚上的板绕脚底一起倾（{@link #tiltDegrees()}，渲染层实现见
+ *       {@code EntityTiltMixin}）＋ W 额外给一点点前推（{@link #tiltPush()}），不改变朝向、也不改变移动基准。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -32,8 +32,8 @@ public final class SnowboardControl {
 
 	/** 前倾（W）每 tick 沿身体前方补多少推进 —— 这就是“稍微往前”，要更明显就加大。 */
 	private static final double TILT_PUSH = 0.010D;
-	/** 前倾 / 后倾的身体俯仰角（弧度）：前倾 body.xRot += 它，后倾 -= 它。 */
-	private static final float TILT_LEAN = 0.18F;
+	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
+	private static final float TILT_DEGREES = 15.0F;
 
 	private SnowboardControl() {
 	}
@@ -91,7 +91,7 @@ public final class SnowboardControl {
 		return TILT_PUSH;
 	}
 
-	public static float tiltLean() {
-		return TILT_LEAN;
+	public static float tiltDegrees() {
+		return TILT_DEGREES;
 	}
 }
