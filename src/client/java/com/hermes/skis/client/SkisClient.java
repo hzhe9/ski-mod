@@ -17,9 +17,6 @@ import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 
 public class SkisClient implements ClientModInitializer {
-	/** 双板本地玩家上一 tick 写的身体朝向（只用于渲染插值 yBodyRotO）。 */
-	private static final Map<Integer, Float> SKI_PREV_BODY = new HashMap<>();
-
 	@Override
 	public void onInitializeClient() {
 		// 脚上的板：双板 SkiBoardModel、单板 SnowboardModel，各自一套层与贴图
@@ -59,25 +56,7 @@ public class SkisClient implements ClientModInitializer {
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				} else {
-					// ——— 双板：锁定朝向 + A / D 转向（与服务端同一套规则，这样模型转起来才跟手）———
-					SkisControl.ensureLocked(player.getId(), player.getYRot());
-					Input keys = player == client.player && client.player != null
-							? client.player.input.keyPresses : null;
-					SkisControl.steer(player, keys);
-					yaw = SkisControl.heading(player.getId(), player.getYRot());
-					// 视角锁在身体朝向 ±90°（左右一共 180°），跟单板一个规矩
-					if (player == client.player) {
-						float off = Mth.wrapDegrees(player.getYRot() - yaw);
-						float limit = SkisControl.VIEW_LIMIT_DEGREES;
-						if (Math.abs(off) > limit) {
-							player.setYRot(yaw + Mth.clamp(off, -limit, limit));
-						}
-					}
-					// yBodyRotO 必须是**上一 tick 的朝向**：写成当前值会让渲染的 rotLerp 失效，
-					// 模型每 tick 硬跳一次 —— 那正是“转起来一卡一卡”的原因。
-					player.yBodyRotO = SKI_PREV_BODY.getOrDefault(player.getId(), yaw);
-					player.yBodyRot = yaw;
-					SKI_PREV_BODY.put(player.getId(), yaw);
+					// ——— 双板：什么都别管 —— 朝向就是视角（用户定案回到最开始的状态）———
 					continue;
 				}
 				// 单板：把身体写成锁定朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。

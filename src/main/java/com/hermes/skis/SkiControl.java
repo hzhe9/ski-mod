@@ -67,14 +67,21 @@ public final class SkiControl {
 		if (SnowboardControl.isSnowboard(player)) {
 			return null;   // 单板：人板一体站定，按键不参与方向
 		}
-		// 双板：方向只沿**锁定的朝向**（视角不参与）。左右转向由 A / D 转锁定朝向本身完成
-		// （见 SkiGlide#steerSkis），所以这里**不**再把 A / D 当横向分量，否则会变成“只摆方向、模型不转”。
+		// 双板（2026-10 用户定案：回到最开始的状态）—— 以**视角**为基准，A / D 正常参与左右，
+		// 视角转多少人就朝哪走。不锁朝向、不夹视角。
 		double forward = (input.forward() ? 1.0D : 0.0D) - (input.backward() ? 1.0D : 0.0D);
-		if (forward == 0.0D) {
+		double strafe = (input.left() ? 1.0D : 0.0D) - (input.right() ? 1.0D : 0.0D);
+		if (forward == 0.0D && strafe == 0.0D) {
 			return null;
 		}
-		Vec3 front = SkisControl.front(player.getId(), player.getYRot());
-		return forward > 0.0D ? front : front.scale(-1.0D);
+		// yaw=0 朝向 +z，左手方向为 +x
+		float yaw = player.getYRot() * Mth.DEG_TO_RAD;
+		double forwardX = -Mth.sin(yaw);
+		double forwardZ = Mth.cos(yaw);
+		double leftX = Mth.cos(yaw);
+		double leftZ = Mth.sin(yaw);
+		Vec3 direction = new Vec3(forwardX * forward + leftX * strafe, 0.0D, forwardZ * forward + leftZ * strafe);
+		return direction.lengthSqr() > 1.0E-4D ? direction.normalize() : null;
 	}
 
 	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格。单板的前倾推进也用它。 */

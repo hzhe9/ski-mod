@@ -49,7 +49,7 @@ public final class SnowboardControl {
 	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/** 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大；用户定案 0.12）。 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.12D;
+	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.5D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */

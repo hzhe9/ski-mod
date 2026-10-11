@@ -1,12 +1,10 @@
 package com.hermes.skis.mixin.client;
 
-import com.hermes.skis.SkisMod;
 import com.hermes.skis.SnowboardControl;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -38,12 +36,7 @@ public abstract class ClientInputMixin {
 			return;
 		}
 		if (!SnowboardControl.isSnowboard(player)) {
-			// ——— 双板：A / D 只用来**转向**，不能同时把人往旁边挪 ——
-			// 不然按住 A 就变成“一边转一边横移”，看着像绕圈而不是原地转向。前后照常留给孩子玩。
-			if (SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-				cir.setReturnValue(new Vec2(0.0F, move.y));
-			}
-			return;
+			return;   // 双板：输入原样交给原版（视角即朝向）
 		}
 		if (move.x == 0.0F) {
 			cir.setReturnValue(Vec2.ZERO);   // 前后（以及没按方向键）一律不动

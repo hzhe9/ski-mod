@@ -68,11 +68,8 @@ public final class SkiGlide {
 					// ——— 单板 ———
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					carve(player);
-				} else {
-					// ——— 双板 ———
-					SkisControl.ensureLocked(player.getId(), player.getYRot());
-					SkisControl.steer(player, player.getLastClientInput());   // A / D 转锁定朝向，模型连带板一起转
 				}
+				// 双板不做任何朝向锁定：朝向＝视角（用户 2026-10 定案回到最开始的状态）
 				trackDescent(player);
 				applyMomentum(player);
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {

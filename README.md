@@ -177,8 +177,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.12 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
-| **双板** | `SkisControl` | 锁定朝向表 `HEADING`、`steer`（A/D 转向）、`front`/`left`、**双板专属数值**（`TURN_RATE_DEGREES` 3 / `FALL_GAIN_PER_BLOCK` 0.08 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.08 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.05 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
@@ -187,10 +187,10 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | | 双板 | 单板 |
 |---|---|---|
-| 朝向 | **锁定**（穿上板那一刻），转视角**不**带动板 | 锁定（穿上板那一刻），视角可自由转 ±90° |
-| 转向 | **A / D 转锁定朝向本身**（`steerSkis` → `turnBody`，`SKI_TURN_RATE_DEGREES` 3°/tick，A 左 D 右）—— 模型和板跟着一起转 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
-| 前进 | W / S（原版移动，沿锁定朝向） | W/S 只做前倾 / 后倾（**不加推力**） |
-| 左右 | A / D 只转向，**不横移** | A / D 沿身体左右**平移** |
+| 朝向 | **不锁** —— 视角转多少人就朝哪走（用户 2026-10 定案：回到最开始的状态） | 锁定（穿上板那一刻），视角可自由转 ±90° |
+| 转向 | 视角（不用键盘转）| 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
+| 前进 | W / S（原版移动） | W/S 只做前倾 / 后倾（**不加推力**） |
+| 左右 | A / D 原版横移（视角为基准） | A / D 沿身体左右**平移** |
 
 ## 约定与坑（细节见 Hermes 技能）
 
