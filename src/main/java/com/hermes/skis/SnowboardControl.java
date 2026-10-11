@@ -46,10 +46,8 @@ public final class SnowboardControl {
 	 * 2.0 度/tick ＝ 180 度/秒 —— 一直按着就会在雪地上画圈。
 	 */
 	private static final float TURN_RATE_DEGREES = 2.0F;
-	/** carve 时每 tick 沿身体前方补多少“前冲力”（这就是“向前的动量”，与横移合成出右前方 / 左前方）。 */
-	private static final double CARVE_PUSH = 0.02D;
-	/** carve 前冲的速度上限：滑到这么快就不再补，免得按着 W + D 一路飙到极速（格/tick）。 */
-	private static final double CARVE_MAX_SPEED = 0.5D;
+	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
+	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -137,8 +135,9 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>carve 一步</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并让<b>速度方向跟着转同样的角度</b>
-	 * （不是拨到侧向）。服务端与客户端各跑一次，两边朝向与速度方向保持一致。
+	 * <b>carve 一步（只转向、不加力）</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并让
+	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）。
+	 * 服务端与客户端各跑一次，两边朝向与速度方向保持一致。
 	 *
 	 * <p>腾空也照跑（从高处落下时要能带着速度拐弯）。
 	 *
@@ -185,14 +184,6 @@ public final class SnowboardControl {
 		double z = horizontal.z * cos + horizontal.x * sin;
 		entity.setDeltaMovement(x, motion.y, z);
 		entity.hurtMarked = true;
-	}
-
-	public static double carvePush() {
-		return CARVE_PUSH;
-	}
-
-	public static double carveMaxSpeed() {
-		return CARVE_MAX_SPEED;
 	}
 
 	/** 玩家当前按的左右：+1 = 身体左侧，-1 = 身体右侧，0 = 没按。 */

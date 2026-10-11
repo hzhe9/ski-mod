@@ -189,11 +189,7 @@ public final class SkiGlide {
 		if (SnowboardControl.applyCarve(player, input, speed) == 0.0F) {
 			return;
 		}
-		if (!SkiControl.canSteer(player) || speed >= SnowboardControl.carveMaxSpeed()) {
-			return;   // 前冲这种“加力”只在贴地且还没到上限时给
-		}
-		player.addDeltaMovement(SnowboardControl.frontLocked(player.getId(), player.getYRot())
-				.scale(SnowboardControl.carvePush()));
+		// W / S 只转向、不加力；转向过程中把已有的速度用动量托住（不然摩擦会把它吃掉）
 		MOMENTUM.merge(player.getId(), player.getDeltaMovement().horizontalDistance(), Math::max);
 		clampToMaxSpeed(player);
 		player.hurtMarked = true;
@@ -225,9 +221,8 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			return side == 0.0D ? null
-					: SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
+			// 单板只看**当前移动方向**：没在动就没有方向（不加），不管下落本身朝哪
+			return null;
 		}
 		return steerDirection(player);
 	}
