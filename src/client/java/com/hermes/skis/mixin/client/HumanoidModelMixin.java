@@ -46,7 +46,7 @@ public abstract class HumanoidModelMixin {
 	/** 静止时手杖停的位置：不要举到最高，往下放一点。 */
 	private static final float ARM_REST = -0.55F;
 	/** 右键动画里“先举到最高”这一段占的比例，剩下的时间才往下摆、再收回。 */
-	private static final float RAISE_FRACTION = 0.2F;
+	private static final float RAISE_FRACTION = 0.35F;   // 举起段占比（越大＝举起越慢）
 	/** 最低处：一次撑杖摆到的地方。 */
 	private static final float ARM_BOTTOM = ROW_CENTER + ROW_AMPLITUDE;
 	/** 下摆占整段动画的比例，剩下的时间收回最高处。 */
@@ -100,7 +100,7 @@ public abstract class HumanoidModelMixin {
 						armRot = Mth.lerp(t * t * (3.0F - 2.0F * t), ARM_REST, ARM_TOP);   // 举起（平滑）
 					} else if (progress < downEnd) {
 						float t = (progress - RAISE_FRACTION) / (downEnd - RAISE_FRACTION);
-						armRot = Mth.lerp(1.0F - (1.0F - t) * (1.0F - t), ARM_TOP, ARM_BOTTOM);   // 下摆（先快后慢）
+						armRot = Mth.lerp(t * t, ARM_TOP, ARM_BOTTOM);   // 下摆：前半程慢、过半后加速扎下去（点杖）
 					} else {
 						float t = (progress - downEnd) / (1.0F - downEnd);
 						armRot = Mth.lerp(t * t * (3.0F - 2.0F * t), ARM_BOTTOM, ARM_REST);   // 收回
