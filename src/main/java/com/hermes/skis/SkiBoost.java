@@ -35,6 +35,15 @@ public final class SkiBoost {
 
 	/** 玩家实体 id → 冲刺状态。 */
 	private static final Map<Integer, Boost> ACTIVE = new ConcurrentHashMap<>();
+	/** 玩家实体 id → 还差几 tick 才真正发力（按右键后要先举杖、再点下去）。 */
+	private static final Map<Integer, Integer> PENDING = new ConcurrentHashMap<>();
+	/**
+	 * 按右键到真正加速之间的延迟（tick）。
+	 *
+	 * <p>动画总长 {@code SkiState.SWING_TICKS} = 12 tick，举起占 25%、下摆约到 70% ——
+	 * “杖点下去”大约在第 7 tick，所以这里也等 7 tick 再给速度，动作和发力才对得上。
+	 */
+	private static final int DELAY_TICKS = 7;
 
 	/** direction 是当前冲刺方向（水平单位向量）；from 是右键当时的速度（要回到的目标）；peak 是抬到多快。 */
 	private record Boost(Vec3 direction, double from, double peak, int ticksLeft) {
@@ -45,10 +54,21 @@ public final class SkiBoost {
 
 	public static void register() {
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
-			if (ACTIVE.isEmpty()) {
+			if (ACTIVE.isEmpty() && PENDING.isEmpty()) {
 				return;
 			}
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				// 先处理“举手 → 点下去”的延迟：时间到才真正发力
+				Integer pending = PENDING.get(player.getId());
+				if (pending != null) {
+					if (pending <= 1) {
+						PENDING.remove(player.getId());
+						applyBurst(player);
+					} else {
+						PENDING.put(player.getId(), pending - 1);
+					}
+				}
+
 				Boost boost = ACTIVE.get(player.getId());
 				if (boost == null) {
 					continue;
@@ -79,11 +99,18 @@ public final class SkiBoost {
 		});
 	}
 
-	/** 右键一次：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。 */
+	/**
+	 * 右键一次：<b>先举手</b>，{@link #DELAY_TICKS} tick 之后（动画里杖点下去那一刻）才真正发力。
+	 */
 	public static void burst(Player player) {
 		if (SnowboardControl.isSnowboard(player)) {
 			return;   // 单板站定：撑杖也不给冲刺
 		}
+		PENDING.put(player.getId(), DELAY_TICKS);
+	}
+
+	/** 延迟结束后的实际发力：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。 */
+	private static void applyBurst(Player player) {
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double current = horizontal.length();

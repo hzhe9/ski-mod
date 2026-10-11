@@ -142,7 +142,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾（单板腿位） |
 | `SKI_LEG_TILT` | `HumanoidModelMixin` | -0.15 | **双板**：腿（身体下半部分）往后倾出去的角度，配合前倾的上身 |
-| `ARM_REST` / `RAISE_FRACTION` | `HumanoidModelMixin` | -0.55 / 0.2 | 持杖静止时手的位置（**不举到最高**，往下放一点）/ 右键动画里“先举到最高”所占比例 |
+| `ARM_REST` / `RAISE_FRACTION` | `HumanoidModelMixin` | -0.55 / 0.25 | 持杖静止时手的位置（**不举到最高**）/ 右键动画里“先举到最高”所占比例 |
+| `DELAY_TICKS` | `SkiBoost` | 7 | **按右键到手杖真正发力之间的延迟**：动画里“杖点下去”大约在第 7 tick（总长 12），所以发力也等 7 tick，动作与冲劲才对得上 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
 | `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | 0.0 / 0.28 | 单板滑行时**两只手**的姿势：`xRot`=0（**不前抬**）、`zRot`=0.28 rad ≈ 16°（**向两侧微微抬起**，左右对称）。不复用会走原版走路摆臂 |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |

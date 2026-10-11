@@ -46,7 +46,7 @@ public abstract class HumanoidModelMixin {
 	/** 静止时手杖停的位置：不要举到最高，往下放一点。 */
 	private static final float ARM_REST = -0.55F;
 	/** 右键动画里“先举到最高”这一段占的比例，剩下的时间才往下摆、再收回。 */
-	private static final float RAISE_FRACTION = 0.35F;   // 举起段占比（越大＝举起越慢）
+	private static final float RAISE_FRACTION = 0.25F;   // 举起段占比（用户定 25%）
 	/** 最低处：一次撑杖摆到的地方。 */
 	private static final float ARM_BOTTOM = ROW_CENTER + ROW_AMPLITUDE;
 	/** 下摆占整段动画的比例，剩下的时间收回最高处。 */
