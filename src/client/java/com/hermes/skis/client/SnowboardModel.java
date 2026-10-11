@@ -64,8 +64,10 @@ public class SnowboardModel extends Model<HumanoidRenderState> {
 	}
 
 	private static void addBoot(PartDefinition root, String side, float x) {
+		// z 偏 0.05 单位（0.3 cm）：让靴子的侧面**不与板身的长边共面**，也不与腿的侧面共面 ——
+		// 共面会让两面 z-fighting（渲染出一片锯齿点，游戏里同样会闪）。0.05 肉眼看不出来。
 		root.addOrReplaceChild("boot_" + side,
 				CubeListBuilder.create().texOffs(0, 0).addBox(-2.0F, 18.0F, -2.0F, 4.0F, 6.0F, 4.0F),
-				PartPose.offset(x, 0.0F, 0.0F));
+				PartPose.offset(x, 0.0F, 0.05F));
 	}
 }

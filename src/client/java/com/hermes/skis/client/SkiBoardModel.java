@@ -44,10 +44,10 @@ public class SkiBoardModel extends Model<HumanoidRenderState> {
 
 	private static void addSki(PartDefinition root, String side, float x) {
 		PartDefinition ski = root.addOrReplaceChild("ski_" + side, CubeListBuilder.create(), PartPose.offset(x, 0.0F, 0.0F));
-		// 雪鞋：包住小腿下段
+		// 雪鞋：包住小腿下段。z 偏 0.05 单位 —— 与腿的侧面错开，避免 z-fighting（共面会闪）
 		ski.addOrReplaceChild("boot_" + side,
 				CubeListBuilder.create().texOffs(0, 0).addBox(-2.0F, 18.0F, -2.0F, 4.0F, 6.0F, 4.0F),
-				PartPose.ZERO);
+				PartPose.offset(0.0F, 0.0F, 0.05F));
 		// 板身：宽 3、厚 1、长 24 单位（= 150 cm，成人全能板区间内）；靴子居中（前 12 / 后 12）
 		ski.addOrReplaceChild("board_" + side,
 				CubeListBuilder.create().texOffs(20, 0).addBox(-1.5F, BOARD_TOP, -12.0F, 3.0F, 1.0F, 24.0F),
