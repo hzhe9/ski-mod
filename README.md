@@ -88,14 +88,16 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 操作 | 行为 |
 |---|---|
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变 |
-| W / S | **没有任何反应**（前后分量直接丢掉） |
+| W | **前倾**：身体前倾 `TILT_LEAN`，另沿身体前方每 tick 补一点点推进（`TILT_PUSH`，「稍微往前」）—— 不改变朝向、不参与横移 |
+| S | **后倾**：身体后仰 `TILT_LEAN`，不给推进；前后分量本身在原版输入里已被丢掉，所以只影响姿态 |
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
-| 身体状况 | **朝向不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
-| 停住 | 松开 A/D 立刻停：客户端每 tick 把水平速度清零（坡上 / 冰上也不会自己滑） |
-| 滑行物理 | 一律不施加：`SkiGlide` 对单板直接跳过（无动量、无下落加速、无雪面推进） |
+| 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
+| 滑行物理 | 与双板**同款**：下落加速（每降 1 格 +0.08）、低摩擦动量、雪面推进 —— 只是方向不读按键转向，而是沿当前运动方向、静止时沿锁定的身体前方 |
 | 点杖冲刺 | 单板时不给冲刺（`SkiBoost.burst` 直接 return） |
 | 换朝向 | 把板脱下来再穿上（重新锁定） |
+
+> 有动量之后松开 A / D **不会立刻停**，会像双板一样慢慢滑停（`SkiGlide.MOMENTUM_DECAY`，半衰期 ≈ 2.29 秒）。
 
 双板不受影响（仍是原来的滑行 + 按键转向）。锁定表 = `SnowboardControl.BODY_YAW`（实体 id → 角度），条数超过 `MAX_ENTRIES` 整表清空。
 
@@ -116,6 +118,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
 | `BOARD_LEG_SPREAD` | `SkiStance` | 4.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值 |
+| `TILT_PUSH` | `SnowboardControl` | 0.010 格/tick | 单板按 W（前倾）时每 tick 沿身体前方补的推进量 |
+| `TILT_LEAN` | `SnowboardControl` | 0.18 弧度 | 单板 W / S 时身体的俯仰角（前倾 +、后倾 −） |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |

@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -22,8 +23,9 @@ import net.minecraft.world.level.block.state.BlockState;
  *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。</li>
  * </ul>
  *
- * <p><b>单板不参与这套物理</b>：穿上单板 = 人板一体、完全站定（见 {@link SnowboardControl}），
- * 这里只负责给它锁住身体朝向；动量 / 下落加速 / 雪面推进一律不施加。
+ * <p><b>单板共用这套滑行物理</b>（下落加速 / 低摩擦动量 / 雪面推进），但方向来源不同：
+ * 它不读按键转向（A / D 是横移），只沿当前运动方向走、静止时沿锁定的身体前方；
+ * 另外按 W（前倾）会额外给一点点前推（{@link #tiltPush}）。
  *
  * <p>不需要药水效果。
  */
@@ -67,13 +69,15 @@ public final class SkiGlide {
 					continue;
 				}
 				if (SnowboardControl.isSnowboard(player)) {
-					// 单板：人板一体、完全站定 —— 不施加任何滑行物理，只锁住朝向
-					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
-					forgetPhysics(player.getId());
-					continue;
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot());   // 单板：锁住身体朝向
+				} else {
+					SnowboardControl.forget(player.getId());
 				}
 				trackDescent(player);
 				applyMomentum(player);
+				if (SnowboardControl.isSnowboard(player)) {
+					tiltPush(player);   // 单板：W 前倾额外给一点点前推
+				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
 				}
@@ -170,6 +174,21 @@ public final class SkiGlide {
 		}
 	}
 
+	/**
+	 * 单板「前倾」（W）：每 tick 沿锁定的身体前方补一点点推进（“稍微往前”）；按 S（后倾）不推。
+	 * 只加力、不改朝向，也不参与 A / D 的横移。
+	 */
+	private static void tiltPush(ServerPlayer player) {
+		Input input = player.getLastClientInput();
+		if (input == null || !input.forward() || !SkiControl.canSteer(player)) {
+			return;
+		}
+		player.addDeltaMovement(SnowboardControl.front(player.getId(), player.getYRot())
+				.scale(SnowboardControl.tiltPush()));
+		clampToMaxSpeed(player);
+		player.hurtMarked = true;
+	}
+
 	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）。 */
 	private static Vec3 steerDirection(ServerPlayer player) {
 		return SkiControl.steer(travelDirection(player), player);
@@ -178,6 +197,10 @@ public final class SkiGlide {
 		Vec3 motion = player.getDeltaMovement();
 		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
+		}
+		if (SnowboardControl.isSnowboard(player)) {
+			// 单板静止时沿锁定的身体前方，而不是视线（视角可以随便转）
+			return SnowboardControl.front(player.getId(), player.getYRot());
 		}
 		Vec3 look = player.getLookAngle();
 		Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);

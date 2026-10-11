@@ -10,7 +10,6 @@ import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.Vec3;
 
 public class SkisClient implements ClientModInitializer {
 	@Override
@@ -46,14 +45,15 @@ public class SkisClient implements ClientModInitializer {
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向
 			}
-			// 单板：没按 A / D 时保持完全站定（水平速度清零，坡上 / 冰上也滑不动）；
-			// 按了 A / D 就交给原版移动 —— ClientInputMixin 已把输入换算到身体左右轴上
+			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			LocalPlayer self = client.player;
-			if (self != null && SnowboardControl.isSnowboard(self)) {
-				Input keys = self.input.keyPresses;
-				if (keys == null || !(keys.left() || keys.right())) {
-					Vec3 motion = self.getDeltaMovement();
-					self.setDeltaMovement(0.0D, motion.y, 0.0D);
+			if (self != null) {
+				if (!SnowboardControl.isSnowboard(self)) {
+					SnowboardControl.setTilt(self.getId(), 0);
+				} else {
+					Input keys = self.input.keyPresses;
+					int tilt = keys == null ? 0 : (keys.forward() ? 1 : (keys.backward() ? -1 : 0));
+					SnowboardControl.setTilt(self.getId(), tilt);
 				}
 			}
 		});
