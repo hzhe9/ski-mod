@@ -46,10 +46,13 @@ public abstract class HumanoidModelMixin {
 	private static final float GLIDE_LEAN = 0.05F;
 	/** 手臂向外的滚转角（正负对称，保证两根滑雪杖平行、不向内倾斜）。 */
 	private static final float ARM_OUTWARD_ROLL = 0.10F;
-	/** 单板滑行时两只手的固定前抬角（弧度）：0 = 垂在身侧，负值 = 向前抬。微微抬起就够。 */
-	private static final float FREE_ARM_XROT = -0.45F;
-	/** 单板滑行时空着的那只手向外张开的滚转角。 */
-	private static final float FREE_ARM_ROLL = 0.15F;
+	/** 单板滑行时两只手的前后角（弧度）：0 = 垂在身侧，负值 = 向前抬。不要前抬，保持 0。 */
+	private static final float FREE_ARM_XROT = 0.0F;
+	/**
+	 * 单板滑行时两只手**向两侧微微抬起**的角度（绕前后轴，弧度）——
+	 * 右臂取 +、左臂取 -，于是两只手对称地离开身体侧面。0.28 rad ≈ 16°，微微抬起。
+	 */
+	private static final float FREE_ARM_ROLL = 0.28F;
 
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
