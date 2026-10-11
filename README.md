@@ -49,7 +49,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `textures/item/modern_ski.png` | 16×16 | 双板物品图标 |
 | `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区） |
-| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖**物品栏图标**（`pole_icon()` 画的竖直杖：顶部握把、细杖身、靠杖尖的橙色挡雪盘） |
+| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖 2D 图标（`pole_icon()` 画，**当前 GUI 不用它**，留作备用） |
 | `textures/item/snowboard.png` | 16×16 | 单板物品图标 |
 | `textures/entity/ski_board.png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头） |
 | `textures/entity/snowboard.png` | 128×32 | 单板脚上模型 |
@@ -94,11 +94,11 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 空格 | 不能跳（`makeJump` 取消） |
 | 鼠标（头 / 视角） | 可以随便转 |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot` + `yBodyRotO`（渲染读的是 render state 的 `bodyRot`，`yBodyRotO` 一起写是为了不让插值把身体拉回视角方向） |
-| 滑行物理 | 与双板**同款**：下落加速（每降 1 格 +0.08）、低摩擦动量、雪面推进 —— 只是方向不读按键转向，而是沿当前运动方向、静止时沿锁定的身体前方 |
+| 滑行物理 | **只保留下落加速**：每降 1 格 +0.08，而且**只在真的在横向移动时**（有速度或按着 A/D）才给，方向沿那一侧。不做雪面推进、动量也不捕获玩家自己走出来的速度 —— 否则平地走路 / 站坡上都会“莫名往前” |
 | 点杖冲刺 | 单板时不给冲刺（`SkiBoost.burst` 直接 return） |
 | 换朝向 | 把板脱下来再穿上（重新锁定） |
 
-> 有动量之后松开 A / D **不会立刻停**，会像双板一样慢慢滑停（`SkiGlide.MOMENTUM_DECAY`，半衰期 ≈ 2.29 秒）。
+> 单板的动量只在「下落加速」和「按着 A / D 横移」这两种情形下跟随，松开就靠原版摩擦停住；双板仍是原来的低摩擦动量（`SkiGlide.MOMENTUM_DECAY`，半衰期 ≈ 2.29 秒）。
 
 双板不受影响（仍是原来的滑行 + 按键转向）。锁定表 = `SnowboardControl.BODY_YAW`（实体 id → 角度），条数超过 `MAX_ENTRIES` 整表清空。
 
@@ -133,7 +133,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 双板 `SkiBoardModel`：板宽 3、厚 1、长 22（前 12.5 / 后 9.5 ≈ 前 57%，贴近现实固定器位置）、板头 box(3,1,2)
 - 单板 `SnowboardModel`：板宽 9、厚 1、长 24（前 14 / 后 10）、板头 box(9,1,2)，整组绕 Y 转 90° 横在脚下；两只鞋 box(4,6,4) **建在模型根节点下**（与腿同一坐标系、同一横向偏移 `BOARD_LEG_SPREAD`）—— 放进转了 90° 的板组里会让鞋与腿朝向差 90°，看起来就是“脚歪了”
 - 滑雪杖 `models/item/ski_pole.json`：杖身总长 24.75 单位（= 初版 15 单位 ×1.65）、挡雪盘随杖尖下移。**GUI 只显示模型 y 0~16 这段**，所以：
-  - 物品栏走 `ski_pole_gui.json`（标准 **2D 图标**：`parent: item/generated` + `layer0: skis:item/ski_pole_icon`），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
+  - 物品栏走 `ski_pole_gui.json` —— **一版独立的 3D 短模型**（杖尖 y1.0 / 挡雪盘 y2.2 / 杖身 y3.4~13.5 / 握把 y13.5~16，全部落在 0~16 内），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
   - 长模型自己的 `display.gui` 另给了 `scale 0.55 + translation.y 1.0` 兜底 —— 万一某个上下文没命中 case 落到 fallback，整根杖也能完整落在框内，不会只剩上半截。
 
 ## 架构速览
@@ -169,6 +169,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 肢体 `zRot` 符号：-x 侧肢体正 zRot = 末端向外；搞反会让垂在身侧的长物品内倾穿模
 - 渲染状态每帧重建，**不要**把跨帧状态挂在它上面（用静态表 + 实体 id）
 - **改完 Mixin 要自己跑一次启动自检**：注入目标写错＝启动即崩（本项目被 `Camera#setup` 这个不存在的方法名坑过一次）。用 PCL 导出的启动脚本 bat 拉真实客户端，看 `logs/latest.log` 出现 `[skis] … 已加载` + `Sound engine started`、且无 `MixinApplyError` 才算过。
+- **单板不能有任何“自动推力”**：排查“莫名往前”要同时看三条 —— `glidePush` 雪面推进、下落加速的方向兜底（没输入时用身体前方＝静止的人自己往前滑，应返回 `null`＝不加力）、动量把玩家走路/落地残留的速度一直托住。
 - **下落加速的方向要跟着玩家的横向输入**：单板静止/低速下落时先用 `sideSign(按键)` → `sideLocked()`（往左滑就加左边），没按才退到 `frontLocked()`（身体前方）。只写“身体前方”会被用户判为“下落增加的速度是向前，不对”。
 - **相机的倾斜偏移方向必须用「锁定的身体朝向」`frontLocked()`，不能用 `player.getYRot()`（视角 yaw）**：用视角的话玩家一转视野偏移就跟着转，相机绕人转圈、甩到身体外面去（用户原话：“转动轴没有跟着移动…视野跑偏到整个身体之外”）。倾斜是身体的事，方向基准只能是不动的那个。
 - **相机要“整块挂到倾斜后的头上”＝位置 + 朝向都改，而且 `setPosition` 有两个重载**：普通（第一人称/第三人称）走 `setPosition(double, double, double)`，**只有骑矿车分支**才走 `setPosition(Vec3)` —— 只拦 Vec3 版等于完全没改，症状是“低头看见自己的后背”（First-person Model 渲染的身体已经倾了）。三个 double 参数各自 `@ModifyArg` 取 index 0/1/2，再加一个 Vec3 版兜底骑乘；朝向用 `setRotation(FF)` 的 index 1。

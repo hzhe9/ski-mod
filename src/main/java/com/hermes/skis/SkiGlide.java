@@ -22,8 +22,8 @@ import net.minecraft.world.level.block.state.BlockState;
  *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。</li>
  * </ul>
  *
- * <p><b>单板共用这套滑行物理</b>（下落加速 / 低摩擦动量 / 雪面推进），但方向来源不同：
- * 它不读按键转向（A / D 是横移），只沿当前运动方向走、静止时沿锁定的身体前方。
+ * <p><b>单板只保留“下落加速”这一条</b>：低摩擦动量不捕获玩家自己走出来的速度、也不做雪面推进，
+ * 免得平地走路 / 站坡上都会"莫名往前"。下落加速也只在真的有横向移动（速度或按着 A / D）时才给，方向沿那一侧。
  * W / S 只改姿态（前倾 / 后倾）与相机，<b>不给任何推进</b>。
  *
  * <p>不需要药水效果。
@@ -115,7 +115,11 @@ public final class SkiGlide {
 
 		double gain = Math.min(steps * GAIN_PER_BLOCK, MAX_GAIN_PER_TICK);
 		Vec3 direction = steerDirection(player);
+		if (direction == null) {
+			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
+		}
 		player.addDeltaMovement(direction.scale(gain));
+		MOMENTUM.merge(id, player.getDeltaMovement().horizontalDistance(), Math::max);   // 让加速出来的速度被动量托住
 		clampToMaxSpeed(player);
 		player.hurtMarked = true;   // 让客户端也吃到这份加速，不然会被客户端的移动预测抹掉
 	}
@@ -139,7 +143,12 @@ public final class SkiGlide {
 		Vec3 motion = player.getDeltaMovement();
 		double speed = motion.horizontalDistance();
 
-		double momentum = Math.max(MOMENTUM.getOrDefault(id, 0.0D), speed);
+		double momentum = MOMENTUM.getOrDefault(id, 0.0D);
+		if (!SnowboardControl.isSnowboard(player)) {
+			momentum = Math.max(momentum, speed);   // 双板照旧：把当前速度纳入动量
+		} else if (SnowboardControl.sideSign(player.getLastClientInput()) != 0.0D) {
+			momentum = Math.max(momentum, speed);   // 单板只在真的按 A / D 横移时跟随
+		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : MOMENTUM_DECAY;
 		momentum = Math.min(momentum, SkiControl.MAX_GLIDE_SPEED);   // 速度上限
 
@@ -153,14 +162,20 @@ public final class SkiGlide {
 			return;   // 玩家自己滑得更快，不插手
 		}
 		Vec3 direction = steerDirection(player);   // 托速度时也允许用 WASD 转向，不然会像被锁住一样
+		if (direction == null) {
+			if (motion.horizontalDistanceSqr() <= 1.0E-6D) {
+				return;
+			}
+			direction = new Vec3(motion.x, 0.0D, motion.z).normalize();   // 没输入就沿原方向托
+		}
 		player.setDeltaMovement(direction.x * momentum, motion.y, direction.z * momentum);
 		player.hurtMarked = true;
 	}
 
 	/** 雪 / 冰面上的推进：正在移动就沿移动方向补一点。 */
 	private static void glidePush(ServerPlayer player) {
-		if (!isOnSnowOrIce(player)) {
-			return;
+		if (SnowboardControl.isSnowboard(player) || !isOnSnowOrIce(player)) {
+			return;   // 单板不做雪面推进：那是“没人碰它自己往前”的来源之一
 		}
 		Vec3 motion = player.getDeltaMovement();
 		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
@@ -170,9 +185,10 @@ public final class SkiGlide {
 		}
 	}
 
-	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）。 */
+	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）；单板可能返回 null＝不给加速。 */
 	private static Vec3 steerDirection(ServerPlayer player) {
-		return SkiControl.steer(travelDirection(player), player);
+		Vec3 travel = travelDirection(player);
+		return travel == null ? null : SkiControl.steer(travel, player);
 	}
 	private static Vec3 travelDirection(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
@@ -180,13 +196,11 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板静止时：先看 A / D —— 往哪边滑，下落加速就往哪边加；没按才退到身体前方。
-			// （视角朝向不能用：那是鼠标方向，转一下就变。）
+			// 单板：只有真的往左 / 往右在动时才给方向（按下 A / D），否则 null ＝ 不加力。
+			// 视角朝向、身体前方都不能当兜底 —— 那会让静止的人自己往前滑。
 			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			if (side != 0.0D) {
-				return SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
-			}
-			return SnowboardControl.frontLocked(player.getId(), player.getYRot());
+			return side == 0.0D ? null
+					: SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
 		}
 		Vec3 look = player.getLookAngle();
 		Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);
