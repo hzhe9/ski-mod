@@ -116,7 +116,7 @@ public final class SkiGlide {
 		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
 
 		double gain = Math.min(steps * GAIN_PER_BLOCK, MAX_GAIN_PER_TICK);
-		Vec3 direction = steerDirection(player);
+		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
 		}
@@ -212,6 +212,26 @@ public final class SkiGlide {
 			player.addDeltaMovement(direction.scale(GLIDE_PUSH));
 			player.hurtMarked = true;
 		}
+	}
+
+	/**
+	 * 下落加速的方向。
+	 *
+	 * <p>单板：<b>往哪滑就往哪边加</b> —— 有横向速度就沿当前运动方向；还没动起来但按着 A / D 就沿那一侧；
+	 * 两个都没有（直上直下地掉）就不加，免得“莫名往前”。注意这条<b>不受</b>
+	 * {@link #travelDirection} 那个“单板不拨方向”的限制 —— 下落加速本来就该沿当前运动方向加。
+	 */
+	private static Vec3 descentDirection(ServerPlayer player) {
+		Vec3 motion = player.getDeltaMovement();
+		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
+			return new Vec3(motion.x, 0.0D, motion.z).normalize();
+		}
+		if (SnowboardControl.isSnowboard(player)) {
+			double side = SnowboardControl.sideSign(player.getLastClientInput());
+			return side == 0.0D ? null
+					: SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
+		}
+		return steerDirection(player);
 	}
 
 	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）；单板可能返回 null＝不给加速。 */
