@@ -66,8 +66,10 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
-| `FALL_GAIN_PER_BLOCK` | 0.08 | **双板**下落基数：实得增量 = `0.08 × √(累计格数)` —— **边际递减**，掉得越多每格给得越少 |
-| `BOARD_GAIN_PER_BLOCK` | 0.08 | **单板**同项（**线性**：`0.08 × 格数`），只取左右分量 |
+| `FALL_GAIN_PER_BLOCK` | 0.08 | **双板**下落基数：实得增量 = `0.08 × (累计格数)^0.7` —— **边际递减** |
+| `BOARD_GAIN_PER_BLOCK` | 0.08 | **单板**同项，同一条曲线 `0.08 × (累计格数)^0.7`，只取左右分量 |
+| `FALL_GAIN_EXPONENT` | 0.7 | 两板共用的曲线指数（1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减）。改小 = 衰减更猛 |
+| `VEER_SMOOTHING` / `VEER_MAX_DEGREES` | 0.35 / 4° | 单板只用 W/S 时的平滑趋近系数与单 tick 上限（替代原“固定 2°/tick + 到目标死停”） |
 | `MAX_SPEED`（单板） | 0.55 格/tick | 单板速度上限 ≈ 11 m/s ≈ 40 km/h（参照：原版步行 0.216、疾跑 0.281、创造飞行 0.545 格/tick） |
 | `MAX_SPEED`（双板） | 1.4 格/tick | 双板速度上限 ≈ 100 km/h |
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
@@ -168,6 +170,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
+- 穿板时 `Attributes.STEP_HEIGHT` 设为 **1.0**（原版玩家默认 0.6），脱板恢复 0.6 —— 26.2 里**没有** `setMaxUpStep`，台阶高度是属性。
 - ⚠️ **MC 里 yaw 增大是「往右转」**（yaw=0 朝 +z，yaw=90 朝 -x）：单板 carve 的侧压符号按这条写（`turn = -side` 前倾 / `side` 后倾）。
 - 双板需求拆成两件独立的事：① **视角不影响模型左右朝向** ② **A/D 要转模型朝向**。做法就是 `ensureLocked` + `steerSkis`(turnBody) + `SkisClient` 写 `yBodyRot`；`desiredDirection` 对双板只认 W/S（沿锁定朝向），**不要**把 A/D 当横向分量（那样就成了“只摆滑行方向、模型不动”）。
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。

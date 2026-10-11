@@ -63,6 +63,10 @@ public final class SnowboardControl {
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.5D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.996D;
+	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
+	private static final double VEER_SMOOTHING = 0.35D;
+	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
+	private static final double VEER_MAX_DEGREES = 4.0D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -206,10 +210,9 @@ public final class SnowboardControl {
 			double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
 			double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
 			double diff = Mth.wrapDegrees((float) (goal - current));
-			if (Math.abs(diff) < TURN_RATE_DEGREES) {
-				return 0.0F;   // 已经摆到目标方向，别再转
-			}
-			turn = diff > 0.0D ? 1.0D : -1.0D;
+			// 平滑趋近：步长与剩余角度成正比（快到位时自动变慢），而不是“固定 2°/tick、到了就死停”——
+			// 后者在目标附近会变成一顿一顿的（用户报“单板前后转向一卡一卡”）。
+			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES) / TURN_RATE_DEGREES;
 		}
 		float delta = (float) (turn * TURN_RATE_DEGREES);
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);

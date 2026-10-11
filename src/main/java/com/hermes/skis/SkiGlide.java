@@ -8,6 +8,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.BlockState;
@@ -34,6 +36,8 @@ public final class SkiGlide {
 	private static final double MIN_MOTION_SQR = 0.008D;
 	private static final double GLIDE_PUSH = 0.055D;
 
+	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
+	private static final double FALL_GAIN_EXPONENT = 0.7D;
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
 	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
@@ -59,6 +63,7 @@ public final class SkiGlide {
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 				if (!isSkiing(player)) {
+					setStepHeight(player, 0.6D);   // 恢复原版台阶高度
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId());
 					SkisControl.forget(player.getId());
@@ -70,6 +75,8 @@ public final class SkiGlide {
 					carve(player);
 				}
 				// 双板不做任何朝向锁定：朝向＝视角（用户 2026-10 定案回到最开始的状态）
+				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
+				setStepHeight(player, 1.0D);
 				trackDescent(player);
 				applyMomentum(player);
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
@@ -112,15 +119,12 @@ public final class SkiGlide {
 		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
+		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT —— 边际递减，掉得越多每格给的越少
+		// （用户：“下落得越多加速的增长量反而越来越小”，随后又要求“衰减改小一点点”→ 指数从 0.5 提到 0.7）
 		boolean board = SnowboardControl.isSnowboard(player);
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
-		double gain;
-		if (board) {
-			gain = Math.min(steps * SnowboardControl.fallGainPerBlock(), cap);   // 单板：线性
-		} else {
-			// 双板：基数 × √(累计格数) —— 边际递减，掉得越多每格给的越少（用户：“增长量反而越来越小”）
-			gain = Math.min(Math.sqrt(steps) * SkisControl.fallGainPerBlock(), cap);
-		}
+		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
+		double gain = Math.min(Math.pow(steps, FALL_GAIN_EXPONENT) * base, cap);
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
@@ -132,6 +136,17 @@ public final class SkiGlide {
 	}
 
 	/** 把水平速度压到 {@link SkiControl#MAX_GLIDE_SPEED} 以内（垂直分量不动）。 */
+	/**
+	 * 设置台阶高度。26.2 里它不是 {@code setMaxUpStep}，而是属性 {@link Attributes#STEP_HEIGHT}
+	 * （原版玩家默认 0.6 格）。
+	 */
+	private static void setStepHeight(ServerPlayer player, double value) {
+		AttributeInstance attribute = player.getAttribute(Attributes.STEP_HEIGHT);
+		if (attribute != null) {
+			attribute.setBaseValue(value);
+		}
+	}
+
 	private static void clampToMaxSpeed(ServerPlayer player) {
 		// 上限按板取（单板 / 双板各自一个值）
 		Vec3 motion = player.getDeltaMovement();

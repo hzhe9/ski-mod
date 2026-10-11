@@ -44,8 +44,7 @@ public class SkiPoleItem extends Item {
 			player.getCooldowns().addCooldown(stack, COOLDOWN_TICKS);
 			level.playSound(null, player.getX(), player.getY(), player.getZ(),
 					SoundEvents.SNOW_BREAK, SoundSource.PLAYERS, 0.7F, 1.6F);
-			player.sendOverlayMessage(Component.literal("§b[滑雪杖] §f撑杖冲刺！"));
-		}
+			}
 
 		return InteractionResult.SUCCESS;
 	}
