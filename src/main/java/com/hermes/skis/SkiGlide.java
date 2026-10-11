@@ -186,16 +186,40 @@ public final class SkiGlide {
 			return;   // 腾空时不切雪（跳下悬崖不该还在转 / 还在往前冲）
 		}
 		Input input = player.getLastClientInput();
-		if (SnowboardControl.applyCarve(player.getId(), input, player.getDeltaMovement().horizontalDistance()) == 0.0F) {
+		double speed = player.getDeltaMovement().horizontalDistance();
+		float turned = SnowboardControl.applyCarve(player.getId(), input, speed);
+		if (turned == 0.0F) {
 			return;
 		}
-		if (player.getDeltaMovement().horizontalDistance() >= SnowboardControl.carveMaxSpeed()) {
+		rotateVelocity(player, turned);   // 已有的速度（比如从高处落下来的那份）跟着转向一起拐弯
+		if (speed >= SnowboardControl.carveMaxSpeed()) {
 			return;   // 已经够快，不再补
 		}
 		player.addDeltaMovement(SnowboardControl.frontLocked(player.getId(), player.getYRot())
 				.scale(SnowboardControl.carvePush()));
 		MOMENTUM.merge(player.getId(), player.getDeltaMovement().horizontalDistance(), Math::max);
 		clampToMaxSpeed(player);
+		player.hurtMarked = true;
+	}
+
+	/**
+	 * 把玩家当前的水平速度绕 Y 轴转 {@code degrees}（与身体朝向同向）——
+	 * 这样“带着速度转向”才成立：不光身体拐了，原本的速度（例如从高处落下来的那份）也跟着拐。
+	 *
+	 * <p>按 {@code F(θ) = (-sinθ, cosθ)}、yaw 增大＝左转 的约定推的旋转，与 {@link SnowboardControl} 一致。
+	 */
+	private static void rotateVelocity(ServerPlayer player, float degrees) {
+		Vec3 motion = player.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		if (horizontal.lengthSqr() < 1.0E-6D) {
+			return;
+		}
+		double rad = Math.toRadians(degrees);
+		double cos = Math.cos(rad);
+		double sin = Math.sin(rad);
+		double x = horizontal.x * cos - horizontal.z * sin;
+		double z = horizontal.z * cos + horizontal.x * sin;
+		player.setDeltaMovement(x, motion.y, z);
 		player.hurtMarked = true;
 	}
 
