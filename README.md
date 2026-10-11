@@ -69,6 +69,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `FALL_GAIN_PER_BLOCK` | 0.1 | **双板**下落基数 |
 | `BOARD_GAIN_PER_BLOCK` | 0.1 | **单板**同项（只取左右分量） |
 | `FALL_GAIN_EXPONENT` | 1.0 | 两板共用的曲线指数。**当前 1.0 = 线性**（用户要求先去掉衰减试手感）；0.8 = 很缓的边际递减、0.5 = 开方 |
+| `STICK_DOWN` / `STICK_DOWN_MAX` | 0.08 / 0.8 | **双板下坡贴地**：没在地面、正在下落、且**没按跳跃键**时，每 tick 额外补这么多向下速度（所以是贴着坡面滑下去，不是一格一格弹）。按跳跃键完全不插手 |
 | `STEP_UP_PENALTY` | 0.04 格/tick | 滑上 1 格台阶扣掉的水平速度（动量一起扣，否则下一步被托回来） |
 | `STEP_UP_MIN_HEIGHT` | 0.5 格 | 判定“上了一格台阶”的最小抬升高度 |
 | `VEER_SMOOTHING` / `VEER_MAX_DEGREES` | 0.35 / 4° | 单板只用 W/S 时的平滑趋近系数与单 tick 上限（替代原“固定 2°/tick + 到目标死停”） |

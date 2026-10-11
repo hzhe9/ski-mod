@@ -38,6 +38,10 @@ public final class SkiGlide {
 
 	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
 	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性（用户要求先去掉衰减，试手感）
+	/** 双板下坡时每 tick 额外补多少向下的速度（贴地，别弹跳）。 */
+	private static final double STICK_DOWN = 0.08D;
+	/** 贴地时的下落速度上限（别再快了，免得落地太硬）。 */
+	private static final double STICK_DOWN_MAX = 0.8D;
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
@@ -81,6 +85,9 @@ public final class SkiGlide {
 				// 双板不做任何朝向锁定：朝向＝视角（用户 2026-10 定案回到最开始的状态）
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
 				setStepHeight(player, 1.0D);
+				if (!SnowboardControl.isSnowboard(player)) {
+					stickToGround(player);   // 双板：下坡贴着地面滑，不一跳一跳地弹下去
+				}
 				trackDescent(player);
 				applyMomentum(player);
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
@@ -173,6 +180,28 @@ public final class SkiGlide {
 		} else {
 			MOMENTUM.put(id, momentum);
 		}
+	}
+
+	/**
+	 * 双板下坡贴地：没在地面、又在往下掉、而且<b>没按跳跃键</b>时，额外补一点向下的速度 ——
+	 * 于是下坡是“贴着坡面滑下去”，而不是被惯性抛起来、一格一格地弹。
+	 *
+	 * <p>按了跳跃键就完全不插手（腾空跳起来的功能照旧保留）；上升中也不管（那是自己跳的）。
+	 */
+	private static void stickToGround(ServerPlayer player) {
+		if (player.onGround()) {
+			return;
+		}
+		Input keys = player.getLastClientInput();
+		if (keys != null && keys.jump()) {
+			return;
+		}
+		Vec3 motion = player.getDeltaMovement();
+		if (motion.y >= 0.0D) {
+			return;
+		}
+		player.setDeltaMovement(motion.x, Math.max(motion.y - STICK_DOWN, -STICK_DOWN_MAX), motion.z);
+		player.hurtMarked = true;
 	}
 
 	private static void clampToMaxSpeed(ServerPlayer player) {
