@@ -37,15 +37,19 @@ public class SkisClient implements ClientModInitializer {
 			}
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
 			for (Player player : client.level.players()) {
-				if (!SnowboardControl.isSnowboard(player)) {
+				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {   // 单板 / 双板都算
 					SnowboardControl.forget(player.getId());
 					continue;
 				}
 				SnowboardControl.ensureLocked(player.getId(), player.getYRot());
-				// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
-				Input keys = player == client.player && client.player != null
-						? client.player.input.keyPresses : null;
-				SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
+				if (SnowboardControl.isSnowboard(player)) {
+					// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
+					Input keys = player == client.player && client.player != null
+							? client.player.input.keyPresses : null;
+					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
+				}
+				// 单板 & 双板都一样：把身体（连带板）锁到锁定朝向 —— 转视角只转头，
+			// 不写这一句双板的身体/板就会被原版拉着跟视角转（用户报的正是这个）。
 				float yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向

@@ -36,10 +36,14 @@ public final class SkiGlide {
 
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
-	/** 每下落 1 格加多少水平速度（单板与双板<b>共用这一个值</b>；0.18 被用户判“太快”，回落到 0.10）。 */
+	/** 双板：每下落 1 格加多少水平速度（0.18 被用户判“太快”，定在 0.10）。 */
 	private static final double GAIN_PER_BLOCK = 0.10D;
-	/** 单 tick 最多加多少（防止悬崖一瞬间给爆）。 */
+	/** 单板：同样下落，单板只取左右分量、体感明显更弱，所以给更大的系数（用户：“单板下落加速太慢”）。 */
+	private static final double BOARD_GAIN_PER_BLOCK = 0.22D;
+	/** 双板单 tick 上限（防止悬崖一瞬间给爆）。 */
 	private static final double MAX_GAIN_PER_TICK = 0.3D;
+	/** 单板单 tick 上限。 */
+	private static final double BOARD_MAX_GAIN_PER_TICK = 0.5D;
 
 	/** 动量每 tick 保留的比例：越接近 1 越滑、越慢停（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.985D;
@@ -121,7 +125,10 @@ public final class SkiGlide {
 		double steps = Math.floor(accumulated / STEP_BLOCKS);
 		DESCEND_ACCUM.put(id, accumulated - steps * STEP_BLOCKS);
 
-		double gain = Math.min(steps * GAIN_PER_BLOCK, MAX_GAIN_PER_TICK);
+		boolean board = SnowboardControl.isSnowboard(player);
+		double gain = board
+				? Math.min(steps * BOARD_GAIN_PER_BLOCK, BOARD_MAX_GAIN_PER_TICK)
+				: Math.min(steps * GAIN_PER_BLOCK, MAX_GAIN_PER_TICK);
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
 			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
@@ -245,7 +252,7 @@ public final class SkiGlide {
 		if (SnowboardControl.isSnowboard(player)) {
 			Vec3 axis = SnowboardControl.sideLocked(player.getId(), player.getYRot(), 1.0D);   // 身体左侧单位向量
 			double along = horizontal.lengthSqr() < 1.0E-6D ? 0.0D : horizontal.normalize().dot(axis);
-			if (Math.abs(along) >= 0.1D) {
+			if (Math.abs(along) >= 0.02D) {
 				return along > 0.0D ? axis : axis.scale(-1.0D);   // 正在往左 / 往右滑
 			}
 			double side = SnowboardControl.sideSign(player.getLastClientInput());

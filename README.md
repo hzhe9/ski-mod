@@ -66,7 +66,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
-| `GAIN_PER_BLOCK` | 0.10 | 每下降 1 格加多少水平速度（**单板与双板共用**；试过 0.18，用户判“太快”） |
+| `GAIN_PER_BLOCK` | 0.10 | **双板**每下降 1 格加多少水平速度（试过 0.18，用户判“太快”） |
+| `BOARD_GAIN_PER_BLOCK` | 0.22 | **单板**同项：只取左右分量、体感更弱，所以给更大的系数 |
 | `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.985 | 滑行动量每 tick 保留比例（半衰期 ≈ 2.29 秒）＝ 有效摩擦力（双板） |
 | `BOARD_MOMENTUM_DECAY` | 0.996 | 单板专用、更滑：切雪转向时速度不该被地面摩擦一点点啃掉 |
@@ -165,6 +166,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
+- **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
 - 双板：**按 S（后倾）＝刹车**，`applyMomentum` 里对动量额外乘 `BRAKE_DECAY`；只靠原版后退只能“短暂停一下”，松手动量就把速度托回去了。
 
