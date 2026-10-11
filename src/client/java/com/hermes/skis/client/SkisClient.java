@@ -45,11 +45,7 @@ public class SkisClient implements ClientModInitializer {
 				// carve：前倾 + 横移 → 身体朝向持续转（与服务端同一套规则，两边保持一致）
 				Input keys = player == client.player && client.player != null
 						? client.player.input.keyPresses : null;
-				float turned = SnowboardControl.applyCarve(
-						player.getId(), keys, player.getDeltaMovement().horizontalDistance());
-				if (turned != 0.0F) {
-					SnowboardControl.rotateVelocity(player, turned);   // 速度跟着转向一起拐
-				}
+				SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 				float yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				player.yBodyRot = yaw;
 				player.yBodyRotO = yaw;   // 上一 tick 一起写，避免插值把身体拉回视角方向
@@ -62,7 +58,10 @@ public class SkisClient implements ClientModInitializer {
 					SnowboardControl.tickTilt(self.getId());
 				} else {
 					Input keys = self.input.keyPresses;
-					int tilt = keys == null ? 0 : (keys.forward() ? 1 : (keys.backward() ? -1 : 0));
+					// W 与 S 同按（快速切换时的一帧残留）判中立，免得“单按 S 却跳成前倾”
+					boolean forward = keys != null && keys.forward();
+					boolean backward = keys != null && keys.backward();
+					int tilt = forward == backward ? 0 : (forward ? 1 : -1);
 					SnowboardControl.setTiltTarget(self.getId(), tilt);
 					SnowboardControl.tickTilt(self.getId());
 					// 身体被 carve 转了之后，视角要跟着被拉回「新朝向 ± 限制」之内（不然会甩过 180 度）

@@ -186,11 +186,9 @@ public final class SkiGlide {
 		// 只有“前冲”那一口力限制在贴地时给。
 		Input input = player.getLastClientInput();
 		double speed = player.getDeltaMovement().horizontalDistance();
-		float turned = SnowboardControl.applyCarve(player.getId(), input, speed);
-		if (turned == 0.0F) {
+		if (SnowboardControl.applyCarve(player, input, speed) == 0.0F) {
 			return;
 		}
-		SnowboardControl.rotateVelocity(player, turned);   // 速度跟着拐（从高处落下来的那份也算上）
 		if (!SkiControl.canSteer(player) || speed >= SnowboardControl.carveMaxSpeed()) {
 			return;   // 前冲这种“加力”只在贴地且还没到上限时给
 		}

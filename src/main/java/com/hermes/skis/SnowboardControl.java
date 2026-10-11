@@ -137,13 +137,18 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>carve 转向</b>：A / D 的侧压决定往哪转；<b>没按 A / D 时，只要滑动速度够，光前 / 后倾也能转</b>
-	 * （前倾走一边、后倾走另一边）。<b>后倾＝后刃</b>：同样的侧压，转向与前倾相反。
-	 * 服务端与客户端每 tick 各跑一次同样的规则，两边朝向保持一致（客户端管相机与模型、服务端管力）。
+	 * <b>carve 一步</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并<b>把速度方向对齐到同一侧</b>
+	 * （相对新朝向的左 / 右）。服务端与客户端各跑一次，两边朝向与速度方向保持一致。
+	 *
+	 * <p>为什么速度方向要对齐而不是“自己慢慢旋”：用户反馈“按 S 方向变了但速度没跟上转向”、
+	 * “左右移动加前后倾会被拖慢” —— 根因是速度方向与输入方向各走一套、互相拉扯。
+	 * 统一成“速度方向 = 相对当前身体朝向的侧向”之后，朝向每 tick 转多少，速度方向就跟着转多少。
+	 *
+	 * <p>腾空也照跑（从高处落下时要能带着速度拐弯）。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
-	public static float applyCarve(int entityId, Input input, double speed) {
+	public static float applyCarve(Entity entity, Input input, double speed) {
 		if (input == null || (!input.forward() && !input.backward())) {
 			// 只在“压刃”时切雪：光按 A / D 是纯横移，不加前冲、也不转向
 			return 0.0F;
@@ -158,31 +163,23 @@ public final class SnowboardControl {
 		} else if (input.backward()) {
 			side = -side;   // 后倾＝后刃：同样的侧压，转向与前倾相反（“S 应该是向后”）
 		}
-		if (side == 0.0D) {
-			return 0.0F;
-		}
+		int entityId = entity.getId();
 		float delta = (float) (side * TURN_RATE_DEGREES);   // +＝左转（yaw 增大），-＝右转
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
+		alignVelocity(entity, side);
 		return delta;
 	}
 
-	/**
-	 * 把实体的水平速度绕 Y 轴转 {@code degrees}（与身体朝向同向）——
-	 * 转向时速度要跟着拐，否则“从高处落下来带着的那份速度”不听使唤。
-	 * 服务端与客户端都要调用（本地玩家的位置权威在客户端，光服务端转看不见效果）。
-	 */
-	public static void rotateVelocity(Entity entity, float degrees) {
+	/** 把速度的<b>方向</b>对齐到「相对当前身体朝向的 side 那一侧」，大小不变（切雪时板是横着走的）。 */
+	private static void alignVelocity(Entity entity, double side) {
 		Vec3 motion = entity.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
-		if (horizontal.lengthSqr() < 1.0E-6D) {
+		double magnitude = horizontal.length();
+		if (magnitude < 1.0E-4D) {
 			return;
 		}
-		double rad = Math.toRadians(degrees);
-		double cos = Math.cos(rad);
-		double sin = Math.sin(rad);
-		double x = horizontal.x * cos - horizontal.z * sin;
-		double z = horizontal.z * cos + horizontal.x * sin;
-		entity.setDeltaMovement(x, motion.y, z);
+		Vec3 target = sideLocked(entity.getId(), entity.getYRot(), side);
+		entity.setDeltaMovement(target.x * magnitude, motion.y, target.z * magnitude);
 		entity.hurtMarked = true;
 	}
 
