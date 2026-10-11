@@ -236,23 +236,14 @@ public final class SkiGlide {
 		double decay;
 		if (SnowboardControl.isSnowboard(player)) {
 			// ——— 单板 ———
-			double side = SnowboardControl.sideSign(keys);
-			boolean braking = keys != null && keys.backward();   // 按 S 也是刹车
-			if (side != 0.0D) {
-				// 按的那一侧与当前滑行方向相反 → 相当于“给反向速度”，即刹车（用户：向左滑时按 D 就减速）
-				Vec3 axis = SnowboardControl.sideLocked(id, player.getYRot(), side);
-				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
-				if (horizontal.lengthSqr() > 1.0E-6D && horizontal.normalize().dot(axis) < 0.0D) {
-					braking = true;
-				} else {
-					momentum = Math.max(momentum, speed);
-				}
-			} else {
-				momentum = Math.max(momentum, speed);
+			if (SnowboardControl.sideSign(keys) != 0.0D) {
+				// 单板的减速就是“横向移动本身”：向左滑时按 D，原版会把人往右挪，速度自然抵消。
+				// 所以这里**不覆盖玩家速度、也不额外扣动量**（S 完全不刹车），
+				// 只把动量对齐到当前实际速度 —— 否则动量会托着旧速度，反着按等于白按。
+				MOMENTUM.put(id, speed);
+				return;
 			}
-			if (braking) {
-				momentum *= SnowboardControl.brakeRetain();   // 比例衰减：不会把速度一口气压到 0
-			}
+			momentum = Math.max(momentum, speed);
 			decay = SnowboardControl.momentumDecay();
 		} else {
 			// ——— 双板 ———
