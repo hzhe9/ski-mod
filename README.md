@@ -139,7 +139,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
-| `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.45 / 0.15 | 单板滑行时**两只手**的固定前抬角（微微抬起，-0.45 rad ≈ 26°）/ 外张角（不复用会走原版走路摆臂） |
+| `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | 0.0 / 0.28 | 单板滑行时**两只手**的姿势：`xRot`=0（**不前抬**）、`zRot`=0.28 rad ≈ 16°（**向两侧微微抬起**，左右对称）。不复用会走原版走路摆臂 |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |
 
 ### 模型几何
