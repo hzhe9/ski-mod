@@ -36,10 +36,10 @@ public final class SkiGlide {
 
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
-	/** 每下落 1 格加多少水平速度。 */
-	private static final double GAIN_PER_BLOCK = 0.08D;
-	/** 单 tick 最多加多少（防止悬崖一瞬间给爆）。 */
-	private static final double MAX_GAIN_PER_TICK = 0.3D;
+	/** 每下落 1 格加多少水平速度（用户 2026-10 要求加大：0.08 → 0.18）。 */
+	private static final double GAIN_PER_BLOCK = 0.18D;
+	/** 单 tick 最多加多少（防止悬崖一瞬间给爆；随 GAIN_PER_BLOCK 一起放宽）。 */
+	private static final double MAX_GAIN_PER_TICK = 0.5D;
 
 	/** 动量每 tick 保留的比例：越接近 1 越滑、越慢停（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.985D;
