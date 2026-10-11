@@ -36,10 +36,10 @@ public final class SkiGlide {
 
 	/** 每累计下落这么多格算一次，按次均匀给速度。 */
 	private static final double STEP_BLOCKS = 1.0D;
-	/** 每下落 1 格加多少水平速度（用户 2026-10 要求加大：0.08 → 0.18）。 */
-	private static final double GAIN_PER_BLOCK = 0.18D;
-	/** 单 tick 最多加多少（防止悬崖一瞬间给爆；随 GAIN_PER_BLOCK 一起放宽）。 */
-	private static final double MAX_GAIN_PER_TICK = 0.5D;
+	/** 每下落 1 格加多少水平速度（单板与双板<b>共用这一个值</b>；0.18 被用户判“太快”，回落到 0.10）。 */
+	private static final double GAIN_PER_BLOCK = 0.10D;
+	/** 单 tick 最多加多少（防止悬崖一瞬间给爆）。 */
+	private static final double MAX_GAIN_PER_TICK = 0.3D;
 
 	/** 动量每 tick 保留的比例：越接近 1 越滑、越慢停（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.985D;
@@ -209,11 +209,9 @@ public final class SkiGlide {
 	}
 
 	/**
-	 * 下落加速的方向。
-	 *
-	 * <p>单板：<b>往哪滑就往哪边加</b> —— 有横向速度就沿当前运动方向；还没动起来但按着 A / D 就沿那一侧；
-	 * 两个都没有（直上直下地掉）就不加，免得“莫名往前”。注意这条<b>不受</b>
-	 * {@link #travelDirection} 那个“单板不拨方向”的限制 —— 下落加速本来就该沿当前运动方向加。
+	 * 下落加速的方向（单板与双板同一套优先级）：
+	 * 有横向速度 → 沿当前移动方向；按着 A / D → 沿那一侧；都没有 → 沿身体前方。
+	 * 保证“只要在往下掉就总有方向可加”，不然一停下来就完全不加速。
 	 */
 	private static Vec3 descentDirection(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
@@ -221,8 +219,12 @@ public final class SkiGlide {
 			return new Vec3(motion.x, 0.0D, motion.z).normalize();
 		}
 		if (SnowboardControl.isSnowboard(player)) {
-			// 单板只看**当前移动方向**：没在动就没有方向（不加），不管下落本身朝哪、也不管是不是在空中
-			return null;
+			// 单板也要“总有方向”，否则一静止就完全不加（双板那条永远有方向，一对比就看出来）
+			double side = SnowboardControl.sideSign(player.getLastClientInput());
+			if (side != 0.0D) {
+				return SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);   // 按着 A / D：沿那一侧
+			}
+			return SnowboardControl.frontLocked(player.getId(), player.getYRot());           // 都没有：沿身体前方
 		}
 		return steerDirection(player);
 	}
