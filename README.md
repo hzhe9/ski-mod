@@ -66,9 +66,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速 |
-| `FALL_GAIN_PER_BLOCK` | 0.08 | **双板**下落基数：实得增量 = `0.08 × (累计格数)^0.8` —— **边际递减** |
-| `BOARD_GAIN_PER_BLOCK` | 0.08 | **单板**同项，同一条曲线 `0.08 × (累计格数)^0.8`，只取左右分量 |
-| `FALL_GAIN_EXPONENT` | 0.8 | 两板共用的曲线指数（1 = 线性、0.5 = 开方；0.8 = 很缓的边际递减）。改小 = 衰减更猛 |
+| `FALL_GAIN_PER_BLOCK` | 0.1 | **双板**下落基数 |
+| `BOARD_GAIN_PER_BLOCK` | 0.1 | **单板**同项（只取左右分量） |
+| `FALL_GAIN_EXPONENT` | 1.0 | 两板共用的曲线指数。**当前 1.0 = 线性**（用户要求先去掉衰减试手感）；0.8 = 很缓的边际递减、0.5 = 开方 |
 | `STEP_UP_PENALTY` | 0.04 格/tick | 滑上 1 格台阶扣掉的水平速度（动量一起扣，否则下一步被托回来） |
 | `STEP_UP_MIN_HEIGHT` | 0.5 格 | 判定“上了一格台阶”的最小抬升高度 |
 | `VEER_SMOOTHING` / `VEER_MAX_DEGREES` | 0.35 / 4° | 单板只用 W/S 时的平滑趋近系数与单 tick 上限（替代原“固定 2°/tick + 到目标死停”） |
@@ -129,7 +129,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|---|
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
-| `BOARD_LEG_SPREAD` | `SkiStance` | 2.0 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
+| `BOARD_LEG_SPREAD` | `SkiStance` | 2.8 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
 | `TILT_LERP` | `SnowboardControl` | 0.25 | 俯仰姿态每 tick 向目标靠拢的比例（≈10 tick 到位）—— 倾斜是渐进的 |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
 | `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 90.0 度 | 头（视角）相对锁定身体朝向的最大偏转，左右各一份 |
@@ -139,7 +139,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
-| `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.25 / 0.15 | 单板滑行时**空着的那只手**的固定前抬角 / 外张角（不复用会走原版走路摆臂） |
+| `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.45 / 0.15 | 单板滑行时**两只手**的固定前抬角（微微抬起，-0.45 rad ≈ 26°）/ 外张角（不复用会走原版走路摆臂） |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |
 
 ### 模型几何
@@ -184,8 +184,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.08 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
-| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.05 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.5 / `MOMENTUM_DECAY` 0.996） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.985 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
