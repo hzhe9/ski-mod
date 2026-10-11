@@ -27,7 +27,7 @@ public final class SkisControl {
 	private static final double MAX_SPEED = 1.4D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
-	private static final double MOMENTUM_DECAY = 0.985D;
+	private static final double MOMENTUM_DECAY = 0.993D;   // 原 0.985（约 2 秒掉一半）太涩，用户要求滑得久一点
 
 	/** 按 S（后倾）刹车的额外衰减：0.90 ≈ 半秒停住，松开后不会被动量拉回原速。 */
 	private static final double BRAKE_DECAY = 0.90D;

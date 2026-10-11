@@ -42,6 +42,8 @@ public final class SkiGlide {
 	private static final double STICK_DOWN = 0.08D;
 	/** 贴地时的下落速度上限（别再快了，免得落地太硬）。 */
 	private static final double STICK_DOWN_MAX = 0.8D;
+	/** 只有脚底离地不超过这么多格时才贴地（更远＝真的在坠落，交给原版重力）。 */
+	private static final double STICK_MAX_DROP = 2.5D;
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
@@ -198,6 +200,11 @@ public final class SkiGlide {
 		}
 		Vec3 motion = player.getDeltaMovement();
 		if (motion.y >= 0.0D) {
+			return;
+		}
+		// ⚠️ 只在“脚底下很近就是地面”（下坡 / 蹭着坡面）时才贴 ——
+		// 否则从高处跳下会变成匀速下坠，把原版的重力加速弄没了（用户实测到了这一点）。
+		if (SkiControl.groundDistance(player) > STICK_MAX_DROP) {
 			return;
 		}
 		player.setDeltaMovement(motion.x, Math.max(motion.y - STICK_DOWN, -STICK_DOWN_MAX), motion.z);

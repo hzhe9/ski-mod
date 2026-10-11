@@ -95,7 +95,7 @@ public final class SkiControl {
 	}
 
 	/** 脚底到下方地面的距离（格）；下面探不到东西就返回一个很大的值。 */
-	private static double groundDistance(ServerPlayer player) {
+	public static double groundDistance(ServerPlayer player) {
 		Vec3 from = player.position();
 		Vec3 to = from.add(0.0D, -(STEER_MAX_HEIGHT + 0.1D), 0.0D);
 		BlockHitResult hit = player.level().clip(new ClipContext(from, to,
