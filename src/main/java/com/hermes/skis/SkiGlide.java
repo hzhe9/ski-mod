@@ -43,7 +43,7 @@ public final class SkiGlide {
 	/** 贴地时的下落速度上限（别再快了，免得落地太硬）。 */
 	private static final double STICK_DOWN_MAX = 0.8D;
 	/** 只有脚底离地不超过这么多格时才贴地（更远＝真的在坠落，交给原版重力）。 */
-	private static final double STICK_MAX_DROP = 2.5D;
+	private static final double STICK_MAX_DROP = 1.0D;   // 脚底离地不超过 1 格才贴地（用户定）
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
