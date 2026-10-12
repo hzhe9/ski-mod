@@ -1,15 +1,15 @@
-"""生成 skis 模组的全部贴图与模型贴图（6 种款式）。
+"""生成 skis 模组的全部贴图（6 种款式）。
 
 产物（`<v>` = 款式 key：wood / graphite / topo / brushed / neon / leopard；
        **wood 是基础款，文件不带后缀**）：
-  assets/skis/textures/item/modern_ski[_<v>].png       高山滑雪板物品图标（16x16）
-  assets/skis/textures/item/snowboard[_<v>].png        滑雪单板物品图标（16x16）
   assets/skis/textures/entity/ski_board[_<v>].png      双板脚上模型贴图（128x32）
   assets/skis/textures/entity/snowboard[_<v>].png      单板脚上模型贴图（128x32）
   assets/skis/textures/item/ski_pole.png               滑雪杖 3D 模型贴图（64x64）
-  assets/skis/textures/item/ski_pole_icon.png          滑雪杖物品栏图标（16x16）
   assets/skis/textures/entity/equipment/humanoid/modern_ski.png 备用护甲层（旧方案）
-  assets/skis/icon.png                                 mod 图标
+  assets/skis/icon.png                                 mod 图标（底板上贴一块石墨款板子图形）
+
+物品栏图标**不在本脚本里**：6 款板 + 杖的图标都是真 3D 模型（`elements` 复用上面的实体贴图），
+生成器是 `tools/gen_item_icons.py`；旧的 16x16 平面图标方案已废弃、连文件一起删掉了。
 
 UV 约定（CubeListBuilder 自动布局；⚠ 板面 v 轴与板的前后方向**相反**，v=0 在板尾，
 所以「板头那一段」画在 v 的高端）：
@@ -184,7 +184,8 @@ def snowboard_sheet(v):
 
 
 def ski_icon(v):
-    """高山滑雪板物品图标：一对平行斜放的板（板头用 tip 色、板面主色 + 中线点缀）。"""
+    """16x16 的高山滑雪板图形：**只给 mod 图标用**（`mod_icon()` 把它放大后贴在底板上）。
+    物品栏图标是真 3D 模型，不走这里。"""
     c = v["icon"]
     img = blank()
     length = 11
@@ -201,24 +202,6 @@ def ski_icon(v):
     return img
 
 
-def snowboard_icon(v):
-    """滑雪单板物品图标：斜放的窄板（twin-tip 两头同色）+ 两道固定器横带。"""
-    c = v["icon"]
-    img = blank()
-    length = 13
-    x0, y0 = 1, 14
-    for t in range(length):
-        x, y = x0 + t, y0 - t
-        color = c["tip"] if (t < 2 or t >= length - 2) else c["main"]
-        for w in range(2):
-            put(img, x + w, y, color)
-            put(img, x + w, y + 1, color)
-        if t in (4, 5, 8, 9):
-            for w in range(2):
-                put(img, x + w, y, c["binding"])
-    return img
-
-
 def pole_texture():
     """滑雪杖 3D 模型贴图：64x64，杖身 / 握把 / 挡雪盘三个 UV 分区。"""
     img = blank(64, 64)
@@ -231,20 +214,6 @@ def pole_texture():
     for y in range(0, 16, 3):
         for x in range(48, 64, 3):
             put(img, x + (y // 3) % 3, y, BASKET_DK)
-    return img
-
-
-def pole_icon():
-    """滑雪杖物品栏图标：握把在上、杖身居中、挡雪盘靠近杖尖。"""
-    img = blank()
-    fill(img, 7, 1, 9, 15, SHAFT)
-    fill(img, 7, 1, 8, 15, SHAFT_HI)
-    fill(img, 9, 1, 10, 15, (120, 132, 144, 255))
-    fill(img, 6, 0, 10, 4, GRIP)
-    fill(img, 6, 0, 10, 1, GRIP_HI)
-    fill(img, 4, 12, 12, 14, BASKET)
-    fill(img, 4, 13, 12, 14, BASKET_DK)
-    fill(img, 7, 14, 9, 16, SHAFT)
     return img
 
 
@@ -289,7 +258,6 @@ def main():
         os.makedirs(d, exist_ok=True)
     outputs = {
         os.path.join(TEX_ITEM, "ski_pole.png"): pole_texture(),
-        os.path.join(TEX_ITEM, "ski_pole_icon.png"): pole_icon(),
         os.path.join(TEX_ARMOR, "modern_ski.png"): armor_layer(),
         ICON: mod_icon(),
     }
@@ -297,8 +265,6 @@ def main():
         sfx = "" if v["key"] == BASE_KEY else "_" + v["key"]
         outputs[os.path.join(TEX_ENTITY, f"ski_board{sfx}.png")] = ski_board(v)
         outputs[os.path.join(TEX_ENTITY, f"snowboard{sfx}.png")] = snowboard_sheet(v)
-        outputs[os.path.join(TEX_ITEM, f"modern_ski{sfx}.png")] = ski_icon(v)
-        outputs[os.path.join(TEX_ITEM, f"snowboard{sfx}.png")] = snowboard_icon(v)
     for path, image in outputs.items():
         image.save(path)
         print("written:", os.path.relpath(path, ROOT), image.size)

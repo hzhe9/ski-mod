@@ -30,17 +30,33 @@
 因为任何款式的板都算 `skis:modern_ski` / `skis:snowboard`，**已做好的其他款式也能再改款**（换款式不亏材料）。
 滑雪杖：铁粒×1 + 木棍×2（`I` / `S` / `S`，一次出 2 根）。
 
+### 物品属性（都在 `SkisMod` 注册时写死）
+
+| 项 | 值 |
+|---|---|
+| 堆叠 / 耐久 | `stacksTo(1)` / `durability(390)`（板与杖都不可堆叠） |
+| 护甲 | `Attributes.ARMOR +2`（`EquipmentSlotGroup.FEET`，ADD_VALUE） |
+| 移速 | `Attributes.MOVEMENT_SPEED +0.010`（ADD_VALUE；原版玩家基础 0.1 → 0.11，即穿上快约 10%） |
+| 装备音效 / 装备资源 | `ARMOR_EQUIP_LEATHER` / `equipment/modern_ski.json`（`skis:modern_ski`） |
+| 创造栏 | 每款板各一条（`VARIANTS` 6 × 2）+ 1 根滑雪杖 |
+
 ## 分支
 
 | 分支 | 手臂 | 冲刺 |
 |---|---|---|
-| `main` | **平时不动**，只有右键撑杖才播放一次摆臂（从最高处往下摆到最后处，再收回最高处） | 右键一次：速度抬到「当前 + 0.35」，再在 60 tick（3 秒）内线性回到「右键当时的原速」 |
+| `main` | **平时不动**，只有右键撑杖才播放一次摆臂（从最高处往下摆到最后处，再收回最高处） | 右键一次：速度抬到「当前 + `ADD`（0.06）」，再在 60 tick（3 秒）内线性回到「右键当时的原速」 |
 | `swing` | 滑行时**双臂持续同相划动**；滞空或落地不满 5 tick 时停在离地前最后一帧姿势 | 无（只有撑杖推进） |
 
-两版共用物品注册、模型、贴图、配方、滑行物理；差异只在手臂与冲刺这几处文件：
+两版共用物品注册、模型、贴图、配方、滑行物理。**这里不维护差异文件清单**（枚举一次就会过期）——
+要清单直接跑：
 
-- 只在 `main`：`SkiBoost.java`（冲刺尾焰）、`SwingHooks.java`（main→client 的动画钩子）
-- 两版都有但内容不同：`SkiState.java`、`SkisClient.java`、`HumanoidModelMixin.java`、`SkiPoleItem.java`、`SkisMod.java`
+```bash
+git diff --name-only main swing          # 全部差异文件
+git diff --stat main swing               # 带行数
+```
+
+只有两条稳定的归属关系值得记住：`SkiBoost.java`（冲刺）与 `SwingHooks.java`（main→client 的动画钩子）**只在 `main`**；
+`swing` 用 `SkiArmorRenderer` 而 `main` 是 `BoardArmorRenderer`（前者不带单板）。
 
 ## 构建与装机
 
@@ -81,26 +97,27 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 ## 贴图与模型生成
 
 ```bash
-/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py      # 实体贴图（脚上模型 / 物品图标共用）
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图同上）
 ```
 
+**物品栏图标不是贴图**：6 款板 + 杖的图标都是 `elements` 形式的 3D 物品模型（见上节），贴图直接复用下表的实体贴图 ——
+所以换配色只跑 `gen_assets.py`、图标跟着变。
+
 款式全在 `tools/gen_assets.py` 顶部的 `VARIANTS` 表里（`top` 板面底色、`ops` 板面花纹区间、`base/side/tip`
-板身其他面、`boot/boot_hi/buckle` 雪鞋三色、`icon` 物品图标四色）。**`wood` 是基础款，产物文件名不带后缀**，
+板身其他面、`boot/boot_hi/buckle` 雪鞋三色；`icon` 四色只给 `icon.png` 里那块板子用）。**`wood` 是基础款，产物文件名不带后缀**，
 其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 一条衍生配方 + 两个 lang 键。
 ⚠ 板面 UV 的 v 轴与板的前后方向相反（v=0 是板尾），板头那一段要画在 v 的高端；改板身长宽会整体挪动所有 u 数字。
 
-产物（全部在 `src/main/resources/assets/skis/`）：
+产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **15 个 png**）：
 
 | 文件 | 尺寸 | 用途 |
 |---|---|---|
-| `textures/item/modern_ski.png` | 16×16 | 双板物品图标 |
-| `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区） |
-| `textures/item/ski_pole_icon.png` | 16×16 | 滑雪杖 2D 图标（`pole_icon()` 画，**当前 GUI 不用它**，留作备用） |
-| `textures/item/snowboard.png` | 16×16 | 单板物品图标 |
-| `textures/entity/ski_board.png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头） |
-| `textures/entity/snowboard.png` | 128×32 | 单板脚上模型 |
-| `textures/entity/equipment/humanoid/modern_ski.png` | 64×32 | 备用护甲层贴图 |
-| `icon.png` | 128×128 | mod 图标 |
+| `textures/entity/ski_board[_<款>].png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头）；**同时是双板物品图标的贴图** |
+| `textures/entity/snowboard[_<款>].png` | 128×32 | 单板脚上模型；**同时是单板物品图标的贴图** |
+| `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区），脚上手上与物品栏共用 |
+| `textures/entity/equipment/humanoid/modern_ski.png` | 64×32 | 备用护甲层贴图（`equipment/modern_ski.json` 引用） |
+| `icon.png` | 128×128 | mod 图标（`fabric.mod.json` 引用） |
 
 贴图用的是 `CubeListBuilder` 的**自动 UV 布局**，各面落在固定像素区（脚本注释里写了每个 box 占哪块）。
 **改板子尺寸必须同步改脚本里对应的 `fill` 区域**，否则板子会渲染成透明/串色。
@@ -176,6 +193,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 常量 | 位置 | 当前值 | 作用 |
 |---|---|---|---|
+| `BASE_LEG_X` | `SkiStance` | 1.9 | 双板腿的**基础**横向位置；`legOffsetX()` = `BASE_LEG_X` + `LEG_SPREAD` = 2.8 |
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.8 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
@@ -195,6 +213,16 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SKI_FREE_ARM_XROT` / `SKI_FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.25 / 0.28 | **双板空手**（那只手没拿滑雪杖）时两臂的姿势：`xRot`=-0.25 rad ≈ 14°（**向前微抬**，负值＝向前）、`zRot`=±0.28 rad ≈ 16°（**向两侧微抬**）。拿杖的那只手仍走撑杖姿势 |
 | `SWING_TICKS` | `SkiState` | 12 | 一次摆臂动画时长（0.6 秒） |
 
+### 零散常量（各处，也常被问到）
+
+| 常量 | 位置 | 当前值 | 作用 |
+|---|---|---|---|
+| `MIN_MOTION_SQR` | `SkiGlide` | 0.008 | 水平速度的平方低于它就算「没在动」：不沿当前方向兜底加下落加速、也不接管动量 |
+| `TILT_EPSILON` | `SnowboardControl` | 0.01 | 俯仰角与目标差小于它就视为到位，停止补间 |
+| `MAX_ENTRIES` | `SkiGlide` / `SnowboardControl` / `SkiBoost` | 64 | 静态表（动量 / 锁定朝向 / 冲刺）条数上限，超了**整表清空**，防地图残留状态泄漏 |
+| `COOLDOWN_TICKS` | `item/SkiPoleItem` | 10（0.5 s） | 两次撑杖之间的冷却；冷却中右键直接 `FAIL`（所以连撑最快 0.5 s 一次） |
+| `BOARD_TOP` | `SkiBoardModel` / `SnowboardModel` | 23.0 | 板身与翘头在模型空间里的 y 值（板顶面高度） |
+
 ### 模型几何
 
 - 双板 `SkiBoardModel`：板宽 3、厚 1、长 **24 单位（= 150 cm，落在成人全能板 155–175 cm 区间下沿；含翘头总长 26 单位 = 162.5 cm）**、靴子**居中（前 12 / 后 12，对应现实高山板的居中安装点）**、板头 box(3,1,2) `texOffs(20,26)`
@@ -212,7 +240,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `SkisMod.java` | 物品注册、创造栏、装备资源；`isModernSki` / `isSkiFeet` 判定 |
 | `item/SkiPoleItem.java` | 滑雪杖右键行为（客户端摆臂 + 服务端冲刺） |
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
-| `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进 |
+| `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进、脚上装备的台阶高度 |
+| `SkisControl.java` | **双板专属数值**（下落基数 / 单 tick 上限 / 速度上限 1.4 / 动量衰减 0.99 / 刹车 0.90）＋双板按键转向；不持有朝向状态（视角即朝向） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量、取消 `makeJump` |
@@ -224,6 +253,9 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟） |
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
 | `mixin/client/SnowboardHeadLimitMixin.java` | 单板时在 `Entity#turn` 末尾把视角 yaw 夹到「锁定身体朝向 ± `VIEW_LIMIT_DEGREES`」 |
+| `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |
+| `mixin/client/LivingEntityFallSoundMixin.java` | 穿板落地**不响闷响**（`LivingEntity#playBlockFallSound` HEAD cancel） |
+| `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
