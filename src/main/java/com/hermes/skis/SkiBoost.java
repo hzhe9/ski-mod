@@ -40,8 +40,8 @@ public final class SkiBoost {
 	/**
 	 * 按右键到真正加速之间的延迟（tick）。
 	 *
-	 * <p>动画总长 {@code SkiState.SWING_TICKS} = 12 tick，举起占 25%、下摆约到 70% ——
-	 * “杖点下去”大约在第 7 tick，所以这里也等 7 tick 再给速度，动作和发力才对得上。
+	 * <p>动画总长 {@code SkiState.SWING_TICKS} = 12 tick，这里等 5 tick 再给速度 ——
+	 * 举手到点地的那一小段过去之后发力，动作和冲劲才对得上。
 	 */
 	private static final int DELAY_TICKS = 5;
 

@@ -113,17 +113,16 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 |---|---|---|
 | `STEP_BLOCKS` | 1.0 | 每累计下降这么多格结算一次加速（**双板**；单板另有自己的 0.1 格步长，见下一行） |
 | `DESCENT_STEP_BLOCKS`（单板） | 0.1 | **单板的结算步长**（`SnowboardControl`）：每降 0.1 格结算一次 —— 每格的<b>总量不变</b>（仍 0.1/格），只是拆成十份，下坡第一格就立刻有反应（原来要攒满 1 格才有第一份，用户报“一开始没有加速”） |
-| `FALL_GAIN_PER_BLOCK` | 0.1 | **双板**下落基数 |
-| `BOARD_GAIN_PER_BLOCK` | 0.1 | **单板**同项（只取左右分量） |
+| `FALL_GAIN_PER_BLOCK`（双板） | 0.1 | **双板**下落基数（`SkisControl`） |
+| `FALL_GAIN_PER_BLOCK`（单板） | 0.1 | **单板**同项（`SnowboardControl`；只取左右分量） |
 | `FALL_GAIN_PER_TICK_MAX` | 两板均 0.3 | **单 tick 下落加速上限**：一次结算最多加这么多（防止从高处一步把速度给爆） |
 | `FALL_GAIN_EXPONENT` | 1.0 | 两板共用的曲线指数。**当前 1.0 = 线性**（用户要求先去掉衰减试手感）；0.8 = 很缓的边际递减、0.5 = 开方 |
-| `STICK_DOWN` / `STICK_DOWN_MAX` / `STICK_MAX_DROP` | 0.08 / 0.8 / 2.5 | **双板下坡贴地**：没在地面、正在下落、**没按跳跃键**、且**脚底离地 ≤ 1 格**时，每 tick 额外补向下速度（贴坡面滑，不弹跳）。⚠️ 离地更远＝真的在坠落，完全不插手，保留原版重力加速 |
+| `STICK_DOWN` / `STICK_DOWN_MAX` / `STICK_MAX_DROP` | 0.08 / 0.8 / 1.0 | **双板下坡贴地**：没在地面、正在下落、**没按跳跃键**、且**脚底离地 ≤ 1 格**时，每 tick 额外补向下速度（贴坡面滑，不弹跳）。⚠️ 离地更远＝真的在坠落，完全不插手，保留原版重力加速 |
 | `STEP_UP_PENALTY` | 0.04 格/tick | 滑上 1 格台阶扣掉的水平速度（动量一起扣，否则下一步被托回来） |
 | `STEP_UP_MIN_HEIGHT` | 0.5 格 | 判定“上了一格台阶”的最小抬升高度 |
 | `VEER_SMOOTHING` / `VEER_MAX_DEGREES` | 0.35 / 4° | 单板只用 W/S 时的平滑趋近系数与单 tick 上限（替代原“固定 2°/tick + 到目标死停”） |
 | `MAX_SPEED`（单板） | 0.55 格/tick | 单板速度上限 ≈ 11 m/s ≈ 40 km/h（参照：原版步行 0.216、疾跑 0.281、创造飞行 0.545 格/tick） |
 | `MAX_SPEED`（双板） | 1.4 格/tick | 双板速度上限 ≈ 100 km/h |
-| `MAX_GAIN_PER_TICK` | 0.3 | 单 tick 最多加多少（悬崖分几 tick 给） |
 | `MOMENTUM_DECAY` | 0.99 | 滑行动量每 tick 保留比例 ＝ 有效摩擦力（双板；0.985 太涩 → 0.993 → 用户定 0.99） |
 | `ADD` / `MIN_PEAK` | 0.06 / 0.32 | 滑雪杖助推（原 0.1 / 0.45，用户要“慢一点”） |
 | `MOMENTUM_DECAY` | 0.99 | 单板（用户 2026-10-11 定 0.99，与双板同值；0.99 = 每 tick 保留 99%，1 秒后剩 81.8%，半衰期 3.45 s） |
@@ -167,8 +166,8 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 常量 | 当前值 | 作用 |
 |---|---|---|
-| `ADD` | 0.1 | 每次右键在"当前速度"之上抬高多少 |
-| `MIN_PEAK` | 0.45 | 起步速度下限（站着撑着也能冲出去） |
+| `ADD` | 0.06 | 每次右键在"当前速度"之上抬高多少 |
+| `MIN_PEAK` | 0.32 | 起步速度下限（站着撑着也能冲出去） |
 | `DURATION_TICKS` | 60 | 冲刺持续 3 秒后回到原速 |
 | `CURVE` | 1.0 | 衰减曲线（1.0 = 线性匀速缓降，越大越"先猛后缓"） |
 | `LIFT` | 0.12 | 右键那一下的向上分量 |
@@ -190,7 +189,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 | `GLIDE_KNEE_BEND` / `GLIDE_LEAN` | `HumanoidModelMixin` | 0.08 / 0.05 | 屈膝角度 / 身体前倾（单板腿位） |
 | `SKI_LEG_TILT` | `HumanoidModelMixin` | -0.15 | **双板**：腿（身体下半部分）往后倾出去的角度，配合前倾的上身 |
 | `ARM_REST` / `RAISE_FRACTION` | `HumanoidModelMixin` | -0.55 / 0.25 | 持杖静止时手的位置（**不举到最高**）/ 右键动画里“先举到最高”所占比例 |
-| `DELAY_TICKS` | `SkiBoost` | 5 | **按右键到手杖真正发力之间的延迟**：动画里“杖点下去”大约在第 7 tick（总长 12），所以发力也等 7 tick，动作与冲劲才对得上 |
+| `DELAY_TICKS` | `SkiBoost` | 5 | **按右键到手杖真正发力之间的延迟**：动画总长 12 tick，这里等 5 tick 再发力，动作与冲劲才对得上 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
 | `FREE_ARM_XROT` / `FREE_ARM_ROLL` | `HumanoidModelMixin` | 0.0 / 0.28 | 单板滑行时**两只手**的姿势：`xRot`=0（**不前抬**）、`zRot`=0.28 rad ≈ 16°（**向两侧微微抬起**，左右对称）。不复用会走原版走路摆臂 |
 | `SKI_FREE_ARM_XROT` / `SKI_FREE_ARM_ROLL` | `HumanoidModelMixin` | -0.25 / 0.28 | **双板空手**（那只手没拿滑雪杖）时两臂的姿势：`xRot`=-0.25 rad ≈ 14°（**向前微抬**，负值＝向前）、`zRot`=±0.28 rad ≈ 16°（**向两侧微抬**）。拿杖的那只手仍走撑杖姿势 |
@@ -200,10 +199,10 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 - 双板 `SkiBoardModel`：板宽 3、厚 1、长 **24 单位（= 150 cm，落在成人全能板 155–175 cm 区间下沿；含翘头总长 26 单位 = 162.5 cm）**、靴子**居中（前 12 / 后 12，对应现实高山板的居中安装点）**、板头 box(3,1,2) `texOffs(20,26)`
   - 板腰宽为什么不按现实的 85–95 mm 压到 1.4 单位：**看的是比例**——现实「靴宽 12 cm : 板腰 9 cm ≈ 0.75」，我们的靴子是 4 单位宽，所以 3 单位才是同比例的现实值；压到 1.4 单位会比靴子窄 3 倍，MC 里细成一根线
-- 单板 `SnowboardModel`：板宽 9、厚 1、板身长 **22 单位（150 cm 减去两头翘头；前 11 / 后 11 —— 人物站在板的几何正中）** + **板头 / 板尾两块上翘 box(9,1,2)**（`texOffs(90,0)` / `(90,4)`）＝ **twin-tip：两头一样翘、前后左右都对称、板面花纹也是两端各一段白 + 中间青色中线**，含翘总长 26 单位 = 162.5 cm（现实 twin 板 145–165）；整组绕 Y 转 90° 横在脚下；两只鞋 box(4,6,4) **建在模型根节点下**（与腿同一坐标系、同一横向偏移 `BOARD_LEG_SPREAD`）—— 放进转了 90° 的板组里会让鞋与腿朝向差 90°，看起来就是“脚歪了”
+- 单板 `SnowboardModel`：板宽 4、厚 1、板身长 **22 单位（= 137.5 cm；前 11 / 后 11 —— 人物站在板的几何正中）** + **板头 / 板尾两块上翘 box(4,1,2)**（`texOffs(90,0)` / `(90,4)`）＝ **twin-tip：两头一样翘、前后左右都对称、板面花纹也是两端各一段白 + 中间青色中线**，含翘总长 26 单位 = 162.5 cm（现实 twin 板 145–165）；整组绕 Y 转 90° 横在脚下；两只鞋 box(4,6,4) **建在模型根节点下**（与腿同一坐标系、同一横向偏移 `BOARD_LEG_SPREAD`）—— 放进转了 90° 的板组里会让鞋与腿朝向差 90°，看起来就是“脚歪了”
   - ⚠️ 加/改这块的翘头时，新的 box 需要**自己一块不重叠的 UV 区**（板尾用 `(90,4)`，紧挨板头的 `(90,0)` 下方），并且别压到板身“侧面那一行”（板身 dz=22 时是第 22 行）
 - 滑雪杖 `models/item/ski_pole.json`：杖身总长 **21.6 单位（握柄顶 16.5 → 杖尖 −5.1）= 135 cm**（现实成人杖 105–135，按身高 ≈ ×0.68；改长度时**保持握柄不动**、只收起下端，手的位置与 display 偏移都不用重调）、挡雪盘（雪轮）随杖尖上移。**GUI 只显示模型 y 0~16 这段**，所以：
-  - 物品栏走 `ski_pole_gui.json` —— **一版独立的 3D 短模型**（杖尖 y1.0 / 挡雪盘 y2.2 / 杖身 y3.4~13.5 / 握把 y13.5~16，全部落在 0~16 内），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
+  - 物品栏走 `ski_pole_gui.json` —— **一版独立的 3D 短模型**（杖身 y2.0~12.89 / 握把 y12.89~14.0 / 挡雪盘 y2.39~2.83，全部落在 0~16 内），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
   - 长模型自己的 `display.gui` 另给了 `scale 0.55 + translation.y 1.0` 兜底 —— 万一某个上下文没命中 case 落到 fallback，整根杖也能完整落在框内，不会只剩上半截。
 
 ## 架构速览
@@ -240,7 +239,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.997 / `DESCENT_STEP_BLOCKS` 0.1） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `DESCENT_STEP_BLOCKS` 0.1） |
 | **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
