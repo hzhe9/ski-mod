@@ -12,3 +12,10 @@
 
 1. **数值只写在 `tuning.md`**，其它文档不复制数值（复制过的都过期了）。
 2. **枚举类清单不手写**：分支差异、文件清单这类用 `git` 现取（`git diff --name-only main swing`）。
+
+改完文档 / 资源后跑一次守卫（退出码非 0 就是有问题）：
+
+```bash
+python tools/check_docs.py            # 常量对表 + 死资源 + 两个生成器的产物可复现性
+python tools/check_docs.py --skip-assets
+```
