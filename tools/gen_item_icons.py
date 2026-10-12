@@ -34,10 +34,11 @@ VARIANTS = ["wood", "graphite", "topo", "brushed", "neon", "leopard"]
 BASE = "wood"
 
 # 图标的显示变换（GUI 里那一眼的角度）—— 只旋转不缩放，缩放交给几何体自己
-# rx=+90：板面（花纹面）朝镜头、板头朝上；rx=-90 会正反颠倒（底面朝外）还板头朝下（用户 2026-10-12 实机反馈改）
+# rx=+90：板面（花纹面）朝镜头（−90 会底面朝外，用户 2026-10-12 实机确认）；
+# rz=170：画面内转正 —— +90 的上下是颠倒的（白条跑到下端），rz 再转 180° 把上下扳回、不碰朝外面。
 GUI_DISPLAY = {
-    "modern_ski": {"rotation": [90, 20, -10], "translation": [0, 0, 0], "scale": [1, 1, 1]},
-    "snowboard": {"rotation": [90, 20, -10], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "modern_ski": {"rotation": [90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "snowboard": {"rotation": [90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
 }
 
 # 图标里要不要带雪鞋：不带 = 只看板子（小尺寸下更清楚，与原来的 2D 图标观感一致）；
