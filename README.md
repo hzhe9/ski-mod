@@ -8,13 +8,13 @@
 |---|---|---|---|
 | `skis:modern_ski` | 高山滑雪板（双板 / Alpine Skis） | 脚部（靴子） | 两块平行的板（长 24 单位 = 150 cm），两腿各向外平移 0.9 单位 |
 | `skis:snowboard` | 滑雪单板（Snowboard） | 脚部（靴子） | 一只板（宽 4、长 22 单位 + 两头各 2 单位翘头 = **twin-tip**，含翘总长 26 单位 = 162.5 cm），两脚**平行并列**站在板上；穿上后完全站定、身体不跟视角转，只有 A/D 能沿身体左右平移（见下「单板」） |
-| `skis:ski_pole` | 滑雪杖 | 手 | 右键撑杖 → 一次摆臂 + 一段逐渐衰减的冲刺（`main` 分支）；手上是 3D 长杖，物品栏是标准 2D 图标 |
+| `skis:ski_pole` | 滑雪杖 | 手 | 右键撑杖 → 一次摆臂 + 一段逐渐衰减的冲刺（`main` 分支）；手上与物品栏都是**真 3D 模型**（物品栏走缩进一格的 GUI 版 `models/item/ski_pole_gui.json`，不再是平面图标） |
 
 ### 6 种外观款式（纯装饰）
 
 两种板各有 6 款，**数值完全相同**，款式只写在成品的两个原版组件里：
 
-- `minecraft:item_model` → 换物品图标 + 脚上模型贴图（`assets/skis/models/item/<id>_<款>.json`）
+- `minecraft:item_model` → 换物品图标 + 脚上模型贴图：图标是**真 3D 模型**（`assets/skis/models/item/<id>_<款>.json`，方块模型 `elements` 格式，**直接复用脚上那张 128x32 贴图**，不另画图）；角度由模型自己的 `display.gui.rotation` 决定
 - `minecraft:custom_name` → 翻译键 `item.skis.<id>.<款>`（中英各一份 lang，可本地化）
 
 | # | 款式 | 中文名 | 英文名 | 双板配方（无序） | 单板配方（无序） |
@@ -54,6 +54,29 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 - 实例目录：`G:/games/Minecraft/Minecraft/.minecraft/versions/26.2-Fabric 0.19.3`
 - 同一个 mod id 的两个 jar **不能同时启用**：不用的那个改名成 `xxx.jar.disabled` 即可随时切换
 - 只改数值常量时**编译通过即可**；改到 Mixin / 模型层注册 / 装备注册这类"只有启动才暴露"的东西才需要启动一次自检
+
+## 物品图标（真 3D）
+
+图标不是 16x16 平面图，而是**方块模型格式的 3D `elements` 模型**，贴图复用脚上那套 `textures/entity/*.png`
+（6 款配色自动跟着走）。生成：
+
+```bash
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py
+```
+
+它把 `SkiBoardModel` / `SnowboardModel` 的 addBox 几何按「实体空间 → 方块空间 → 按 display 旋转算投影 →
+缩放居中到一格 (8,8,8)」生成模型，并逐面算出 uv（方块模型的 `uv` 是 0..16 名义坐标、不是像素；
+每面方向按 `FaceBakery.defaultFaceUV`）。
+
+| 物品 | `display.gui.rotation` | 说明 |
+|---|---|---|
+| `modern_ski` | `[-40, 10, -10]` | 换算自脚上视图（yaw=25 / pitch=-30），斜置 |
+| `snowboard` | `[-90, 20, -10]` | 竖起来 + 一点侧倾 |
+| `ski_pole_gui` | `[6, 22, -8]` | 一点倾斜，露出两个面 |
+
+**关键坑**（细节见 Hermes 技能 `minecraft-mod-support` §7b）：方块模型 y 朝上 ⇒ `up` 面在 **max y**，
+与实体模型（y 向下）相反；`display` 旋转顺序是 **X→Y→Z** ⇒ 细长扁平的物品要把长边摆斜必须用 **rz**，
+只改 rx 只会把宽度转进来（板子仍是一条线）。改角度前先跑一次「脚上模型 vs 图标模型同相机对照」自证朝向。
 
 ## 贴图与模型生成
 
