@@ -34,11 +34,11 @@ VARIANTS = ["wood", "graphite", "topo", "brushed", "neon", "leopard"]
 BASE = "wood"
 
 # 图标的显示变换（GUI 里那一眼的角度）—— 只旋转不缩放，缩放交给几何体自己
-# rx=+90：板面（花纹面）朝镜头（−90 会底面朝外，用户 2026-10-12 实机确认）；
-# rz=170：画面内转正 —— +90 的上下是颠倒的（白条跑到下端），rz 再转 180° 把上下扳回、不碰朝外面。
+# ⚠ 旋转顺序 = 先 Z 再 Y 后 X（见 rot_vec；实机三轮才试对）：
+#   rx=-90 + rz=170：花纹面朝镜头、上下与首版一致；rx 翻号会露出底面，rz 差 180° 上下会颠倒。
 GUI_DISPLAY = {
-    "modern_ski": {"rotation": [90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
-    "snowboard": {"rotation": [90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "modern_ski": {"rotation": [-90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "snowboard": {"rotation": [-90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
 }
 
 # 图标里要不要带雪鞋：不带 = 只看板子（小尺寸下更清楚，与原来的 2D 图标观感一致）；
@@ -184,14 +184,19 @@ def element_for_box(box, to_model):
 
 
 def rot_vec(rot, p):
-    """按 MC 的 display 旋转顺序（X→Y→Z，见 ItemTransform + JOML rotationXYZ=qz*qy*qx）转一个向量。"""
+    """按 MC 的 display 旋转顺序转一个向量：**先 Z、再 Y、最后 X**（v' = Rx·Ry·Rz·v）。
+
+    依据：① 原版 ItemTransform.apply 依次 mulPose(XP/YP/ZP)，PoseStack 后乘 ⇒ 矩阵 qx·qy·qz
+    ⇒ 向量上 Z 最先；② Blockbench 显示预览（three.js Euler 'XYZ' → Rx·Ry·Rz）同构；
+    ③ 实机三轮反馈全吻合（2026-10-12）。旧注释写的“X→Y→Z”是把代码顺序当成了作用顺序 —— 错过三轮。
+    """
     x, y, z = p
-    a = math.radians(rot[0])
-    y, z = y * math.cos(a) - z * math.sin(a), y * math.sin(a) + z * math.cos(a)
-    a = math.radians(rot[1])
-    x, z = x * math.cos(a) + z * math.sin(a), -x * math.sin(a) + z * math.cos(a)
     a = math.radians(rot[2])
     x, y = x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a)
+    a = math.radians(rot[1])
+    x, z = x * math.cos(a) + z * math.sin(a), -x * math.sin(a) + z * math.cos(a)
+    a = math.radians(rot[0])
+    y, z = y * math.cos(a) - z * math.sin(a), y * math.sin(a) + z * math.cos(a)
     return (x, y, z)
 
 
