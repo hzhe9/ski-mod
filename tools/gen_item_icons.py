@@ -21,10 +21,9 @@ import math
 import os
 import sys
 
-ROOT = r"D:/hermes/item/game/git/ski-mod-push"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 仓库根（本脚本在 tools/ 下）
 RES = os.path.join(ROOT, "src", "main", "resources", "assets", "skis")
 MODELS = os.path.join(RES, "models", "item")
-OUT = r"C:/Users/97685/Desktop/output"
 
 ENTITIES = os.path.join(RES, "textures", "entity")
 TEX_W, TEX_H = 128, 32          # 脚上贴图尺寸

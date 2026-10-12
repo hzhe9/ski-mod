@@ -1,0 +1,64 @@
+# 资源管线（贴图 / 模型 / 图标 / 款式）
+
+> 生成器怎么跑、产物有哪些、几何与 UV 的约定。
+
+## 物品图标（真 3D）
+
+图标不是 16x16 平面图，而是**方块模型格式的 3D `elements` 模型**，贴图复用脚上那套 `textures/entity/*.png`
+（6 款配色自动跟着走）。生成：
+
+```bash
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py
+```
+
+它把 `SkiBoardModel` / `SnowboardModel` 的 addBox 几何按「实体空间 → 方块空间 → 按 display 旋转算投影 →
+缩放居中到一格 (8,8,8)」生成模型，并逐面算出 uv（方块模型的 `uv` 是 0..16 名义坐标、不是像素；
+每面方向按 `FaceBakery.defaultFaceUV`）。
+
+| 物品 | `display.gui.rotation` | 说明 |
+|---|---|---|
+| `modern_ski` | `[-90, 20, -10]` | 竖起来 + 一点侧倾（与单板同角度） |
+| `snowboard` | `[-90, 20, -10]` | 竖起来 + 一点侧倾 |
+| `ski_pole_gui` | `[6, 22, -8]` | 一点倾斜，露出两个面 |
+
+**关键坑**：方块模型 y 朝上 ⇒ `up` 面在 **max y**，
+与实体模型（y 向下）相反；`display` 旋转顺序是 **X→Y→Z** ⇒ 细长扁平的物品要把长边摆斜必须用 **rz**，
+只改 rx 只会把宽度转进来（板子仍是一条线）。改角度前先跑一次「脚上模型 vs 图标模型同相机对照」自证朝向。
+
+## 贴图与模型生成
+
+```bash
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py      # 实体贴图（脚上模型 / 物品图标共用）
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图同上）
+```
+
+**物品栏图标不是贴图**：6 款板 + 杖的图标都是 `elements` 形式的 3D 物品模型（见上节），贴图直接复用下表的实体贴图 ——
+所以换配色只跑 `gen_assets.py`、图标跟着变。
+
+款式全在 `tools/gen_assets.py` 顶部的 `VARIANTS` 表里（`top` 板面底色、`ops` 板面花纹区间、`base/side/tip`
+板身其他面、`boot/boot_hi/buckle` 雪鞋三色；`icon` 四色只给 `icon.png` 里那块板子用）。**`wood` 是基础款，产物文件名不带后缀**，
+其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 一条衍生配方 + 两个 lang 键。
+⚠ 板面 UV 的 v 轴与板的前后方向相反（v=0 是板尾），板头那一段要画在 v 的高端；改板身长宽会整体挪动所有 u 数字。
+
+产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **15 个 png**）：
+
+| 文件 | 尺寸 | 用途 |
+|---|---|---|
+| `textures/entity/ski_board[_<款>].png` | 128×32 | 双板脚上模型（雪鞋 + 板身 + 板头）；**同时是双板物品图标的贴图** |
+| `textures/entity/snowboard[_<款>].png` | 128×32 | 单板脚上模型；**同时是单板物品图标的贴图** |
+| `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区），脚上手上与物品栏共用 |
+| `textures/entity/equipment/humanoid/modern_ski.png` | 64×32 | 备用护甲层贴图（`equipment/modern_ski.json` 引用） |
+| `icon.png` | 128×128 | mod 图标（`fabric.mod.json` 引用） |
+
+贴图用的是 `CubeListBuilder` 的**自动 UV 布局**，各面落在固定像素区（脚本注释里写了每个 box 占哪块）。
+**改板子尺寸必须同步改脚本里对应的 `fill` 区域**，否则板子会渲染成透明/串色。
+
+### 模型几何
+
+- 双板 `SkiBoardModel`：板宽 3、厚 1、长 **24 单位（= 150 cm，落在成人全能板 155–175 cm 区间下沿；含翘头总长 26 单位 = 162.5 cm）**、靴子**居中（前 12 / 后 12，对应现实高山板的居中安装点）**、板头 box(3,1,2) `texOffs(20,26)`
+  - 板腰宽为什么不按现实的 85–95 mm 压到 1.4 单位：**看的是比例**——现实「靴宽 12 cm : 板腰 9 cm ≈ 0.75」，我们的靴子是 4 单位宽，所以 3 单位才是同比例的现实值；压到 1.4 单位会比靴子窄 3 倍，MC 里细成一根线
+- 单板 `SnowboardModel`：板宽 4、厚 1、板身长 **22 单位（= 137.5 cm；前 11 / 后 11 —— 人物站在板的几何正中）** + **板头 / 板尾两块上翘 box(4,1,2)**（`texOffs(90,0)` / `(90,4)`）＝ **twin-tip：两头一样翘、前后左右都对称、板面花纹也是两端各一段白 + 中间青色中线**，含翘总长 26 单位 = 162.5 cm（现实 twin 板 145–165）；整组绕 Y 转 90° 横在脚下；两只鞋 box(4,6,4) **建在模型根节点下**（与腿同一坐标系、同一横向偏移 `BOARD_LEG_SPREAD`）—— 放进转了 90° 的板组里会让鞋与腿朝向差 90°，看起来就是“脚歪了”
+  - ⚠️ 加/改这块的翘头时，新的 box 需要**自己一块不重叠的 UV 区**（板尾用 `(90,4)`，紧挨板头的 `(90,0)` 下方），并且别压到板身“侧面那一行”（板身 dz=22 时是第 22 行）
+- 滑雪杖 `models/item/ski_pole.json`：杖身总长 **21.6 单位（握柄顶 16.5 → 杖尖 −5.1）= 135 cm**（现实成人杖 105–135，按身高 ≈ ×0.68；改长度时**保持握柄不动**、只收起下端，手的位置与 display 偏移都不用重调）、挡雪盘（雪轮）随杖尖上移。**GUI 只显示模型 y 0~16 这段**，所以：
+  - 物品栏走 `ski_pole_gui.json` —— **一版独立的 3D 短模型**（杖身 y2.0~12.89 / 握把 y12.89~14.0 / 挡雪盘 y2.39~2.83，全部落在 0~16 内），由 `items/ski_pole.json` 的 `minecraft:select`（`property: display_context`，`when: "gui"` 单值写法）分流；
+  - 长模型自己的 `display.gui` 另给了 `scale 0.55 + translation.y 1.0` 兜底 —— 万一某个上下文没命中 case 落到 fallback，整根杖也能完整落在框内，不会只剩上半截。
