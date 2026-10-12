@@ -4,6 +4,8 @@
        **wood 是基础款，文件不带后缀**）：
   assets/skis/textures/entity/ski_board[_<v>].png      双板脚上模型贴图（128x32）
   assets/skis/textures/entity/snowboard[_<v>].png      单板脚上模型贴图（128x32）
+  assets/skis/textures/item/ski_board[_<v>].png        上两者的同名副本 —— 物品图标模型专用（entity/ 不进物品图集）
+  assets/skis/textures/item/snowboard[_<v>].png        同上（单板）
   assets/skis/textures/item/ski_pole.png               滑雪杖 3D 模型贴图（64x64）
   assets/skis/textures/entity/equipment/humanoid/modern_ski.png 备用护甲层（旧方案）
   assets/skis/icon.png                                 mod 图标（底板上贴一块石墨款板子图形）
@@ -171,15 +173,15 @@ def ski_board(v):
 
 
 def snowboard_sheet(v):
-    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(4,1,22) + 板头/板尾 box(4,1,2) 各一（twin-tip）。"""
+    """单板脚上模型贴图（128x32）：雪鞋 + 板身 box(5.76,1,22) + 板头/板尾 box(5.76,1,2) 各一（twin-tip）。"""
     img = blank(128, 32)
     draw_boot(img, v)
-    paint_top(img, (42, 0, 46, 22), v, twin=True)      # 板面（两头镜像）
-    fill(img, 46, 0, 50, 22, v["base"])                # 板底
-    fill(img, 20, 22, 72, 23, v["side"])               # 板侧一圈
+    paint_top(img, (42, 0, 48, 22), v, twin=True)      # 板面（两头镜像）：宽 5.76 → u42..47.76，画到 48
+    fill(img, 47, 0, 54, 22, v["base"])                # 板底：u47.76..53.52（先画底、板面盖掉重叠的 0.24px）
+    fill(img, 20, 22, 76, 23, v["side"])               # 板侧一圈（2d+2w = 55.52 → 画到 76）
     for y0 in (0, 4):                                  # 板头 / 板尾同款
-        fill(img, 90, y0, 102, y0 + 3, v["tip"])
-        fill(img, 92, y0, 96, y0 + 2, v["tip_up"])
+        fill(img, 90, y0, 106, y0 + 3, v["tip"])       # 翘头侧带 2d+2w = 15.52 → 画到 106
+        fill(img, 92, y0, 98, y0 + 2, v["tip_up"])     # 翘头板面 d..d+w = 2..7.76 → 画到 98
     return img
 
 
@@ -265,6 +267,10 @@ def main():
         sfx = "" if v["key"] == BASE_KEY else "_" + v["key"]
         outputs[os.path.join(TEX_ENTITY, f"ski_board{sfx}.png")] = ski_board(v)
         outputs[os.path.join(TEX_ENTITY, f"snowboard{sfx}.png")] = snowboard_sheet(v)
+        # 同名副本进 textures/item/：**物品模型只能引用织进物品图集的贴图**（textures/entity/ 不进图集，
+        # 引用它 = 图标紫黑缺失；脚上模型走实体渲染器直接读文件，不受影响）。两份内容始终一致。
+        outputs[os.path.join(TEX_ITEM, f"ski_board{sfx}.png")] = ski_board(v)
+        outputs[os.path.join(TEX_ITEM, f"snowboard{sfx}.png")] = snowboard_sheet(v)
     for path, image in outputs.items():
         image.save(path)
         print("written:", os.path.relpath(path, ROOT), image.size)

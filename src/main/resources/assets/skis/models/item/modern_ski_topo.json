@@ -20,8 +20,8 @@
     }
   },
   "textures": {
-    "tex": "skis:entity/ski_board_topo",
-    "particle": "skis:entity/ski_board_topo"
+    "tex": "skis:item/ski_board_topo",
+    "particle": "skis:item/ski_board_topo"
   },
   "elements": [
     {

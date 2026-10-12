@@ -2,15 +2,9 @@
   "type": "minecraft:crafting_shapeless",
   "category": "equipment",
   "ingredients": [
-    {
-      "item": "skis:snowboard"
-    },
-    {
-      "item": "minecraft:coal"
-    },
-    {
-      "item": "minecraft:iron_ingot"
-    }
+    "skis:snowboard",
+    "minecraft:coal",
+    "minecraft:iron_ingot"
   ],
   "result": {
     "id": "skis:snowboard",

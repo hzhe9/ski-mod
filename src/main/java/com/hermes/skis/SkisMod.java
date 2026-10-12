@@ -2,7 +2,7 @@ package com.hermes.skis;
 
 import com.hermes.skis.item.SkiPoleItem;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
+import net.fabricmc.fabric.api.creativetab.v1.FabricCreativeModeTab;
 import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -16,7 +16,6 @@ import net.minecraft.world.entity.EquipmentSlotGroup;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.CreativeModeTab;
-import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
@@ -105,13 +104,20 @@ public class SkisMod implements ModInitializer {
 		SkiGlide.register();
 		SkiBoost.register();
 
-		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES).register(output -> {
-			for (String variant : VARIANTS) {
-				output.accept(variantStack(MODERN_SKI, "modern_ski", variant), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
-				output.accept(variantStack(SNOWBOARD, "snowboard", variant), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
-			}
-			output.accept(new ItemStack(SKI_POLE), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
-		});
+		// 独立创造标签页（mod 常规做法；不再往原版「工具与实用设施」页里塞）
+		CreativeModeTab tab = FabricCreativeModeTab.builder()
+				.title(Component.translatable("itemGroup.skis"))
+				.icon(() -> new ItemStack(MODERN_SKI))
+				.displayItems((params, output) -> {
+					for (String variant : VARIANTS) {
+						output.accept(variantStack(MODERN_SKI, "modern_ski", variant));
+						output.accept(variantStack(SNOWBOARD, "snowboard", variant));
+					}
+					output.accept(new ItemStack(SKI_POLE));
+				})
+				.build();
+		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB,
+				Identifier.fromNamespaceAndPath(MOD_ID, "ski"), tab);
 
 		LOGGER.info("[skis] 现代滑雪板 / 滑雪单板（脚部装备）/ 滑雪杖（手持实体）已加载（右键冲刺变体）");
 	}

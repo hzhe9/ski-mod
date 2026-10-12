@@ -2,15 +2,9 @@
   "type": "minecraft:crafting_shapeless",
   "category": "equipment",
   "ingredients": [
-    {
-      "item": "skis:modern_ski"
-    },
-    {
-      "item": "minecraft:leather"
-    },
-    {
-      "item": "minecraft:ink_sac"
-    }
+    "skis:modern_ski",
+    "minecraft:leather",
+    "minecraft:ink_sac"
   ],
   "result": {
     "id": "skis:modern_ski",

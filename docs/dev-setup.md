@@ -36,7 +36,7 @@ git diff --stat main swing               # 带行数
 
 | 文件 | 职责 |
 |---|---|
-| `SkisMod.java` | 物品注册、创造栏、装备资源；`isModernSki` / `isSkiFeet` 判定 |
+| `SkisMod.java` | 物品注册、独立创造标签页（`itemGroup.skis`）、装备资源；`isModernSki` / `isSkiFeet` 判定 |
 | `item/SkiPoleItem.java` | 滑雪杖右键行为（客户端摆臂 + 服务端冲刺） |
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、低摩擦动量、雪面推进、脚上装备的台阶高度 |
@@ -70,7 +70,7 @@ git diff --stat main swing               # 带行数
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `DESCENT_STEP_BLOCKS` 0.1） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.11 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `DESCENT_STEP_BLOCKS` 0.5） |
 | **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 

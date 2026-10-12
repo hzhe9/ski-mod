@@ -13,5 +13,6 @@
   "item.skis.snowboard.topo": "Topo Snowboard",
   "item.skis.snowboard.brushed": "Brushed Snowboard",
   "item.skis.snowboard.neon": "Neon Snowboard",
-  "item.skis.snowboard.leopard": "Leopard Snowboard"
+  "item.skis.snowboard.leopard": "Leopard Snowboard",
+  "itemGroup.skis": "Ski Gear"
 }

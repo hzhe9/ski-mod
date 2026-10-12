@@ -20,8 +20,8 @@
     }
   },
   "textures": {
-    "tex": "skis:entity/ski_board_brushed",
-    "particle": "skis:entity/ski_board_brushed"
+    "tex": "skis:item/ski_board_brushed",
+    "particle": "skis:item/ski_board_brushed"
   },
   "elements": [
     {

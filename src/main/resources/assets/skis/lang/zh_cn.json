@@ -13,5 +13,6 @@
   "item.skis.snowboard.topo": "滑雪单板 · 等高线",
   "item.skis.snowboard.brushed": "滑雪单板 · 拉丝",
   "item.skis.snowboard.neon": "滑雪单板 · 霓虹",
-  "item.skis.snowboard.leopard": "滑雪单板 · 豹纹"
+  "item.skis.snowboard.leopard": "滑雪单板 · 豹纹",
+  "itemGroup.skis": "滑雪装备"
 }

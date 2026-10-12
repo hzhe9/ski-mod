@@ -61,9 +61,9 @@ def snowboard_boxes(side):
     if side == 0:
         yaw = 90.0
         return [
-            (20, 0, -2.0, 23.0, -11.0, 4, 1, 22, yaw),   # 板身
-            (90, 0, -2.0, 22.3, -13.0, 4, 1, 2, yaw),    # 板头
-            (90, 4, -2.0, 22.3, 11.0, 4, 1, 2, yaw),     # 板尾
+            (20, 0, -2.88, 23.0, -11.0, 5.76, 1, 22, yaw),   # 板身（宽 5.76 = 36 cm）
+            (90, 0, -2.88, 22.3, -13.0, 5.76, 1, 2, yaw),    # 板头
+            (90, 4, -2.88, 22.3, 11.0, 5.76, 1, 2, yaw),     # 板尾
         ]
     x = 2.8 * side
     return [(0, 0, x - 2.0, 18.0, -2.05, 4, 6, 4, 0.0)]  # 雪鞋
@@ -224,7 +224,8 @@ def build_board_model(board, variant):
         p = to_block(ex, ey, ez)
         return tuple((p[k] - center[k] + fix[k]) * scale + offs[k] for k in range(3))
 
-    tex = f"skis:entity/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
+    # 物品模型只能引用 textures/item/（entity/ 不进物品图集 → 图标紫黑缺失）
+    tex = f"skis:item/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
     if variant != BASE:
         tex += f"_{variant}"
     return {

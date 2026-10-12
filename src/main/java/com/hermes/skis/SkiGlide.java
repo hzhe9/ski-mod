@@ -127,7 +127,7 @@ public final class SkiGlide {
 
 		double accumulated = DESCEND_ACCUM.getOrDefault(id, 0.0D);
 		boolean board = SnowboardControl.isSnowboard(player);
-		// 结算步长按板取：双板 1.0 格一次，单板 0.1 格一次（开始下坡就立刻有反应）
+		// 结算步长按板取：双板 1.0 格一次，单板 0.5 格一次（下坡降没半格就有第一份）
 		double step = board ? SnowboardControl.descentStepBlocks() : STEP_BLOCKS;
 		if (accumulated < step) {
 			return;

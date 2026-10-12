@@ -2,15 +2,9 @@
   "type": "minecraft:crafting_shapeless",
   "category": "equipment",
   "ingredients": [
-    {
-      "item": "skis:modern_ski"
-    },
-    {
-      "item": "minecraft:iron_ingot"
-    },
-    {
-      "item": "minecraft:lapis_lazuli"
-    }
+    "skis:modern_ski",
+    "minecraft:iron_ingot",
+    "minecraft:lapis_lazuli"
   ],
   "result": {
     "id": "skis:modern_ski",
