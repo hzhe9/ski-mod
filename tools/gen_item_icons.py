@@ -36,8 +36,8 @@ BASE = "wood"
 
 # 图标的显示变换（GUI 里那一眼的角度）—— 只旋转不缩放，缩放交给几何体自己
 GUI_DISPLAY = {
-    "modern_ski": {"rotation": [240, -15, -35], "translation": [0, 0, 0], "scale": [1, 1, 1]},
-    "snowboard": {"rotation": [240, -15, -30], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "modern_ski": {"rotation": [-90, 20, -10], "translation": [0, 0, 0], "scale": [1, 1, 1]},
+    "snowboard": {"rotation": [-90, 20, -10], "translation": [0, 0, 0], "scale": [1, 1, 1]},
 }
 
 # 图标里要不要带雪鞋：不带 = 只看板子（小尺寸下更清楚，与原来的 2D 图标观感一致）；

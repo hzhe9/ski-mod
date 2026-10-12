@@ -70,7 +70,7 @@ cp -p build/libs/skis-mod-1.0.0.jar \
 
 | 物品 | `display.gui.rotation` | 说明 |
 |---|---|---|
-| `modern_ski` | `[-40, 10, -10]` | 换算自脚上视图（yaw=25 / pitch=-30），斜置 |
+| `modern_ski` | `[-90, 20, -10]` | 竖起来 + 一点侧倾（与单板同角度） |
 | `snowboard` | `[-90, 20, -10]` | 竖起来 + 一点侧倾 |
 | `ski_pole_gui` | `[6, 22, -8]` | 一点倾斜，露出两个面 |
 
