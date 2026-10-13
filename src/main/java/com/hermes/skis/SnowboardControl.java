@@ -64,6 +64,14 @@ public final class SnowboardControl {
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.99D;   // 用户 2026-10-11 定 0.99（与双板同值）
 	/**
+	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— 比平时更滑。
+	 *
+	 * <p>{@link #MOMENTUM_DECAY} 0.99 是平时的「有效摩擦力」（每 tick 掉 1%，1 秒 -18%）；
+	 * 转向时改用这个值：0.997 ≈ 每 tick 掉 0.3%（1 秒 -6%，一次 180° 的弯只掉 6%）。
+	 * 改成 <b>1.0</b> ＝ 转向全程完全不掉速；改回 0.99 ＝ 与直行同摩擦。
+	 */
+	private static final double CARVE_MOMENTUM_DECAY = 0.997D;
+	/**
 	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
 	 *
 	 * <p>双板是 1.0（每满 1 格才给一次），单板用 0.5 —— 每降半格结算一次，单次给
@@ -179,6 +187,25 @@ public final class SnowboardControl {
 	/** 单板：动量衰减（越接近 1 越滑）。 */
 	public static double momentumDecay() {
 		return MOMENTUM_DECAY;
+	}
+
+	/** 单板：<b>转向期间</b>的动量衰减（比 {@link #momentumDecay()} 更滑，见 {@link #CARVE_MOMENTUM_DECAY}）。 */
+	public static double carveMomentumDecay() {
+		return CARVE_MOMENTUM_DECAY;
+	}
+
+	/**
+	 * 这一 tick 是不是在<b>转向</b>（与 {@link #applyCarve} 的前置条件同一套判定）：压着刃（W / S）
+	 * 且转得动 —— 有侧压（A / D）一定在转，没侧压时要有滑速才转得动。
+	 *
+	 * <p>转向期间用 {@link #CARVE_MOMENTUM_DECAY} 的摩擦，而且反向侧压算「换刃」不算刹车
+	 * （见 {@link SkiGlide} 里的动量处理），否则刚起弯那一下速度会被原版摩擦吃掉一大截。
+	 */
+	public static boolean isCarving(Input input, double speed) {
+		if (input == null || (!input.forward() && !input.backward())) {
+			return false;
+		}
+		return sideSign(input) != 0.0D || speed >= CARVE_MIN_SPEED;
 	}
 
 	/** 单板：下落加速每累计这么多格结算一次（比双板的 1.0 格细）。 */

@@ -240,7 +240,11 @@ public final class SkiGlide {
 		if (SnowboardControl.isSnowboard(player)) {
 			// ——— 单板 ———
 			double side = SnowboardControl.sideSign(keys);
-			if (side != 0.0D) {
+			// 正在转向（压着刃）时，反向侧压是「换刃转向」而不是刹车 ——
+			// 走刹车分支（不托底、动量被对齐成当前速度）的话，起弯那一下速度会被原版摩擦＋反向输入吃掉一大截
+			// （实测 0.5 → 0.165，占 67%），而且动量被清掉后整段弯都回不到原来的速度。
+			boolean carving = SnowboardControl.isCarving(keys, speed);
+			if (side != 0.0D && !carving) {
 				// 分“同向 / 反向”两种按法：
 				//   反向（向左滑时按 D）＝刹车 —— 原版横移把人往右挪、速度自然抵消，
 				//   所以这里**不覆盖玩家速度、也不托动量**，只把动量对齐到当前实际速度（否则动量会托着旧速度，反着按等于白按）；
@@ -257,7 +261,8 @@ public final class SkiGlide {
 				}
 			}
 			momentum = Math.max(momentum, speed);
-			decay = SnowboardControl.momentumDecay();
+			// 转向期间用专门的（更小的）摩擦：转弯不该比直行还涩
+			decay = carving ? SnowboardControl.carveMomentumDecay() : SnowboardControl.momentumDecay();
 		} else {
 			// ——— 双板 ———
 			momentum = Math.max(momentum, speed);
