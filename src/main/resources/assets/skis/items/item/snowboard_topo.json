@@ -1,6 +1,19 @@
 {
-	"model": {
-		"type": "minecraft:model",
-		"model": "skis:item/snowboard_topo"
-	}
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:display_context",
+    "cases": [
+      {
+        "when": "gui",
+        "model": {
+          "type": "minecraft:model",
+          "model": "skis:item/snowboard_topo"
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:model",
+      "model": "skis:item/snowboard_topo_hand"
+    }
+  }
 }

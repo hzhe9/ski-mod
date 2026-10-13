@@ -31,6 +31,20 @@
 （旧文档写「X→Y→Z」，连错三轮）。细长扁平的物品要把长边摆斜必须用 **rz**，只改 rx 只会把宽度转进来（板子仍是一条线）。
 改角度前先跑一次「脚上模型 vs 图标模型同相机对照」自证朝向。
 
+### 手上 / 地面模型（`*_hand.json`）
+
+拿在手上的**不是图标几何**，而是**脚上模型的原尺寸几何**（去雪鞋、不缩放：双板全长 26 单位 ≈ 162 cm，
+单板 26 单位含翘头；`build_hand_model()` 只做实体→方块空间换算 + 居中），由 `gen_item_icons.py` 一并生成
+12 个 `<id>[_<款>]_hand.json`。**GUI 与手上的分流**照滑雪杖的模式，写在 `items/` 定义里（`display_context` select）：
+
+```
+gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面、展示框…）→ skis:item/<id>_hand
+```
+
+手上 display = **竖持姿态** `[90, 0, 0]`（板面朝镜头 + 板竖起来；顺序先 Z 后 X），
+pos/scale 照滑雪杖手上验证过的比例换算：3 人称 `translation [0,-7,1] / scale 0.85`、1 人称 `[1.13,-4,1.13] / scale 0.75`。
+（`HAND_DISPLAY` 常量在 `gen_item_icons.py`。）
+
 ## 贴图与模型生成
 
 ```bash
@@ -43,7 +57,7 @@
 
 款式全在 `tools/gen_assets.py` 顶部的 `VARIANTS` 表里（`top` 板面底色、`ops` 板面花纹区间、`base/side/tip`
 板身其他面、`boot/boot_hi/buckle` 雪鞋三色；`icon` 四色只给 `icon.png` 里那块板子用）。**`wood` 是基础款，产物文件名不带后缀**，
-其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 补 `items/item/<id>_<款>.json`（`item_model` 组件指向的**物品模型定义**，缺了图标=紫黑棋盘格）+ 一条衍生配方 + 两个 lang 键。
+其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 补 `models/item/<id>_<款>_hand.json`（两者都由 `gen_item_icons.py` 生成）+ 补 `items/item/<id>_<款>.json`（**select 分流**：gui→图标、fallback→hand；缺了图标=紫黑棋盘格）+ 一条衍生配方 + 两个 lang 键。
 ⚠ 板面 UV 的 v 轴与板的前后方向相反（v=0 是板尾），板头那一段要画在 v 的高端；改板身长宽会整体挪动所有 u 数字。
 
 产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **27 个 png**）：

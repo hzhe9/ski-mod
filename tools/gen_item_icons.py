@@ -41,6 +41,15 @@ GUI_DISPLAY = {
     "snowboard": {"rotation": [-90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
 }
 
+# 手上/地面用 display（*_hand.json 专用）：**竖持姿态 A** —— 板面朝外、板竖起来（用户 2026-10-12 选定）。
+# 位置/缩放照滑雪杖手上那套换算：模型中心 8 → scale 后 + translation ≈ 手位 1（ski_pole 实机验证过的比例）。
+HAND_DISPLAY = {
+    "thirdperson_righthand": {"rotation": [90, 0, 0], "translation": [0, -7, 1], "scale": [0.85, 0.85, 0.85]},
+    "thirdperson_lefthand": {"rotation": [90, 0, 0], "translation": [0, -7, 1], "scale": [0.85, 0.85, 0.85]},
+    "firstperson_righthand": {"rotation": [90, 0, 0], "translation": [1.13, -4, 1.13], "scale": [0.75, 0.75, 0.75]},
+    "firstperson_lefthand": {"rotation": [90, 0, 0], "translation": [1.13, -4, 1.13], "scale": [0.75, 0.75, 0.75]},
+}
+
 # 图标里要不要带雪鞋：不带 = 只看板子（小尺寸下更清楚，与原来的 2D 图标观感一致）；
 # 带 = 连两只雪鞋一起，更像脚上那一套。
 WITH_BOOTS = False
@@ -243,6 +252,37 @@ def build_board_model(board, variant):
     }
 
 
+# ------------------------------------------- 手上/地面模型（脚上几何、无鞋、原尺寸）
+def build_hand_model(board, variant):
+    """手（1/3 人称）与地面等上下文用：**脚上模型的原尺寸几何**，去掉雪鞋、不缩放。
+
+    - 几何与脚上完全一致（collect 已按 WITH_BOOTS 排除雪鞋），只做「实体空间 → 方块空间 → 居中 (8,8,8)」；
+    - 不做图标那种 11 格适配缩放 —— 手上要的是真板尺寸（双板全长 26 单位 ≈ 162 cm）；
+    - GUI 仍走图标模型：items/ 定义按 display_context 分流（gui → 图标，其余 → 本模型）；
+    - display 竖持 [90,0,0]（顺序先 Z 后 X ⇒ 板面朝镜头 + 竖起来），pos/scale 见 HAND_DISPLAY。
+    """
+    boxes = collect(board)
+    to_block = lambda ex, ey, ez: (ex, 24.0 - ey, ez)
+    pts = [to_block(b[2] + (b[5] if i & 1 else 0), b[3] + (b[6] if i & 2 else 0),
+                    b[4] + (b[7] if i & 4 else 0))
+           for b in boxes for i in range(8)]
+    center = [(min(p[k] for p in pts) + max(p[k] for p in pts)) / 2.0 for k in range(3)]
+
+    def to_model(ex, ey, ez):
+        p = to_block(ex, ey, ez)
+        return tuple(p[k] - center[k] + 8.0 for k in range(3))
+
+    tex = f"skis:item/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
+    if variant != BASE:
+        tex += f"_{variant}"
+    return {
+        "parent": "minecraft:item/handheld",
+        "display": dict(HAND_DISPLAY),
+        "textures": {"tex": tex, "particle": tex},
+        "elements": [element_for_box(b, to_model) for b in boxes],
+    }
+
+
 # ----------------------------------------------------------------- 滑雪杖 GUI 模型
 def build_pole_gui():
     """滑雪杖：把手上那根真 3D 杖缩进一格（uv 照抄原模型，只改几何坐标）。"""
@@ -288,6 +328,7 @@ def main():
             model = build_board_model(board, variant)
             if not dry:
                 write_json(os.path.join(MODELS, f"{board}{sfx}.json"), model)
+                write_json(os.path.join(MODELS, f"{board}{sfx}_hand.json"), build_hand_model(board, variant))
     if not dry:
         write_json(os.path.join(MODELS, "ski_pole_gui.json"), build_pole_gui())
     print("done", "(dry)" if dry else "")
