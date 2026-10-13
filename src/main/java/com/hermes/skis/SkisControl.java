@@ -27,7 +27,7 @@ public final class SkisControl {
 	private static final double MAX_SPEED = 1.4D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
-	private static final double MOMENTUM_DECAY = 0.99D;   // 与原版 0.985 相比更滑；用户定 0.99（两板一致）
+	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（两板同值）
 
 	private SkisControl() {
 	}

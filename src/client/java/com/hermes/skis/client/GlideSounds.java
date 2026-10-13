@@ -42,11 +42,11 @@ public final class GlideSounds {
 	/** 雪声（切雪）用的音效：原版雪地脚步。 */
 	private static final SoundEvent SNOW_SOUND = SoundEvents.SNOW_STEP;
 	/** 慢速时每多少 tick 响一声。 */
-	private static final int SNOW_INTERVAL_BASE = 6;
+	private static final int SNOW_INTERVAL_BASE = 8;
 	/** 速度每快 1 格/tick，间隔少多少 tick（夹到下限）。 */
-	private static final double SNOW_INTERVAL_PER_SPEED = 9.0D;
-	/** 最快时的间隔（tick）：2 tick 一声 ≈ 连成一片沙沙声。 */
-	private static final int SNOW_INTERVAL_MIN = 2;
+	private static final double SNOW_INTERVAL_PER_SPEED = 5.0D;
+	/** 最快时的间隔（tick）：别再密了，太密听上去像电流声（用户 2026-10-13 反馈「太密集」）。 */
+	private static final int SNOW_INTERVAL_MIN = 4;
 	/** 雪声音量 = 基础 + 速度 × 系数（夹到上限）。 */
 	private static final float SNOW_VOLUME_BASE = 0.12F;
 	private static final float SNOW_VOLUME_PER_SPEED = 0.5F;
@@ -75,6 +75,10 @@ public final class GlideSounds {
 		if (level == null) {
 			return;
 		}
+		if (client.isPaused()) {
+			silence(client);   // 暂停时立刻收声（原因见 silence 的注释）
+			return;
+		}
 		if (WIND.size() > MAX_ENTRIES) {
 			WIND.clear();
 			SNOW_TIMER.clear();
@@ -98,6 +102,24 @@ public final class GlideSounds {
 			}
 			SNOW_TIMER.put(id, timer);
 		}
+	}
+
+	/**
+	 * 暂停时立刻收声。
+	 *
+	 * <p>暂停（单人 Esc / 失焦）时游戏仍在渲染、{@code Minecraft#tick()} 照跑（所以本类每 tick 还是被调用），
+	 * 但声音引擎拿到的参数是「已暂停」——她只推进音乐，<b>不再推进游戏内的声音</b>：
+	 * 正在循环的风声会一直响下去，每几 tick 播一次的切雪声也会继续播。所以暂停时必须<b>主动停</b>：
+	 * 循环实例用 {@code SoundManager#stop(instance)}（立刻掐频道，不用等引擎下一次 tick 才认 stop 标记），
+	 * 已经在播的那一声切雪声按「音效 id + 声道」一次停掉。
+	 */
+	private static void silence(Minecraft client) {
+		for (WindSound wind : WIND.values()) {
+			client.getSoundManager().stop(wind);
+		}
+		WIND.clear();
+		SNOW_TIMER.clear();
+		client.getSoundManager().stop(SNOW_SOUND.location(), SoundSource.PLAYERS);
 	}
 
 	/** 在滑吗：穿着板、在雪 / 冰面上、脚底离地一格以内、有速度。 */
@@ -148,8 +170,9 @@ public final class GlideSounds {
 		@Override
 		public void tick() {
 			this.time++;
-			// 前 20 tick 先让它起播（和原版鞘翅一样，避免瞬间开关时的爆音）
-			if (this.player.isRemoved() || (this.time > 20 && !isGliding(this.player))) {
+			// 前 20 tick 先让它起播（和原版鞘翅一样，避免瞬间开关时的爆音）；暂停时立刻停
+			if (this.player.isRemoved() || Minecraft.getInstance().isPaused()
+					|| (this.time > 20 && !isGliding(this.player))) {
 				stop();
 				return;
 			}

@@ -65,15 +65,15 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
-	private static final double MOMENTUM_DECAY = 0.99D;   // 用户 2026-10-11 定 0.99（与双板同值）
+	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（与双板同值）
 	/**
-	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— 比平时更滑。
+	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— 比平时更滑（0.999 vs 0.998）。
 	 *
-	 * <p>{@link #MOMENTUM_DECAY} 0.99 是平时的「有效摩擦力」（每 tick 掉 1%，1 秒 -18%）；
-	 * 转向时改用这个值：0.997 ≈ 每 tick 掉 0.3%（1 秒 -6%，一次 180° 的弯只掉 6%）。
-	 * 改成 <b>1.0</b> ＝ 转向全程完全不掉速；改回 0.99 ＝ 与直行同摩擦。
+	 * <p>平时用 {@link #MOMENTUM_DECAY} 0.998（每 tick 掉 0.2%，1 秒 −4%）；转向期间用这个 0.999
+	 * （1 秒 −2%）—— 这是当初「减少转向过程中的摩擦」那条要求在 0.998 基线下的等价值。
+	 * 想让转向与直行完全一样就改成 0.998；想「转向完全不掉速」就改成 1.0。
 	 */
-	private static final double CARVE_MOMENTUM_DECAY = 0.997D;
+	private static final double CARVE_MOMENTUM_DECAY = 0.999D;
 	/**
 	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
 	 *
