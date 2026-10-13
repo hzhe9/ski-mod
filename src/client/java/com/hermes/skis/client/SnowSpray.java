@@ -14,6 +14,9 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -40,6 +43,8 @@ public final class SnowSpray {
 	private static final ParticleOptions SNOW = ParticleTypes.ITEM_SNOWBALL;
 	/** 速度低于这个（格/tick）就不持续扬雪 —— 慢慢挪一步不该扬雪。 */
 	private static final double MIN_SPEED = 0.10D;
+	/** 脚底离地面在这个高度以内就扬雪（格）：滑下坡时常常没踩着地，用「离地一格内」代替 `onGround`。 */
+	private static final double GROUND_RANGE = 1.0D;
 	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
 	private static final double SPRAY_PER_SPEED = 10.0D;
 	/** 贴地雪屑的每侧数量上限。 */
@@ -77,9 +82,9 @@ public final class SnowSpray {
 	/** 掉落之前至少得有这么快（站着不动凭空掉到 0 不算）。 */
 	private static final double BURST_MIN_SPEED = 0.12D;
 	/** 一团雪屑的粒子数 = 掉落量 × 这个系数（再夹到上限）。 */
-	private static final double BURST_PER_DROP = 260.0D;
+	private static final double BURST_PER_DROP = 450.0D;
 	/** 一团雪屑的粒子数上限（急刹那一 tick 的爆发量）。 */
-	private static final int BURST_MAX = 80;
+	private static final int BURST_MAX = 160;
 	/** 两团雪屑之间的最短间隔（tick）—— 持续刹车时就是「每隔几 tick 炸一团」。 */
 	private static final int BURST_COOLDOWN_TICKS = 3;
 	/** 雪屑炸开时的上升速度（抛向空中）。 */
@@ -97,7 +102,7 @@ public final class SnowSpray {
 	private SnowSpray() {
 	}
 
-	/** 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、在雪面上的人扬雪。 */
+	/** 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、在雪面上、脚底离地一格以内的人扬雪。 */
 	public static void tick(Minecraft client) {
 		ClientLevel level = client.level;
 		if (level == null) {
@@ -128,11 +133,23 @@ public final class SnowSpray {
 				burst(level, player, last - speed);
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
 			}
-			if (!player.onGround() || speed < MIN_SPEED) {
-				continue;   // 腾空 / 太慢：不持续扬雪
+			if (speed < MIN_SPEED || groundDistance(player, level) > GROUND_RANGE) {
+				continue;   // 太慢、或离地超过一格：不持续扬雪（贴地飞下坡照样扬）
 			}
 			spray(level, player, speed);
 		}
+	}
+
+	/** 脚底到下方地面的距离（格）；下面一格内什么都探不到就返回一个很大的值。 */
+	private static double groundDistance(Player player, ClientLevel level) {
+		Vec3 from = player.position();
+		Vec3 to = from.add(0.0D, -(GROUND_RANGE + 0.1D), 0.0D);
+		BlockHitResult hit = level.clip(new ClipContext(from, to,
+				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return Double.MAX_VALUE;
+		}
+		return from.y - hit.getLocation().y;
 	}
 
 	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多、后者还随速度抛得更高。 */

@@ -57,8 +57,11 @@ public final class SnowboardControl {
 	 */
 	private static final double MAX_SPEED = 0.55D;
 
-	/** 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大；用户 2026-10-12 定 0.11）。 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.11D;
+	/**
+	 * 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大）。
+	 * 0.11 → 0.13（用户 2026-10-13 要求「加大 0.02」）。
+	 */
+	private static final double FALL_GAIN_PER_BLOCK = 0.13D;
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
