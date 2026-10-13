@@ -72,15 +72,26 @@
 
 ### 滑行雪粒子 `SnowSpray.java`（纯客户端观感）
 
-穿着任一种板、在雪 / 冰面上、且速度 ≥ `MIN_SPEED` 时，每 tick 从**板的两侧**（与滑行方向垂直的左右两边）各溅起几颗雪屑：向后上方飞，越快越多。粒子种类是 `PARTICLE` = `ParticleTypes.ITEM_SNOWBALL`（雪块崩开的小白屑，最像飞雪；换成 `ParticleTypes.SNOWFLAKE` 就是慢慢飘的雪花）。纯客户端 `addParticle`，服务端不参与、也不影响任何速度。
+穿着任一种板、在雪 / 冰面上滑行时扬起的雪，**纯客户端观感**（`addParticle`）：服务端不参与，粒子多少不影响速度 —— 速度只决定粒子。三层：
+
+1. **贴地雪屑**：从**板的两侧**（与滑行方向垂直的左右两边）向外、略向上溅，数量随速度增加。粒子种类 `SPRAY` = `ParticleTypes.ITEM_SNOWBALL`（雪块崩开的小白屑，有重力、落地即没）。
+2. **上升雪雾**：同样从板两侧起，但**出生点随速度抬高、向上的初速度随速度线性增加 → 越快飘得越高**，数量也比雪屑涨得快。粒子种类 `FLURRY` = `ParticleTypes.SNOWFLAKE`（几乎不受重力，给了向上初速度就会飘上去 —— 这才是「飘向空中」那层）。
+3. **急减速雪雾**：一 tick 内水平速度掉了 `BURST_DROP` 以上（急停 / 撞墙 / 压刃刹车都会造成这个形状）就从脚下一圈炸开一大团上升雪雾，粒子数随掉落量增加，带 `BURST_COOLDOWN_TICKS` 冷却防抖。同一条规则也顺手管着「之前得够快」这一条（`BURST_MIN_SPEED`）。
 
 | 常量 | 当前值 | 作用 |
 |---|---|---|
-| `MIN_SPEED` | 0.10 格/tick | 低于这个速度不溅雪（慢慢挪一步不扬雪） |
-| `COUNT_PER_SPEED` / `MAX_PER_SIDE` | 6.0 / 2 | 每侧粒子数 = 速度 × `COUNT_PER_SPEED`，夹到 `MAX_PER_SIDE`（0.17 格/tick 起每侧 1 颗，0.34 以上每侧满 2 颗） |
+| `MIN_SPEED` | 0.10 格/tick | 低于这个速度不持续扬雪（慢慢挪一步不该扬雪） |
+| `SPRAY_PER_SPEED` / `SPRAY_MAX_PER_SIDE` | 6.0 / 2 | 贴地雪屑每侧数量 = 速度 × 系数，夹到上限（0.17 起每侧 1 颗，0.34 以上每侧满 2 颗） |
+| `FLURRY_PER_SPEED` / `FLURRY_MAX_PER_SIDE` | 8.0 / 2 | 上升雪雾每侧数量（比雪屑涨得快：0.13 起 1 颗，0.25 以上满 2 颗） |
+| `FLURRY_UPWARD` / `FLURRY_UPWARD_PER_SPEED` | 0.05 / 0.35 | 上升雪雾的向上初速度 = 基础 + 速度 × 系数（0.1 格/tick 时 0.085、0.55 时 0.24、1.4 时 0.54）—— **改这个就是「飘多高」** |
+| `FLURRY_HEIGHT_PER_SPEED` | 0.30 格 | 雪雾出生点随速度抬高的量（越快从越高处起飘） |
 | `SIDE_OFFSET` | 0.34 格 | 出生点离身体中线的横向距离（撒在脚的两侧，不是脚底下） |
-| `OUTWARD` / `UPWARD` / `BACKWARD` | 0.14 / 0.10 / 0.12 | 溅出速度的三个分量：向外、向上、向后（与滑行相反） |
+| `OUTWARD` / `UPWARD` / `BACKWARD` | 0.14 / 0.10 / 0.12 | 贴地雪屑溅出速度的三个分量：向外、向上、向后（与滑行相反） |
 | `SPREAD` / `Y_OFFSET` | 0.16 / 0.06 格 | 出生点的随机散布 / 相对脚底的高度偏移 |
+| `BURST_DROP` / `BURST_MIN_SPEED` | 0.15 / 0.15 格/tick | 急减速的判定：一 tick 掉超过 `BURST_DROP`、且掉之前快过 `BURST_MIN_SPEED` 才炸雪雾 |
+| `BURST_PER_DROP` / `BURST_MAX` | 90.0 / 30 | 一团雪雾的粒子数 = 掉落量 × 系数，夹到上限（掉 0.17 → 15 颗，掉 0.33 以上 → 满 30 颗） |
+| `BURST_COOLDOWN_TICKS` | 4 | 两团雪雾之间的最短间隔（防抖） |
+| `BURST_UPWARD` / `BURST_RADIUS` | 0.22 / 0.55 格 | 炸开时的上升速度 / 随机散布半径 |
 
 ### 落到雪面免摔伤 `SnowLanding.java`
 
@@ -126,7 +137,7 @@
 |---|---|---|---|
 | `MIN_MOTION_SQR` | `SkiGlide` | 0.008 | 水平速度的平方低于它就算「没在动」：不沿当前方向兜底加下落加速、也不接管动量 |
 | `TILT_EPSILON` | `SnowboardControl` | 0.01 | 俯仰角与目标差小于它就视为到位，停止补间 |
-| `MAX_ENTRIES` | `SkiGlide` / `SnowboardControl` / `SkiBoost` | 64 | 静态表（动量 / 锁定朝向 / 冲刺）条数上限，超了**整表清空**，防地图残留状态泄漏 |
+| `MAX_ENTRIES` | `SkiGlide` / `SnowboardControl` / `SkiBoost` / `SnowSpray` | 64 | 静态表（动量 / 锁定朝向 / 冲刺 / 雪粒子的「上一 tick 速度」与雪雾冷却）条数上限，超了**整表清空**，防地图残留状态泄漏 |
 | `COOLDOWN_TICKS` | `item/SkiPoleItem` | 10（0.5 s） | 两次撑杖之间的冷却；冷却中右键直接 `FAIL`（所以连撑最快 0.5 s 一次） |
 | `BOARD_TOP` | `SkiBoardModel` / `SnowboardModel` | 23.0 | 板身与翘头在模型空间里的 y 值（板顶面高度） |
 

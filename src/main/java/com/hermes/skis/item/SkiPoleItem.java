@@ -2,7 +2,6 @@ package com.hermes.skis.item;
 
 import com.hermes.skis.SkiBoost;
 import com.hermes.skis.SwingHooks;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -37,7 +36,6 @@ public class SkiPoleItem extends Item {
 		if (level.isClientSide()) {
 			// 只负责画面：让客户端播放一次摆臂（实现由 SkisClient 注册，服务端为空操作）
 			SwingHooks.triggerSwing(player);
-			spawnSnowPuff(level, player);
 		} else {
 			// 服务端：冲量 + 逐渐衰减的尾焰推力
 			SkiBoost.burst(player);
@@ -47,15 +45,5 @@ public class SkiPoleItem extends Item {
 			}
 
 		return InteractionResult.SUCCESS;
-	}
-
-	private static void spawnSnowPuff(Level level, Player player) {
-		for (int i = 0; i < 8; i++) {
-			double dx = (level.getRandom().nextDouble() - 0.5D) * 0.6D;
-			double dz = (level.getRandom().nextDouble() - 0.5D) * 0.6D;
-			level.addParticle(ParticleTypes.SNOWFLAKE,
-					player.getX() + dx, player.getY() + 0.1D, player.getZ() + dz,
-					dx * 0.3D, 0.1D, dz * 0.3D);
-		}
 	}
 }

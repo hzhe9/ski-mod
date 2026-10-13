@@ -47,7 +47,7 @@ git diff --stat main swing               # 带行数
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量、取消 `makeJump` |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
-| `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle`，速度越快越多；纯客户端观感，服务端不参与 |
+| `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 上升雪雾（都随速度变多，后者随速度飘得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团上升雪雾**（急停/撞墙/压刃刹车）；纯客户端观感，服务端不参与 |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
