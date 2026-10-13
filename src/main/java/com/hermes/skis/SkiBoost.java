@@ -28,8 +28,6 @@ public final class SkiBoost {
 	private static final int DURATION_TICKS = 60;
 	/** 衰减曲线指数：1.0 = 匀速线性缓降（后段一样慢）；越大越“先猛后缓”。 */
 	private static final double CURVE = 1.0D;
-	/** 右键那一下给的向上分量（很小，只是手感上的“点地”）。 */
-	private static final double LIFT = 0.12D;
 	/** 地图上残留状态的清理阈值。 */
 	private static final int MAX_ENTRIES = 64;
 
@@ -120,7 +118,8 @@ public final class SkiBoost {
 				: (current > 0.01D ? horizontal.normalize() : horizontalLook(player));
 
 		double peak = Math.min(Math.max(current + ADD, MIN_PEAK), SkiControl.MAX_GLIDE_SPEED);
-		player.setDeltaMovement(direction.x * peak, motion.y + LIFT, direction.z * peak);
+		// 垂直分量原样保留：撑杖只给水平推力，不会把人蹦起来（原先 +LIFT 会时不时跳一下）
+		player.setDeltaMovement(direction.x * peak, motion.y, direction.z * peak);
 		player.hurtMarked = true;
 
 		ACTIVE.put(player.getId(), new Boost(direction, current, peak, DURATION_TICKS));

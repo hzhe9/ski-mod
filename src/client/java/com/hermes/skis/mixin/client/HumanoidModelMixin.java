@@ -28,8 +28,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
-	/** 屈膝角度（弧度）。 */
-	private static final float GLIDE_KNEE_BEND = 0.08F;
+	/**
+	 * 单板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
+	 * 与双板的 {@link #SKI_LEG_TILT} 同值：用户要求「单板的站姿改成跟双板一样，身体稍微向后斜」。
+	 * （原来是 {@code GLIDE_KNEE_BEND} 的屈膝 0.08，已去掉。）
+	 */
+	private static final float BOARD_LEG_TILT = -0.15F;
 	/**
 	 * 双板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
 	 * 上半身由 {@link #GLIDE_LEAN} 前倾，合起来就是“上身压在前、下身留在后”的滑行姿势。
@@ -83,10 +87,10 @@ public abstract class HumanoidModelMixin {
 
 		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
 		if (board) {
-			// 单板：与双板一样「两腿平行、向外岔开」——不做鸭子站姿、不前后错位
+			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开、下半身往后倾（BOARD_LEG_TILT）
 			// （横向偏移与 SnowboardModel 的鞋位同值，否则脚会与鞋错开）
-			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, GLIDE_KNEE_BEND);
-			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, GLIDE_KNEE_BEND);
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, BOARD_LEG_TILT);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, BOARD_LEG_TILT);
 		} else {
 			// 双板：两腿只横向拉开、保持平行；下半身往后倾出去一点（SKI_LEG_TILT）
 			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), SKI_LEG_TILT);

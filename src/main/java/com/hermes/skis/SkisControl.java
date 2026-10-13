@@ -29,9 +29,6 @@ public final class SkisControl {
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.99D;   // 与原版 0.985 相比更滑；用户定 0.99（两板一致）
 
-	/** 按 S（后倾）刹车的额外衰减：0.90 ≈ 半秒停住，松开后不会被动量拉回原速。 */
-	private static final double BRAKE_DECAY = 0.90D;
-
 	private SkisControl() {
 	}
 
@@ -60,10 +57,5 @@ public final class SkisControl {
 	/** 双板：动量衰减（越接近 1 越滑）。 */
 	public static double momentumDecay() {
 		return MOMENTUM_DECAY;
-	}
-
-	/** 双板：按 S 刹车的额外衰减系数。 */
-	public static double brakeDecay() {
-		return BRAKE_DECAY;
 	}
 }

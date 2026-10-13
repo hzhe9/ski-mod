@@ -8,9 +8,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -268,9 +272,8 @@ public final class SkiGlide {
 			// ——— 双板 ———
 			momentum = Math.max(momentum, speed);
 			decay = SkisControl.momentumDecay();
-			if (keys != null && keys.backward()) {
-				decay *= SkisControl.brakeDecay();   // 按 S ＝刹车：持续减速，松开后也不会被动量拉回原速
-			}
+			// 按 S <b>不是刹车</b>：它只是把滑行方向往后摆（见 SkiControl.desiredDirection 的按键转向），
+			// 速度靠动量原样托住（用户 2026-10-13：高速按 S 要「向后转向」，不是急停）。
 		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.maxGlideSpeed(player));   // 速度上限（按板）
@@ -387,6 +390,24 @@ public final class SkiGlide {
 			return true;
 		}
 		return level.getBlockState(standing).is(BlockTags.SNOW);
+	}
+
+	/**
+	 * 脚底到下方地面的距离（格）；往下 {@code range + 0.1} 格内探不到东西就返回一个很大的值。
+	 *
+	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它，
+	 * 判定一律是「离地 ≤ range」而不是 {@code onGround}（滑下坡时人常常一两 tick 没踩着地）。
+	 */
+	public static double groundDistance(Entity entity, double range) {
+		Level level = entity.level();
+		Vec3 from = entity.position();
+		Vec3 to = from.add(0.0D, -(range + 0.1D), 0.0D);
+		BlockHitResult hit = level.clip(new ClipContext(from, to,
+				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, entity));
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return Double.MAX_VALUE;
+		}
+		return from.y - hit.getLocation().y;
 	}
 
 	/** 雪面的便捷重载：用玩家自己的位置。 */

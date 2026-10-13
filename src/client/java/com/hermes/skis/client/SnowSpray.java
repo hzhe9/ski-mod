@@ -14,9 +14,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -133,23 +130,11 @@ public final class SnowSpray {
 				burst(level, player, last - speed);
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
 			}
-			if (speed < MIN_SPEED || groundDistance(player, level) > GROUND_RANGE) {
+			if (speed < MIN_SPEED || SkiGlide.groundDistance(player, GROUND_RANGE) > GROUND_RANGE) {
 				continue;   // 太慢、或离地超过一格：不持续扬雪（贴地飞下坡照样扬）
 			}
 			spray(level, player, speed);
 		}
-	}
-
-	/** 脚底到下方地面的距离（格）；下面一格内什么都探不到就返回一个很大的值。 */
-	private static double groundDistance(Player player, ClientLevel level) {
-		Vec3 from = player.position();
-		Vec3 to = from.add(0.0D, -(GROUND_RANGE + 0.1D), 0.0D);
-		BlockHitResult hit = level.clip(new ClipContext(from, to,
-				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-		if (hit.getType() != HitResult.Type.BLOCK) {
-			return Double.MAX_VALUE;
-		}
-		return from.y - hit.getLocation().y;
 	}
 
 	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多、后者还随速度抛得更高。 */

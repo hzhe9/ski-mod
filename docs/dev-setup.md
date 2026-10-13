@@ -55,8 +55,10 @@ git diff --stat main swing               # 带行数
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
 | `mixin/client/SnowboardHeadLimitMixin.java` | 单板时在 `Entity#turn` 末尾把视角 yaw 夹到「锁定身体朝向 ± `VIEW_LIMIT_DEGREES`」 |
 | `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |
-| `mixin/client/LivingEntityFallSoundMixin.java` | 穿板落地**不响闷响**（`LivingEntity#playBlockFallSound` HEAD cancel） |
+| `mixin/client/LivingEntityFallSoundMixin.java` | 穿板摔在雪 / 冰面上：`LivingEntity#causeFallDamage` **HEAD 直接取消**（那声落地闷响 + 伤害都在这里；只在 `hurtServer` 免伤拦不住声音）+ `LivingEntity#playBlockFallSound` 兜一层 |
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
+| `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地一格内」而不是 `onGround` |
+| `client/GlideSounds.java` | 滑行音效：切雪声（循环播 `SNOW_STEP`）+ 一条**循环**的风声实例（`ELYTRA_FLYING`，照 `ElytraOnPlayerSoundInstance` 写法），音量都随速度 |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
@@ -66,14 +68,14 @@ git diff --stat main swing               # 带行数
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
-- 双板：**按 S（后倾）＝刹车**，`applyMomentum` 里对动量额外乘 `BRAKE_DECAY`；只靠原版后退只能“短暂停一下”，松手动量就把速度托回去了。
+- 双板：**按 S ＝ 向后转向，不是刹车**（用户 2026-10-13 定）：S 只把滑行方向往后摆（`SkiControl.desiredDirection` 的按键转向，`STEER_RATE` 逐渐摆过去），动量照常托住速度。原来的 `BRAKE_DECAY` 0.90 已删 —— 高速按 S 会变成急停，与「向后转向」冲突。
 
 ## 代码结构：单板与双板彻底分开
 
 | 归属 | 类 | 内容 |
 |---|---|---|
 | **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.13 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `DESCENT_STEP_BLOCKS` 0.5） |
-| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99 / `BRAKE_DECAY` 0.90。不持有朝向状态（视角即朝向） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.99。不持有朝向状态（视角即朝向）；按 S 是转向不是刹车（没有刹车常量） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
