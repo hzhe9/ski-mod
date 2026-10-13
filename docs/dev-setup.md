@@ -58,7 +58,7 @@ git diff --stat main swing               # 带行数
 | `mixin/client/LivingEntityFallSoundMixin.java` | 穿板摔在雪 / 冰面上：`LivingEntity#causeFallDamage` **HEAD 直接取消**（那声落地闷响 + 伤害都在这里；只在 `hurtServer` 免伤拦不住声音）+ `LivingEntity#playBlockFallSound` 兜一层 |
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
 | `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地一格内」而不是 `onGround` |
-| `client/GlideSounds.java` | 滑行音效：切雪声（按速度调的间隔播 `SNOW_STEP`）+ 一条**循环**的风声实例（`ELYTRA_FLYING`，照 `ElytraOnPlayerSoundInstance` 写法），音量都随速度；**暂停时主动 `silence()`**（声音引擎暂停时不再推进游戏内声音，不主动停会一直响） |
+| `client/GlideSounds.java` | 滑行音效：按速度调的间隔播切雪声（`SNOW_STEP`），音量/音高随速度；**无风声**（原先那条 `ELYTRA_FLYING` 循环已删）；**暂停时主动 `silence()`**（声音引擎暂停时不再推进游戏内声音，不主动停会一直响） |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
@@ -74,8 +74,8 @@ git diff --stat main swing               # 带行数
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.13 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 0.999 / `DESCENT_STEP_BLOCKS` 0.5） |
-| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998。不持有朝向状态（视角即朝向）；按 S 是转向不是刹车（没有刹车常量） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.15 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 0.999 / `DESCENT_STEP_BLOCKS` 0.5） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.12 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998。不持有朝向状态（视角即朝向）；按 S 是转向不是刹车（没有刹车常量） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。

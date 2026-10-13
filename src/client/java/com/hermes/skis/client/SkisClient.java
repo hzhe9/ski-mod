@@ -41,7 +41,7 @@ public class SkisClient implements ClientModInitializer {
 			if (client.level == null) {
 				return;
 			}
-			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声与风声（音量随速度）
+			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）

@@ -8,8 +8,6 @@ import com.hermes.skis.SkisMod;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
-import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -19,27 +17,17 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 
 /**
- * <b>滑行音效</b>（纯客户端）：雪面上的切雪声 + 耳边的风声，两者的音量都随速度加大。
- *
- * <ul>
- *   <li><b>风</b>：一条<b>循环</b>的 {@link SoundInstance}（原版 {@code ELYTRA_FLYING} 那阵风声 ——
- *       它本身就是可无缝循环的），音量 = 速度 × {@link #WIND_PER_SPEED}（夹到 {@link #WIND_MAX}），
- *       跟着玩家走、不再滑行时自动停。用循环实例而不是每隔几 tick 播一次，才不会有断断续续的接缝。</li>
- *   <li><b>雪</b>：每到时间就播一声 {@code SNOW_STEP}（原版雪地脚步，就是雪面的"沙沙"切雪声），
- *       <b>速度越快间隔越短、音量越大</b>（{@link #SNOW_INTERVAL_BASE} → {@link #SNOW_INTERVAL_MIN} tick）。</li>
- * </ul>
+ * <b>滑行音效</b>（纯客户端）：雪面上滑行时的<b>切雪声</b> —— 每到时间就播一声 {@code SNOW_STEP}
+ * （原版雪地脚步，就是雪面的“沙沙”声），<b>速度越快间隔越短、音量越大、音高越尖</b>
+ * （{@link #SNOW_INTERVAL_BASE} → {@link #SNOW_INTERVAL_MIN} tick）。
  *
  * <p>触发条件与雪粒子同一条：穿着板、在雪 / 冰面上、脚底离地 {@link #GROUND_RANGE} 格以内、有速度。
- * 走近路时不响（{@link #MIN_SPEED}）；不带板不响。
+ * 太慢不响（{@link #MIN_SPEED}）；不带板不响。
+ *
+ * <p><b>没有风声</b>：原先那条循环的 {@code ELYTRA_FLYING} 风按用户 2026-10-13 的要求去掉，本类只剩切雪声。
  */
 public final class GlideSounds {
-	/** 风：音量 = 速度 × 这个系数。 */
-	private static final double WIND_PER_SPEED = 0.9D;
-	/** 风的最大音量（别再大了，盖过别的音效）。 */
-	private static final float WIND_MAX = 0.55F;
-	/** 起播音量：太小会有"咔"的一下，给一个不为 0 的初值。 */
-	private static final float WIND_START_VOLUME = 0.03F;
-	/** 雪声（切雪）用的音效：原版雪地脚步。 */
+	/** 切雪声用的音效：原版雪地脚步。 */
 	private static final SoundEvent SNOW_SOUND = SoundEvents.SNOW_STEP;
 	/** 慢速时每多少 tick 响一声。 */
 	private static final int SNOW_INTERVAL_BASE = 8;
@@ -56,13 +44,11 @@ public final class GlideSounds {
 	private static final float SNOW_PITCH_PER_SPEED = 0.25F;
 	/** 低于这个速度（格/tick）不出声。 */
 	private static final double MIN_SPEED = 0.10D;
-	/** 脚底离地不超过这个高度（格）才算"在滑"——与雪粒子同一条判定。 */
+	/** 脚底离地不超过这个高度（格）才算“在滑”——与雪粒子同一条判定。 */
 	private static final double GROUND_RANGE = 1.0D;
 
 	private static final int MAX_ENTRIES = 64;
 
-	/** 实体 id → 那条正在播的风声。 */
-	private static final Map<Integer, WindSound> WIND = new ConcurrentHashMap<>();
 	/** 实体 id → 距离下一声切雪还有几 tick。 */
 	private static final Map<Integer, Integer> SNOW_TIMER = new ConcurrentHashMap<>();
 
@@ -79,21 +65,14 @@ public final class GlideSounds {
 			silence(client);   // 暂停时立刻收声（原因见 silence 的注释）
 			return;
 		}
-		if (WIND.size() > MAX_ENTRIES) {
-			WIND.clear();
+		if (SNOW_TIMER.size() > MAX_ENTRIES) {
 			SNOW_TIMER.clear();
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();
 			if (!isGliding(player)) {
-				WIND.remove(id);        // 循环实例自己会在下一 tick 收到 stop()（见 WindSound#tick）
 				SNOW_TIMER.remove(id);
 				continue;
-			}
-			if (!WIND.containsKey(id)) {
-				WindSound wind = new WindSound(player);
-				WIND.put(id, wind);
-				client.getSoundManager().play(wind);
 			}
 			int timer = SNOW_TIMER.getOrDefault(id, 0) - 1;
 			if (timer <= 0) {
@@ -109,15 +88,11 @@ public final class GlideSounds {
 	 *
 	 * <p>暂停（单人 Esc / 失焦）时游戏仍在渲染、{@code Minecraft#tick()} 照跑（所以本类每 tick 还是被调用），
 	 * 但声音引擎拿到的参数是「已暂停」——她只推进音乐，<b>不再推进游戏内的声音</b>：
-	 * 正在循环的风声会一直响下去，每几 tick 播一次的切雪声也会继续播。所以暂停时必须<b>主动停</b>：
-	 * 循环实例用 {@code SoundManager#stop(instance)}（立刻掐频道，不用等引擎下一次 tick 才认 stop 标记），
-	 * 已经在播的那一声切雪声按「音效 id + 声道」一次停掉。
+	 * 每几 tick 播一次的切雪声会一直继续播下去。所以暂停时必须<b>主动停</b>：
+	 * {@code SoundManager#stop(音效 id, 声道)} 把已经在播的那一声（以及刚排队的）一起掐掉，
+	 * 状态表清空，解暂停后重新起算。
 	 */
 	private static void silence(Minecraft client) {
-		for (WindSound wind : WIND.values()) {
-			client.getSoundManager().stop(wind);
-		}
-		WIND.clear();
 		SNOW_TIMER.clear();
 		client.getSoundManager().stop(SNOW_SOUND.location(), SoundSource.PLAYERS);
 	}
@@ -148,39 +123,5 @@ public final class GlideSounds {
 		float pitch = SNOW_PITCH_BASE + (float) speed * SNOW_PITCH_PER_SPEED;
 		level.playLocalSound(player.getX(), player.getY(), player.getZ(), SNOW_SOUND, SoundSource.PLAYERS,
 				volume, pitch, false);
-	}
-
-	/**
-	 * 耳边那阵风：一条循环的声音实例，每 tick 跟着玩家并更新音量；不再滑行就停。
-	 * （照原版 {@code ElytraOnPlayerSoundInstance} 的写法：{@code looping = true} + {@code delay = 0}。）
-	 */
-	private static final class WindSound extends AbstractTickableSoundInstance {
-		private final Player player;
-		private int time;
-
-		private WindSound(Player player) {
-			super(SoundEvents.ELYTRA_FLYING, SoundSource.PLAYERS, SoundInstance.createUnseededRandom());
-			this.player = player;
-			this.looping = true;
-			this.delay = 0;
-			this.volume = WIND_START_VOLUME;
-			this.pitch = 1.0F;
-		}
-
-		@Override
-		public void tick() {
-			this.time++;
-			// 前 20 tick 先让它起播（和原版鞘翅一样，避免瞬间开关时的爆音）；暂停时立刻停
-			if (this.player.isRemoved() || Minecraft.getInstance().isPaused()
-					|| (this.time > 20 && !isGliding(this.player))) {
-				stop();
-				return;
-			}
-			this.x = this.player.getX();
-			this.y = this.player.getY();
-			this.z = this.player.getZ();
-			double speed = this.player.getDeltaMovement().horizontalDistance();
-			this.volume = (float) Mth.clamp(speed * WIND_PER_SPEED, 0.0D, (double) WIND_MAX);
-		}
 	}
 }

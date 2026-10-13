@@ -13,12 +13,13 @@ package com.hermes.skis;
 public final class SkisControl {
 
 	/**
-	 * 下落加速的基数：每下落 1 格加多少（用户 2026-10 定案 0.08）。
+	 * 下落加速的基数：每下落 1 格加多少。
 	 *
-	 * <p>注意实际增量是 {@code 基数 × √(累计下落格数)}（见 {@link SkiGlide}）——
-	 * <b>越掉越快不起来</b>：掉得越多，每多掉 1 格带来的增量越小（用户要求“增长量反而越来越小”）。
+	 * <p>0.1 → 0.12（用户 2026-10-13：单板与双板都增加 0.02）。
+	 * 实际增量 = {@code 基数 × 累计下落格数^指数}（见 {@link SkiGlide} 的 {@code FALL_GAIN_EXPONENT}，
+	 * 现在指数是 1.0 ＝ 线性；指数 < 1 时才是「越掉越快不起来」）。
 	 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.1D;
+	private static final double FALL_GAIN_PER_BLOCK = 0.12D;
 
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
