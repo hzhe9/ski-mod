@@ -12,6 +12,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -379,15 +380,18 @@ public final class SkiGlide {
 		return horizontal.length() > 0.01D ? horizontal.normalize() : new Vec3(0.0D, 0.0D, 1.0D);
 	}
 
-	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面。 */
-	private static boolean isOnSnowOrIce(ServerPlayer player) {
-		var level = player.level();
-		BlockPos standing = player.blockPosition();
+	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面（滑行、雪粒子、落地免伤共用这一条）。 */
+	public static boolean isOnSnowOrIce(Level level, BlockPos standing) {
 		BlockState below = level.getBlockState(standing.below());
 		if (below.is(BlockTags.SNOW) || below.is(BlockTags.ICE)) {
 			return true;
 		}
 		return level.getBlockState(standing).is(BlockTags.SNOW);
+	}
+
+	/** 雪面的便捷重载：用玩家自己的位置。 */
+	private static boolean isOnSnowOrIce(ServerPlayer player) {
+		return isOnSnowOrIce(player.level(), player.blockPosition());
 	}
 
 	private static void forgetPhysics(int id) {

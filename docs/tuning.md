@@ -70,6 +70,22 @@
 
 双板不受影响（仍是原来的滑行 + 按键转向）。锁定表 = `SnowboardControl.BODY_YAW`（实体 id → 角度），条数超过 `MAX_ENTRIES` 整表清空。
 
+### 滑行雪粒子 `SnowSpray.java`（纯客户端观感）
+
+穿着任一种板、在雪 / 冰面上、且速度 ≥ `MIN_SPEED` 时，每 tick 从**板的两侧**（与滑行方向垂直的左右两边）各溅起几颗雪屑：向后上方飞，越快越多。粒子种类是 `PARTICLE` = `ParticleTypes.ITEM_SNOWBALL`（雪块崩开的小白屑，最像飞雪；换成 `ParticleTypes.SNOWFLAKE` 就是慢慢飘的雪花）。纯客户端 `addParticle`，服务端不参与、也不影响任何速度。
+
+| 常量 | 当前值 | 作用 |
+|---|---|---|
+| `MIN_SPEED` | 0.10 格/tick | 低于这个速度不溅雪（慢慢挪一步不扬雪） |
+| `COUNT_PER_SPEED` / `MAX_PER_SIDE` | 6.0 / 2 | 每侧粒子数 = 速度 × `COUNT_PER_SPEED`，夹到 `MAX_PER_SIDE`（0.17 格/tick 起每侧 1 颗，0.34 以上每侧满 2 颗） |
+| `SIDE_OFFSET` | 0.34 格 | 出生点离身体中线的横向距离（撒在脚的两侧，不是脚底下） |
+| `OUTWARD` / `UPWARD` / `BACKWARD` | 0.14 / 0.10 / 0.12 | 溅出速度的三个分量：向外、向上、向后（与滑行相反） |
+| `SPREAD` / `Y_OFFSET` | 0.16 / 0.06 格 | 出生点的随机散布 / 相对脚底的高度偏移 |
+
+### 落到雪面免摔伤 `SnowLanding.java`
+
+穿着任一种板**摔落在雪 / 冰面上不掉血**：走 Fabric 的 `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（在 `hurtServer` 上），三条齐了才免 —— ① 是玩家 ② 脚上是我们的板 ③ 伤害类型属于 `DamageTypeTags.IS_FALL`；落点用 `SkiGlide.isOnSnowOrIce`（与「能不能滑」同一条：雪 / 雪块 / 细雪 / 各种冰）。非雪面照旧摔伤，别的伤害类型一律放行。命中时顺手 `resetFallDistance()`。**没有可调常量。**
+
 ### 冲刺 `SkiBoost.java`（仅 `main`）
 
 | 常量 | 当前值 | 作用 |

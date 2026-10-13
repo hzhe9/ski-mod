@@ -103,6 +103,7 @@ public class SkisMod implements ModInitializer {
 	public void onInitialize() {
 		SkiGlide.register();
 		SkiBoost.register();
+		SnowLanding.register();   // 穿板落到雪面上免摔伤
 
 		// 独立创造标签页（mod 常规做法；不再往原版「工具与实用设施」页里塞）
 		CreativeModeTab tab = FabricCreativeModeTab.builder()

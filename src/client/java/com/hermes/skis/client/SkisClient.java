@@ -41,6 +41,8 @@ public class SkisClient implements ClientModInitializer {
 			if (client.level == null) {
 				return;
 			}
+			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）
+			SnowSpray.tick(client);
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
