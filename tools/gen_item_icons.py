@@ -41,11 +41,18 @@ GUI_DISPLAY = {
     "snowboard": {"rotation": [-90, 20, 170], "translation": [0, 0, 0], "scale": [1, 1, 1]},
 }
 
-# 手上/地面用 display（*_hand.json 专用）：**竖持姿态 A** —— 板面朝外、板竖起来（用户 2026-10-12 选定）。
-# 位置/缩放照滑雪杖手上那套换算：模型中心 8 → scale 后 + translation ≈ 手位 1（ski_pole 实机验证过的比例）。
+# 手上/地面用 display（*_hand.json 专用）。
+# 姿态（用户 2026-10-12 定案）：
+#   - 1 人称：竖持 A [90,0,0]（板面朝外、板竖起来），pos/scale 照滑雪杖手上那套换算（实机验证过）。
+#   - 3 人称：**现实里的夹板拿法** —— 板竖着贴在体侧、夹在手臂和身体中间：
+#     rotation [90,0,±90] 把板面转到侧向（右 [90,0,90] 面朝外，左手镜像 [90,0,-90]）；
+#     translation x=+2 朝身体中线靠（左手由 applyLeftHandFix 自动取负 → 同样朝中线）、
+#     y=+1 把板心从手位抬到胸口/腋下（8×0.85+1 ≈ 比手高 0.5 m）、z=0.5 收回体前平面。
+#     依据：原版左右手 json 平移值相同、靠引擎镜像 translation.x（Forge 补丁参数 applyLeftHandFix），
+#     所以 x=侧向(yaw 镜像)、y=上、z=前；旋转按原版惯例在 json 里手动镜像 ry/rz。
 HAND_DISPLAY = {
-    "thirdperson_righthand": {"rotation": [90, 0, 0], "translation": [0, -7, 1], "scale": [0.85, 0.85, 0.85]},
-    "thirdperson_lefthand": {"rotation": [90, 0, 0], "translation": [0, -7, 1], "scale": [0.85, 0.85, 0.85]},
+    "thirdperson_righthand": {"rotation": [90, 0, 90], "translation": [2, 1, 0.5], "scale": [0.85, 0.85, 0.85]},
+    "thirdperson_lefthand": {"rotation": [90, 0, -90], "translation": [2, 1, 0.5], "scale": [0.85, 0.85, 0.85]},
     "firstperson_righthand": {"rotation": [90, 0, 0], "translation": [1.13, -4, 1.13], "scale": [0.75, 0.75, 0.75]},
     "firstperson_lefthand": {"rotation": [90, 0, 0], "translation": [1.13, -4, 1.13], "scale": [0.75, 0.75, 0.75]},
 }

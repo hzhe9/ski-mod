@@ -41,9 +41,11 @@
 gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面、展示框…）→ skis:item/<id>_hand
 ```
 
-手上 display = **竖持姿态** `[90, 0, 0]`（板面朝镜头 + 板竖起来；顺序先 Z 后 X），
-pos/scale 照滑雪杖手上验证过的比例换算：3 人称 `translation [0,-7,1] / scale 0.85`、1 人称 `[1.13,-4,1.13] / scale 0.75`。
-（`HAND_DISPLAY` 常量在 `gen_item_icons.py`。）
+手上 display：**1 人称竖持** `[90, 0, 0]`（板面朝镜头 + 板竖起来）；
+**3 人称 = 现实夹板拿法** `[90, 0, ±90]`（板面转到侧向贴体、夹在手臂与身体之间），
+`translation [2, 1, 0.5]`（x=朝身体中线——左手由 `applyLeftHandFix` 自动镜像；y=板心抬到腋下高度；z=收回体前），
+缩放 3 人称 0.85 / 1 人称 0.75（`translation [1.13,-4,1.13]`，照滑雪杖换算）。
+（常量与轴向依据见 `gen_item_icons.py` 的 `HAND_DISPLAY` 注释。）
 
 ## 贴图与模型生成
 
