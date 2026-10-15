@@ -64,6 +64,11 @@ public final class SnowboardControl {
 	private static final double FALL_GAIN_PER_BLOCK = 0.15D;
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
+	/**
+	 * <b>穿单板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值。
+	 * 1.0 = 与原版相同；1.5 = 0.12 格/tick²（用户 2026-10-15 定：穿板下落太慢、像飘在空里）。
+	 */
+	private static final double GRAVITY_MULTIPLIER = 1.5D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（与双板同值）
 	/**
@@ -185,6 +190,11 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	public static double fallGainPerTickMax() {
 		return FALL_GAIN_PER_TICK_MAX;
+	}
+
+	/** 单板：<b>穿板时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #GRAVITY_MULTIPLIER}）。 */
+	public static double gravityMultiplier() {
+		return GRAVITY_MULTIPLIER;
 	}
 
 	/** 单板：动量衰减（越接近 1 越滑）。 */

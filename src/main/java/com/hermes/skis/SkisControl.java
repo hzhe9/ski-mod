@@ -24,6 +24,12 @@ public final class SkisControl {
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
 
+	/**
+	 * <b>穿双板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值。
+	 * 1.0 = 与原版相同；1.5 = 0.12 格/tick²（用户 2026-10-15 定：穿板下落太慢、像飘在空里）。
+	 */
+	private static final double GRAVITY_MULTIPLIER = 1.5D;
+
 	/** 双板速度上限（格/tick）：1.4 ≈ 100 km/h，仍是最快的那个。 */
 	private static final double MAX_SPEED = 1.4D;
 
@@ -58,5 +64,10 @@ public final class SkisControl {
 	/** 双板：动量衰减（越接近 1 越滑）。 */
 	public static double momentumDecay() {
 		return MOMENTUM_DECAY;
+	}
+
+	/** 双板：<b>穿板时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #GRAVITY_MULTIPLIER}）。 */
+	public static double gravityMultiplier() {
+		return GRAVITY_MULTIPLIER;
 	}
 }

@@ -26,8 +26,11 @@ import net.minecraft.world.level.block.state.BlockState;
  *   <li><b>滑行惯性（低摩擦）</b>：原版玩家在地面每 tick 会掉掉约 45% 的水平速度（10 tick 就基本停住），
  *       所以这里自己维护一份“动量”，按 {@link #MOMENTUM_DECAY}（默认每 tick 保留 98.5%）慢慢衰减，
  *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
- *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算）；</li>
- *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。</li>
+ *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算）；
+ *   <li><b>重力加重</b>：穿着板时把原版重力（{@code Attributes.GRAVITY}）改成该板倍数的值 ——
+ *       真的改重力，不是每 tick 补一份向下的速度，所以上升段也一起变沉（用户 2026-10-15：
+ *       穿板下落太慢、像“飘在空里”，要求比平时重力更快）；
+ *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。
  * </ul>
  *
  * <p><b>单板只保留“下落加速”这一条</b>：低摩擦动量不捕获玩家自己走出来的速度、也不做雪面推进，
@@ -45,8 +48,6 @@ public final class SkiGlide {
 	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性（用户要求先去掉衰减，试手感）
 	/** 双板下坡时每 tick 额外补多少向下的速度（贴地，别弹跳）。 */
 	private static final double STICK_DOWN = 0.08D;
-	/** 贴地时的下落速度上限（别再快了，免得落地太硬）。 */
-	private static final double STICK_DOWN_MAX = 0.8D;
 	/** 只有脚底离地不超过这么多格时才贴地（更远＝真的在坠落，交给原版重力）。 */
 	private static final double STICK_MAX_DROP = 1.0D;   // 脚底离地不超过 1 格才贴地（用户定）
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
@@ -79,6 +80,7 @@ public final class SkiGlide {
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 				if (!isSkiing(player)) {
 					setStepHeight(player, 0.6D);   // 恢复原版台阶高度
+					resetGravity(player);          // 恢复原版重力
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId());
 					SkisControl.forget(player.getId());
@@ -92,6 +94,7 @@ public final class SkiGlide {
 				// 双板不做任何朝向锁定：朝向＝视角（用户 2026-10 定案回到最开始的状态）
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
 				setStepHeight(player, 1.0D);
+				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
 				if (!SnowboardControl.isSnowboard(player)) {
 					stickToGround(player);   // 双板：下坡贴着地面滑，不一跳一跳地弹下去
 				}
@@ -171,6 +174,34 @@ public final class SkiGlide {
 	}
 
 	/**
+	 * <b>穿板时的重力</b>：26.2 里重力就是属性 {@link Attributes#GRAVITY}（默认 0.08 格/tick²），
+	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
+	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
+	 *
+	 * <p>改的是真重力，不是每 tick 补一份向下的速度 —— 所以上升段一起变沉（跳得更矮、滞空更短）。
+	 * 用户 2026-10-15 报：「骑着板下落太慢、像飘在空里」，要求比平时重力更快。
+	 * 与 {@link #setStepHeight} 同一套做法：只在穿板时生效，脱板由 {@link #resetGravity} 还原。
+	 */
+	private static void applyGravity(ServerPlayer player) {
+		AttributeInstance attribute = player.getAttribute(Attributes.GRAVITY);
+		if (attribute == null) {
+			return;
+		}
+		double multiplier = SnowboardControl.isSnowboard(player)
+				? SnowboardControl.gravityMultiplier()
+				: SkisControl.gravityMultiplier();
+		attribute.setBaseValue(Attributes.GRAVITY.value().getDefaultValue() * multiplier);
+	}
+
+	/** 脱板（或没穿板）时把重力还原成原版默认值。 */
+	private static void resetGravity(ServerPlayer player) {
+		AttributeInstance attribute = player.getAttribute(Attributes.GRAVITY);
+		if (attribute != null) {
+			attribute.setBaseValue(Attributes.GRAVITY.value().getDefaultValue());
+		}
+	}
+
+	/**
 	 * 滑上一格台阶的减速：每上一格扣 {@link #STEP_UP_PENALTY} 格/tick。
 	 *
 	 * <p>动量要一起扣 —— 不然下一步 {@code applyMomentum} 又用旧的动量把速度托回来，等于没减。
@@ -197,6 +228,10 @@ public final class SkiGlide {
 	 * 于是下坡是“贴着坡面滑下去”，而不是被惯性抛起来、一格一格地弹。
 	 *
 	 * <p>按了跳跃键就完全不插手（腾空跳起来的功能照旧保留）；上升中也不管（那是自己跳的）。
+	 *
+	 * <p>这里是<b>纯增量</b>：只补 {@link #STICK_DOWN}，不给下落速度设上限 —— 原来的
+	 * {@code Math.max(motion.y - STICK_DOWN, -0.8)} 会在「离地最后一格」把已经很快的下坠压回 0.8，
+	 * 结果落地前那一格反而被拖慢（用户 2026-10-15 要求去掉）。
 	 */
 	private static void stickToGround(ServerPlayer player) {
 		if (player.onGround()) {
@@ -215,7 +250,7 @@ public final class SkiGlide {
 		if (SkiControl.groundDistance(player) > STICK_MAX_DROP) {
 			return;
 		}
-		player.setDeltaMovement(motion.x, Math.max(motion.y - STICK_DOWN, -STICK_DOWN_MAX), motion.z);
+		player.setDeltaMovement(motion.x, motion.y - STICK_DOWN, motion.z);
 		player.hurtMarked = true;
 	}
 
