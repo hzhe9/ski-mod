@@ -2,9 +2,9 @@
 
 > 生成器怎么跑、产物有哪些、几何与 UV 的约定。
 
-## 物品图标（真 3D）
+## 物品图标（板与杖：真 3D）
 
-图标不是 16x16 平面图，而是**方块模型格式的 3D `elements` 模型**，贴图用 `textures/item/ski_board|snowboard[_<款>].png`
+**板与杖**的图标不是 16x16 平面图，而是**方块模型格式的 3D `elements` 模型**，贴图用 `textures/item/ski_board|snowboard[_<款>].png`
 —— 脚上那套 `textures/entity/*.png` 的**同名副本**（`gen_assets.py` 一次写两份，6 款配色自动跟着走）。
 ⚠️ **物品模型不能引用 `textures/entity/`**：物品贴图必须织进物品图集，只有 `textures/item/` 下的才行 ——
 引用 `entity/` 的症状是**图标紫黑缺失**（日志 `Missing textures in model skis:item/…`）；脚上模型走实体渲染器直接读文件、不受影响，
@@ -50,7 +50,7 @@ gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面�
 ## 贴图与模型生成
 
 ```bash
-/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py      # 贴图（脚上 entity/ + 图标 item/ 副本，一次写两份）
+/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py      # 贴图（脚上 entity/ + 图标 item/ 副本，一次写两份；含滑雪头盔 16x16 平面图标）
 /d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图用 item/ 那份）
 ```
 
@@ -62,7 +62,7 @@ gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面�
 其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 补 `models/item/<id>_<款>_hand.json`（两者都由 `gen_item_icons.py` 生成）+ 补 `items/item/<id>_<款>.json`（**select 分流**：gui→图标、fallback→hand；缺了图标=紫黑棋盘格）+ 一条衍生配方 + 两个 lang 键。
 ⚠ 板面 UV 的 v 轴与板的前后方向相反（v=0 是板尾），板头那一段要画在 v 的高端；改板身长宽会整体挪动所有 u 数字。
 
-产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **27 个 png**）：
+产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **28 个 png**）：
 
 | 文件 | 尺寸 | 用途 |
 |---|---|---|
@@ -71,6 +71,7 @@ gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面�
 | `textures/item/ski_board[_<款>].png` | 128×32 | 上行的同名副本 —— **双板物品图标**用（`entity/` 不进物品图集，图标必须用这份） |
 | `textures/item/snowboard[_<款>].png` | 128×32 | 同上（单板物品图标） |
 | `textures/item/ski_pole.png` | 64×64 | 滑雪杖 3D 模型贴图（杖身/握把/挡雪盘三个 UV 分区），脚上手上与物品栏共用 |
+| `textures/item/ski_helmet.png` | 16×16 | 滑雪头盔图标 —— 普通物品，走 `item/generated` 的**平面图**（不是 3D `elements`），字符表驱动（`HELMET_ART` / `HELMET_PALETTE`） |
 | `textures/entity/equipment/humanoid/modern_ski.png` | 64×32 | 备用护甲层贴图（`equipment/modern_ski.json` 引用） |
 | `icon.png` | 128×128 | mod 图标（`fabric.mod.json` 引用） |
 

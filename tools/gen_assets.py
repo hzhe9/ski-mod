@@ -7,6 +7,7 @@
   assets/skis/textures/item/ski_board[_<v>].png        上两者的同名副本 —— 物品图标模型专用（entity/ 不进物品图集）
   assets/skis/textures/item/snowboard[_<v>].png        同上（单板）
   assets/skis/textures/item/ski_pole.png               滑雪杖 3D 模型贴图（64x64）
+  assets/skis/textures/item/ski_helmet.png             滑雪头盔图标（16x16 平面图，普通物品 → item/generated）
   assets/skis/textures/entity/equipment/humanoid/modern_ski.png 备用护甲层（旧方案）
   assets/skis/icon.png                                 mod 图标（底板上贴一块石墨款板子图形）
 
@@ -55,6 +56,36 @@ ARMOR_DARK = (30, 44, 62, 255)
 ARMOR_MID = (46, 74, 104, 255)
 ARMOR_BOARD = (226, 238, 248, 255)
 ARMOR_ACCENT = (41, 196, 255, 255)
+
+# ---------------------------------------------------------------- 滑雪头盔
+# 滑雪头盔是**普通物品**（不可穿戴），图标用 item/generated 的 16x16 平面图 ——
+# 不做 3D elements（那是板与杖的图标管线的活）。配色与 graphite 款板同色系：
+# 深色壳 + 青色装饰条 + 白色镜框 + 橙色镜片。字符表驱动：一行 = 一像素行，'.' = 透明。
+HELMET_PALETTE = {
+    "S": (38, 54, 76, 255),      # 壳
+    "D": (22, 32, 46, 255),      # 壳（轮廓 / 阴影）
+    "A": (41, 196, 255, 255),    # 装饰条（与板同款青）
+    "F": (238, 244, 250, 255),   # 护目镜框
+    "L": (255, 168, 48, 255),    # 护目镜镜片
+}
+HELMET_ART = [
+    "................",
+    ".....DDDDDD.....",
+    "...DDSSSSSSSD...",
+    "..DSSSAAAAASSD..",
+    ".DSSSAAAAAAASSD.",
+    ".DSSSSSSSSSSSSD.",
+    "DSSSSSSSSSSSSSSD",
+    "DSFFFFFFFFFFFFSD",
+    "DSFLLLLLLLLLLFSD",
+    "DSFLLLLLLLLLLFSD",
+    "DSFFFFFFFFFFFFSD",
+    "DSSSSSSSSSSSSSSD",
+    ".DSSSSSSSSSSSSD.",
+    ".DDSSSSSSSSSSDD.",
+    "..DDDDDDDDDDDD..",
+    "................",
+]
 
 # ---------------------------------------------------------------- 款式表
 # ops = [(l0, l1, w0, w1, color)]：l=1 是板头侧、w=0/1 是板的两侧；按顺序覆盖，后者优先。
@@ -219,6 +250,17 @@ def pole_texture():
     return img
 
 
+def helmet_texture():
+    """滑雪头盔图标（16x16）：按 HELMET_ART 的字符表落像素。"""
+    img = blank(16, 16)
+    for y, row in enumerate(HELMET_ART):
+        assert len(row) == 16, f"HELMET_ART 第 {y} 行宽 {len(row)}（应为 16）"
+        for x, ch in enumerate(row):
+            if ch != ".":
+                put(img, x, y, HELMET_PALETTE[ch])
+    return img
+
+
 def armor_layer():
     """旧方案备用：取原版 iron.png 的靴子像素作模板，重上色。"""
     with zipfile.ZipFile(VANILLA_JAR) as jar:
@@ -260,6 +302,7 @@ def main():
         os.makedirs(d, exist_ok=True)
     outputs = {
         os.path.join(TEX_ITEM, "ski_pole.png"): pole_texture(),
+        os.path.join(TEX_ITEM, "ski_helmet.png"): helmet_texture(),
         os.path.join(TEX_ARMOR, "modern_ski.png"): armor_layer(),
         ICON: mod_icon(),
     }
