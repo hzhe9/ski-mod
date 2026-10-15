@@ -41,8 +41,10 @@ TEX_ENTITY = os.path.join(ASSETS, "textures", "entity")
 TEX_ARMOR = os.path.join(TEX_ENTITY, "equipment", "humanoid")
 ICON = os.path.join(ASSETS, "icon.png")
 
+# Gradle 家目录：优先环境变量（本机底座已搬到 D:\gradle），回落到默认 ~/.gradle
+GRADLE_HOME = os.environ.get("GRADLE_USER_HOME") or os.path.join(os.path.expanduser("~"), ".gradle")
 VANILLA_JAR = os.path.join(
-    os.path.expanduser("~"), ".gradle", "caches", "fabric-loom", "26.2", "minecraft-client.jar"
+    GRADLE_HOME, "caches", "fabric-loom", "26.2", "minecraft-client.jar"
 )
 
 # 与款式无关的固定配色（杖、备用护甲层）
