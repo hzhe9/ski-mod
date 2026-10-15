@@ -32,6 +32,26 @@ git diff --stat main swing               # 带行数
 - 只改数值常量时**编译通过即可**；改到 Mixin / 模型层注册 / 装备注册这类"只有启动才暴露"的东西才需要真启动一次自检
 - **只改注释 / javadoc 时主 jar 不会重编**（Gradle 按 class 哈希判 up-to-date，只有 sources jar 更新）—— 这是正常的，别以为改动没生效
 
+## 准备 Python 环境（生成器 / 文档守卫）
+
+`tools/` 下的生成器（贴图、物品图标）与文档守卫需要 Python + Pillow，依赖固定在仓库根的 `requirements.txt`。
+建议在仓库根自建一个项目内的 venv（`.venv/` 已在 `.gitignore` 里），**生成器一律用它的解释器跑**：
+
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt    # Windows
+.venv/bin/python     -m pip install -r requirements.txt    # macOS / Linux
+```
+
+之后：
+
+```bash
+.venv\Scripts\python tools/gen_assets.py        # Windows；换成 .venv/bin/python 即 macOS / Linux
+```
+
+产物贴图 / 模型 / 图标全部由这两个生成器写出，**不要手改**；`requirements.txt` 锁的是实测能把现有产物
+**逐字节重生成**的那版 Pillow（`tools/check_docs.py` 每次都会重跑生成器做逐字节比对，换版本时由它把关）。
+
 ## 架构速览
 
 | 文件 | 职责 |

@@ -11,7 +11,7 @@
 所以会表现为「脚上正常、图标坏」。生成：
 
 ```bash
-/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py
+python tools/gen_item_icons.py
 ```
 
 它把 `SkiBoardModel` / `SnowboardModel` 的 addBox 几何按「实体空间 → 方块空间 → 按 display 旋转算投影 →
@@ -50,9 +50,12 @@ gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面�
 ## 贴图与模型生成
 
 ```bash
-/d/hermes/hermes-agent/venv/Scripts/python tools/gen_assets.py      # 贴图（脚上 entity/ + 图标 item/ 副本，一次写两份；含滑雪头盔 16x16 平面图标）
-/d/hermes/hermes-agent/venv/Scripts/python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图用 item/ 那份）
+python tools/gen_assets.py      # 贴图（脚上 entity/ + 图标 item/ 副本，一次写两份；含滑雪头盔 16x16 平面图标）
+python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图用 item/ 那份）
 ```
+
+两个生成器都要在**项目自带 venv** 下跑（依赖固定写在 `requirements.txt`）——建环境两行命令见
+[`dev-setup.md`](dev-setup.md)「准备 Python 环境」。同一套 venv 也用来跑 `tools/check_docs.py`。
 
 **物品栏图标不是贴图**：6 款板 + 杖的图标都是 `elements` 形式的 3D 物品模型（见上节），贴图用下表实体贴图的 `textures/item/` 同名副本 ——
 所以换配色只跑 `gen_assets.py`（两份同写）、图标跟着变。
