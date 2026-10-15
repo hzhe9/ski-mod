@@ -9,7 +9,6 @@ import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -21,10 +20,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *   <li><b>单板 A / D</b>：沿<b>身体朝向</b>的左右平移 —— 把「左右输入」绕视角旋转 (身体朝向 − 视角) 后交回原版，
  *       原版再按视角解释它，结果就是沿身体左右走；身体朝向不会因此改变（原版侧移不改 yRot）。</li>
  *   <li><b>W / S</b>：一律没反应（前后分量直接丢掉）。</li>
- *   <li><b>空格</b>：不能跳。</li>
  * </ul>
  *
  * <p>改输入而不是改速度：原版走路 / 服务端同步全走同一条路，不会和客户端移动预测互抢。
+ *
+ * <p><b>空格照旧（单板也能跳）</b>：原来这里把单板的 {@code makeJump} 取消了，2026-10-15 按用户要求
+ * 去掉 —— 现在「按空格跳出去」是穿板时唯一的主动离地方式（其余情况由 {@code SkiGlide} 贴着坡面走）。
  */
 @Mixin(ClientInput.class)
 public abstract class ClientInputMixin {
@@ -47,12 +48,5 @@ public abstract class ClientInputMixin {
 		float delta = (SnowboardControl.bodyYaw(player.getId(), player.getYRot()) - player.getYRot())
 				* Mth.DEG_TO_RAD;
 		cir.setReturnValue(new Vec2(move.x * Mth.cos(delta), move.x * Mth.sin(delta)));
-	}
-
-	@Inject(method = "makeJump", at = @At("HEAD"), cancellable = true)
-	private void skis$noJump(CallbackInfo ci) {
-		if (SnowboardControl.isSnowboard(Minecraft.getInstance().player)) {
-			ci.cancel();
-		}
 	}
 }

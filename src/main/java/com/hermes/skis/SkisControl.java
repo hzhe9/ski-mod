@@ -26,9 +26,10 @@ public final class SkisControl {
 
 	/**
 	 * <b>穿双板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值。
-	 * 1.0 = 与原版相同；1.5 = 0.12 格/tick²（用户 2026-10-15 定：穿板下落太慢、像飘在空里）。
+	 * 只影响<b>腾空段</b>（按空格跳起来 / 脚下没地面时）；贴地滑行由 {@code SkiGlide} 的贴地控制器负责，不经重力。
+	 * 1.0 = 跳跃与原版一样高（用户 2026-10-15 定）；想空中更沉就往上加（1.5 曾用过）。
 	 */
-	private static final double GRAVITY_MULTIPLIER = 1.5D;
+	private static final double GRAVITY_MULTIPLIER = 1.0D;
 
 	/** 双板速度上限（格/tick）：1.4 ≈ 100 km/h，仍是最快的那个。 */
 	private static final double MAX_SPEED = 1.4D;
