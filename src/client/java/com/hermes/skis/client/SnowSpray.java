@@ -46,12 +46,18 @@ import net.minecraft.world.phys.Vec3;
  *       按 {@link #FLURRY_HIGH_FRACTION} 拆两档在空中形成层次；高飞档寿命抬到 {@link #FLURRY_HIGH_LIFETIME}；
  *       转向（一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高 {@link #FLURRY_APEX_TURN_BONUS} 格；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
- *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。</li>
+ *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。
+ *       <b>只在真贴地时才算急刹</b>：上一 tick 与本 tick 都贴地（{@link #GROUND_TOUCH_TOLERANCE}）
+ *       且垂直速度小（{@link #FALL_TOLERANCE}）—— 落地那一 tick 水平速度也会突降，但那是「跳下来」不是「刹车」，
+ *       不加这三道闸门时从一两格高落地也会炸一大团。</li>
  * </ul>
  *
  * <p><b>横向不再固定成两条线</b>：每颗粒子自己抽横向落点（{@link #LATERAL_MIN}–{@link #LATERAL_MAX}）与
  * 横向速度（{@link #OUTWARD_MIN}–{@link #OUTWARD_MAX}，再叠 {@link #OUTWARD_JITTER} 的正负抖动），
  * 高速再按速度把横向速度扇开（{@code fan}）—— 一片雾，不是两条平行线。
+ * <b>贴地层与扬起层各一套参数</b>：贴地层走 {@link #FLECK_LATERAL_MIN}–{@link #FLECK_LATERAL_MAX}（0.20–1.10 格）、
+ * {@link #FLECK_OUTWARD_MIN}–{@link #FLECK_OUTWARD_MAX}、{@link #FLECK_OUTWARD_JITTER}、{@link #FLECK_SPREAD}，
+ * 区间更外更宽 —— 低速时视野里几乎全是贴地层，原来那套窄区间看着是一撮挤在板边。
  *
  * <p><b>所有粒子的出生点都在脚底那片「雪面」上</b>（{@code surface + Y_OFFSET ± Y_JITTER}），
  * <b>不跟着人身子抬</b> —— 高度层次只靠顶点高度做出来，所以看着是雪从地面被卷起来、抛上去。
@@ -174,6 +180,26 @@ public final class SnowSpray {
 	private static final double BACKWARD = 0.16D;
 	/** 出生点水平随机散布（格）。 */
 	private static final double SPREAD = 0.16D;
+	/*
+	 * 贴地层（flecks）自己一套横向散开参数 —— **不跟扬起层共用** {@link #LATERAL_MIN}–{@link #LATERAL_MAX}、
+	 * {@link #OUTWARD_MIN}–{@link #OUTWARD_MAX}、{@link #OUTWARD_JITTER}、{@link #SPREAD}。
+	 *
+	 * <p>原因：低速时扬起层只有 1–2 颗、还压在 0.2–0.4 格，视野里几乎全是贴地层；原来那套
+	 * 0.10–0.80 的落点 / 0.05–0.30 的向外速度抽出来就是贴着板边的一细条。贴地层要「低速也看得出铺开」，
+	 * 所以区间整体外移并加宽（落点 0.20–1.10、向外 0.12–0.45），抖动也加大。
+	 * 两边各一套常量，调贴地层不会连带改掉扬起层的手感（扬起层继续用上面那几个）。
+	 */
+	private static final double FLECK_LATERAL_MIN = 0.20D;
+	private static final double FLECK_LATERAL_MAX = 1.10D;
+	private static final double FLECK_OUTWARD_MIN = 0.12D;
+	private static final double FLECK_OUTWARD_MAX = 0.45D;
+	/** 贴地层向外速度的正负抖动：比扬起层 ±0.06 大，雪屑才不是一律朝外排。 */
+	private static final double FLECK_OUTWARD_JITTER = 0.10D;
+	/** 贴地层出生点的水平散布（格）：比 {@link #SPREAD} 0.16 宽，同样几颗也不排在一条线上。 */
+	private static final double FLECK_SPREAD = 0.22D;
+	/** 贴地层纵向初速的倍率区间（乘 {@link #UPWARD}）：低速也拉开高低差，别挤在一个平面上。 */
+	private static final double FLECK_UPWARD_MIN = 0.30D;
+	private static final double FLECK_UPWARD_MAX = 1.00D;
 	/**
 	 * 出生点离地高度（格）：所有粒子都贴着它们脚下那片雪面起。
 	 *
@@ -197,6 +223,21 @@ public final class SnowSpray {
 	private static final double BURST_UPWARD = 0.5D;
 	/** 雪屑炸开时的随机散布半径（格）。 */
 	private static final double BURST_RADIUS = 0.75D;
+	/**
+	 * <b>「贴地」容差（格）</b>：脚底到雪面上表面的距离 ≤ 这个值才算站在雪面上。
+	 *
+	 * <p>急刹爆发要求<b>上一 tick 与本 tick 都贴地</b>。落地那一 tick 水平速度会突降（动量被重置 / 摩擦吃满），
+	 * 看着像急刹，其实是「从一两格高跳下来」—— 用户明确不要这种爆发。取 0.15 格：站/滑时 gap ≈ 0，
+	 * 而落地前一两 tick 的 gap 是 0.3–1.5 格（{@link #AIR_RANGE} 内），所以「上一 tick 是否贴地」这一条就能挡住整段落地。
+	 */
+	private static final double GROUND_TOUCH_TOLERANCE = 0.15D;
+	/**
+	 * <b>垂直速度容差（格/tick）</b>：|vy| 小于它才算「在地面上滑」，大就说明在坠落。
+	 *
+	 * <p>自由落体的落地瞬时 vy：1 格 ≈ −0.38、2 格 ≈ −0.52、3 格 ≈ −0.65（原版重力 0.08 格/tick² + 0.98 阻尼的离散值），
+	 * 是这里的 4–7 倍；而贴地滑行/急刹时 y 被碰撞压在 0 附近（|vy| ≈ 0）。<= 0.10 把这两种情况分得很干净。
+	 */
+	private static final double FALL_TOLERANCE = 0.10D;
 
 	private static final int MAX_ENTRIES = 64;
 
@@ -206,6 +247,8 @@ public final class SnowSpray {
 	private static final Map<Integer, Double> LAST_DIR = new ConcurrentHashMap<>();
 	/** 实体 id → 雪屑冷却剩余 tick。 */
 	private static final Map<Integer, Integer> BURST_COOLDOWN = new ConcurrentHashMap<>();
+	/** 实体 id → 上一 tick 是否贴地（急刹爆发的第一道闸门：落地那一 tick 不算刹车）。 */
+	private static final Map<Integer, Boolean> LAST_GROUNDED = new ConcurrentHashMap<>();
 	/** {@link #DEBUG_LOG} 用：客户端 tick 计数（每 20 tick 打一行）。 */
 	private static int DEBUG_TICKS = 0;
 
@@ -224,6 +267,7 @@ public final class SnowSpray {
 			LAST_SPEED.clear();
 			LAST_DIR.clear();
 			BURST_COOLDOWN.clear();
+			LAST_GROUNDED.clear();
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();
@@ -264,10 +308,19 @@ public final class SnowSpray {
 						+ " turning=" + turning + " range=" + AIR_RANGE);
 			}
 			if (Double.isNaN(surface)) {
-				continue;   // 脚底离最近的雪面已经超过 AIR_RANGE 格（或附近压根没雪）：没有雪可扬
+				// 空中 / 附近没雪：记成「不贴地」，免得落地那一刻拿几分钟前的旧状态当「一直在雪面上」。
+				LAST_GROUNDED.put(id, false);
+				continue;
 			}
-			// 急减速：炸一团雪屑抛向空中（急刹、撞墙、压刃刹车都是这个形状）
+			// 贴地判定（浮点比较，不用 autoboxing 的 ==）：脚底到雪面上表面 ≤ 容差才算站在雪面上。
+			boolean grounded = player.getY() - surface <= GROUND_TOUCH_TOLERANCE;
+			Boolean wasGrounded = LAST_GROUNDED.put(id, grounded);
+			// 急减速：炸一团雪屑抛向空中（急刹、撞墙、压刃刹车都是这个形状）。
+			// 三道闸门挡掉「落地」这种假急刹：① 上一 tick 贴地 ② 本 tick 贴地 ③ 垂直速度小（真在往下掉就不是刹车）。
+			// 落地那一 tick 水平速度会突降（动量重置 + 落地摩擦），只看差值的话从一两格高跳下来也会炸一大团。
 			if (last != null && cooldown == 0
+					&& Boolean.TRUE.equals(wasGrounded) && grounded
+					&& Math.abs(player.getDeltaMovement().y) < FALL_TOLERANCE
 					&& last > BURST_MIN_SPEED && last - speed > BURST_DROP) {
 				burst(level, player, last - speed, surface);
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
@@ -299,14 +352,18 @@ public final class SnowSpray {
 		double fan = 1.0D + 1.6D * Mth.clamp((speed - MIN_SPEED) / (APEX_SPEED_HI - MIN_SPEED), 0.0D, 1.0D);
 		for (int side = -1; side <= 1; side += 2) {
 			for (int i = 0; i < flecks; i++) {
-				double lateral = side * lateralOffset(random);
-				double out = side * outwardSpeed(random) + randomSign(random) * OUTWARD_JITTER;
+				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
+				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
+				double lateral = side * fleckLateral(random);
+				double out = side * fleckOutward(random) + randomSign(random) * FLECK_OUTWARD_JITTER;
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
-				spawn(player.getX() + leftX * lateral + jitter(random),
+				double up = UPWARD * (FLECK_UPWARD_MIN
+						+ random.nextDouble() * (FLECK_UPWARD_MAX - FLECK_UPWARD_MIN));
+				spawn(player.getX() + leftX * lateral + fleckJitter(random),
 						spawnY + yJitter(random),
-						player.getZ() + leftZ * lateral + jitter(random),
+						player.getZ() + leftZ * lateral + fleckJitter(random),
 						leftX * out + dirX * along,
-						UPWARD * (0.35D + random.nextDouble() * 0.5D),
+						up,
 						leftZ * out + dirZ * along, 0);
 			}
 			for (int i = 0; i < flurries; i++) {
@@ -334,6 +391,21 @@ public final class SnowSpray {
 	/** 向外的横向速度（格/tick，正数）：在 {@link #OUTWARD_MIN}–{@link #OUTWARD_MAX} 上均匀抽。 */
 	private static double outwardSpeed(RandomSource random) {
 		return OUTWARD_MIN + random.nextDouble() * (OUTWARD_MAX - OUTWARD_MIN);
+	}
+
+	/** 贴地层的横向落点（格，正数）：{@link #FLECK_LATERAL_MIN}–{@link #FLECK_LATERAL_MAX} 上均匀抽，比扬起层更外更宽。 */
+	private static double fleckLateral(RandomSource random) {
+		return FLECK_LATERAL_MIN + random.nextDouble() * (FLECK_LATERAL_MAX - FLECK_LATERAL_MIN);
+	}
+
+	/** 贴地层的向外速度（格/tick，正数）：{@link #FLECK_OUTWARD_MIN}–{@link #FLECK_OUTWARD_MAX}。 */
+	private static double fleckOutward(RandomSource random) {
+		return FLECK_OUTWARD_MIN + random.nextDouble() * (FLECK_OUTWARD_MAX - FLECK_OUTWARD_MIN);
+	}
+
+	/** 贴地层出生点的水平抖动（格）：{@code ±FLECK_SPREAD / 2}，比扬起层的 {@link #jitter} 宽。 */
+	private static double fleckJitter(RandomSource random) {
+		return (random.nextDouble() - 0.5D) * FLECK_SPREAD;
 	}
 
 	/** ±1：横向速度的正负抖动，让一部分雪稍微往里收。 */
@@ -530,5 +602,6 @@ public final class SnowSpray {
 		LAST_SPEED.remove(id);
 		LAST_DIR.remove(id);
 		BURST_COOLDOWN.remove(id);
+		LAST_GROUNDED.remove(id);
 	}
 }
