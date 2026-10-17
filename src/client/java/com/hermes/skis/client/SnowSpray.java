@@ -10,6 +10,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
@@ -46,8 +47,8 @@ import net.minecraft.world.phys.Vec3;
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。</li>
  * </ul>
  *
- * <p><b>所有粒子的出生点都在脚底那片「地面」上</b>（{@code groundY + 0.05 ± 0.05}，{@code groundY} 来自
- * {@link SkiGlide#groundDistance}），<b>不跟着人身子抬</b> —— 高度层次只靠顶点高度做出来，
+ * <p><b>所有粒子的出生点都在脚底那片「雪面」上</b>（{@code groundY + 0.05 ± 0.05}，雪面块由 {@link #snowGround}
+ * 向下扫描方块找到，高度再由 {@link SkiGlide#groundDistance} 的射线命中面校正），<b>不跟着人身子抬</b> —— 高度层次只靠顶点高度做出来，
  * 所以看着是雪从地面被卷起来、抛上去，而不是从人身上冒出来。
  *
  * <p>「板的两侧」＝与当前滑行方向<b>垂直</b>的左右两边（沿速度方向求左向量），落点在地面高度，
@@ -59,19 +60,36 @@ public final class SnowSpray {
 	/** 速度低于这个（格/tick）就不持续扬雪 —— 慢慢挪一步不该扬雪。 */
 	private static final double MIN_SPEED = 0.10D;
 	/**
-	 * 脚底离<b>脚下那片地面</b>在这个高度以内就扬雪（格）：滑下坡、跳起来时常常没踩着地，
-	 * 用「离地 2 格内」代替 `onGround`。取 2.0 是因为**一个普通跳跃的顶点约 1.25 格**（起跳 0.42 格/tick、
-	 * 0.08 重力），旧值 1.0 连正常一跳都盖不住 —— 一跳就没粒子，用户说的「跳起来就没雪」就是这么来的。
+	 * 雪面扫描深度（格）：从脚底那一格往下扫这么多格，扫到雪 / 冰块就算「在雪面上」。
+	 *
+	 * <p><b>为什么不看碰撞射线</b>：{@code minecraft:snow} 的 1–8 层雪，<b>碰撞形状</b>是按层数算的
+	 * （1 层根本没有碰撞盒，2 层才 0.125 格），{@code level.clip(..., Block.COLLIDER, ...)} 会直接穿透
+	 * 雪层命到它下面的石头 —— 站在一层雪上 gap 就已经是 1 格，再一跳就超 2 格，表现为「离地一格就没粒子」。
+	 * 方块扫描不依赖碰撞形状，雪层也命中。
+	 *
+	 * <p>取 2：脚下 2 格内能找到雪面就扬雪（**普通跳跃顶点约 1.25 格**）。
+	 */
+	private static final int SCAN_DEPTH = 2;
+	/**
+	 * {@code groundY} 里射线探测的距离上限（格）。找到雪面块之后仍用它取<b>精确碰撞面</b>；
+	 * 但「在不在雪面上」这件事一律由 {@link #snowGround} 的方块扫描判，不看这条射线的结果。
 	 */
 	private static final double GROUND_RANGE = 2.0D;
-	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
-	private static final double SPRAY_PER_SPEED = 20.0D;
+	/**
+	 * 贴地雪屑：每侧数量 = (速度 − {@link #MIN_SPEED}) × 这个系数（再夹到上限）。
+	 *
+	 * <p>用「速度 − MIN_SPEED」而不是「速度」：原来下限夹 1，刚过 {@link #MIN_SPEED} 就已经每侧 1–3 颗，
+	 * 速度再高又被上限夹住 —— 观感是「低速也很密、高速不再变多」。去掉下限 1 之后 0 颗起步，
+	 * 数量随速度**单调**增长；系数按「全程都不撞上限」定，速度 0.85 时才刚好夹到
+	 * {@link #SPRAY_MAX_PER_SIDE}。
+	 */
+	private static final double SPRAY_PER_SPEED = 12.0D;
 	/** 贴地雪屑的每侧数量上限。 */
-	private static final int SPRAY_MAX_PER_SIDE = 6;
-	/** 扬起雪屑：每侧数量 = 速度 × 这个系数（比贴地那层涨得快）。 */
-	private static final double FLURRY_PER_SPEED = 32.0D;
-	/** 扬起雪屑的每侧数量上限。 */
-	private static final int FLURRY_MAX_PER_SIDE = 10;
+	private static final int SPRAY_MAX_PER_SIDE = 8;
+	/** 扬起雪屑：每侧数量 = (速度 − {@link #MIN_SPEED}) × 这个系数（比贴地那层涨得快）。 */
+	private static final double FLURRY_PER_SPEED = 20.0D;
+	/** 扬起雪屑的每侧数量上限（转向的 {@link #TURN_EXTRA_PER_SIDE} 是加在夹上限之后的）。 */
+	private static final int FLURRY_MAX_PER_SIDE = 14;
 	/**
 	 * 扬起雪屑的顶点高度区间（格，从地面算）：1.5 = 胸口以上，3.0 = 头顶再高一头。
 	 *
@@ -100,8 +118,8 @@ public final class SnowSpray {
 	private static final double PARTICLE_DRAG = 0.98D;
 	/** 扬起层里走高飞档（顶点取区间上半）的比例，其余抽下半。 */
 	private static final double FLURRY_HIGH_FRACTION = 0.70D;
-	/** 转向时：扬起层每侧再多几颗。 */
-	private static final int TURN_EXTRA_PER_SIDE = 6;
+	/** 转向时：扬起层每侧再多几颗（加在夹上限之后，所以转向时能超过 {@link #FLURRY_MAX_PER_SIDE}）。 */
+	private static final int TURN_EXTRA_PER_SIDE = 4;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
 	/** 板两边的横向偏移（格）：撒在脚的两侧，而不是脚底下。 */
@@ -150,7 +168,9 @@ public final class SnowSpray {
 	private SnowSpray() {
 	}
 
-	/** 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、在雪面上、脚底离地 {@link #GROUND_RANGE} 格以内的人扬雪。 */
+	/**
+	 * 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、脚下 {@link #SCAN_DEPTH} 格内有雪 / 冰面的人扬雪。
+	 */
 	public static void tick(Minecraft client) {
 		ClientLevel level = client.level;
 		if (level == null) {
@@ -191,44 +211,45 @@ public final class SnowSpray {
 			if (cooldown > 0) {
 				BURST_COOLDOWN.put(id, cooldown - 1);
 			}
-			// 雪面判定看「脚下真正的地面块」，不看 player.blockPosition()：人一跳起来（哪怕只离地 0.3 格）
-			// 那一格就是空气，旧写法会让整个空中阶段颗粒无收（急刹那一团也被同一行堵住）。
-			double gap = SkiGlide.groundDistance(player, GROUND_RANGE);
-			if (gap > GROUND_RANGE) {
-				continue;   // 离脚下那片地面超过 GROUND_RANGE 格：真飞起来了，没有雪可扬
-			}
-			BlockPos ground = BlockPos.containing(player.getX(), player.getY() - gap - 0.05D, player.getZ());
-			if (!SkiGlide.isOnSnowOrIce(level, ground.above())) {
-				continue;   // 脚下那片地面不是雪 / 冰：没有雪可扬
+			// 雪面判定靠**方块扫描**（{@link #snowGround}），不靠碰撞射线：雪层的碰撞形状按层数算，
+			// 1 层雪根本没有碰撞盒，clip 会穿到下面的石头去 —— 那正是「离地一格就没粒子」的来源。
+			// 扫描只找「脚下 SCAN_DEPTH 格内最近的雪 / 冰块」，人在空中但雪面就在脚下一两格照样扬雪。
+			BlockPos snow = snowGround(level, player, SCAN_DEPTH);
+			if (snow == null) {
+				continue;   // 脚下 SCAN_DEPTH 格内没有雪 / 冰：没有雪可扬
 			}
 			// 急减速：炸一团雪屑抛向空中（急刹、撞墙、压刃刹车都是这个形状）
 			if (last != null && cooldown == 0
 					&& last > BURST_MIN_SPEED && last - speed > BURST_DROP) {
-				burst(level, player, last - speed);
+				burst(level, player, last - speed, snow);
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
 			}
 			if (speed < MIN_SPEED) {
-				continue;   // 太慢：不持续扬雪（离地门槛上面已经判过，贴地飞下坡照样扬）
+				continue;   // 太慢：不持续扬雪（雪面门槛上面已经判过，贴地飞下坡照样扬）
 			}
-			spray(level, player, speed, turning);
+			spray(level, player, speed, turning, snow);
 		}
 	}
 
 	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多；扬起层的顶点高度在固定区间里抽（见 {@link #FLURRY_APEX_MIN}）。 */
-	private static void spray(ClientLevel level, Player player, double speed, boolean turning) {
+	private static void spray(ClientLevel level, Player player, double speed, boolean turning, BlockPos snow) {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
 		double dirZ = motion.z / speed;
 		double leftX = -dirZ;   // 左向量
 		double leftZ = dirX;
 		RandomSource random = player.getRandom();
-		int flecks = Mth.clamp((int) (speed * SPRAY_PER_SPEED), 1, SPRAY_MAX_PER_SIDE);
-		int flurries = Mth.clamp((int) (speed * FLURRY_PER_SPEED), 1, FLURRY_MAX_PER_SIDE)
+		// 数量随速度单调增长：0 颗起步、按 (speed − MIN_SPEED) 线性涨，全程只在最高速才夹到上限
+		// （旧写法下限夹 1 → 低速就每侧 1–3 颗，高速又被上限夹死，观感是「低速也密、高速不变多」）。
+		// 那个 1e-9 是二进制浮点的取整噪声补偿：0.3 − 0.1 = 0.19999999999999998，×20 = 3.9999… 会被
+		// 直接截断成 3，白白少一颗 —— 加上它，边界值才按人算的那个数取整。
+		int flecks = Mth.clamp((int) ((speed - MIN_SPEED) * SPRAY_PER_SPEED + 1.0E-9D), 0, SPRAY_MAX_PER_SIDE);
+		int flurries = Mth.clamp((int) ((speed - MIN_SPEED) * FLURRY_PER_SPEED + 1.0E-9D), 0, FLURRY_MAX_PER_SIDE)
 				+ (turning ? TURN_EXTRA_PER_SIDE : 0);
 		// 顶点高度（格）→ 上升初速：每颗自己抽一个顶点，由 riseFor 按离散粒子物理反解出 vy。
 		// 出生高度**不随速度和档位变**：全部贴地起，层次只靠顶点高度做出来。
-		// 两层（贴地 / 扬起）共用同一个出生高度：脚下那片地面 + Y_OFFSET，再 ±Y_JITTER 抖动。
-		double spawnY = groundY(player) + Y_OFFSET;
+		// 两层（贴地 / 扬起）共用同一个出生高度：脚下那片雪面 + Y_OFFSET，再 ±Y_JITTER 抖动。
+		double spawnY = groundY(player, level, snow) + Y_OFFSET;
 		for (int side = -1; side <= 1; side += 2) {
 			double baseX = player.getX() + leftX * SIDE_OFFSET * side;
 			double baseZ = player.getZ() + leftZ * SIDE_OFFSET * side;
@@ -311,18 +332,44 @@ public final class SnowSpray {
 	}
 
 	/**
-	 * 脚底那片「地面」的高度（脚底 y 减去到地面的距离）。
+	 * 从脚下开始往下扫描，找最近的雪 / 冰地面块（<b>不依赖碰撞形状</b>，1–8 层雪都能命中）。
 	 *
-	 * <p>距离来自 {@link SkiGlide#groundDistance}{@code (player, GROUND_RANGE)}；探不到地面、
-	 * 或离地超过 {@link #GROUND_RANGE} 格（人已经飞起来了）时退回 {@code player.getY()} ——
-	 * 此时就用脚底当下那个高度，绝不再往上加。
+	 * <p>雪层的碰撞盒是按层数给的（1 层没有、2 层 0.125 格），{@code level.clip(Block.COLLIDER)}
+	 * 会直接穿过它命到下面的石头 —— 所以这个门槛绝不能用射线量出来的「离地距离」。
+	 *
+	 * @return 找到的雪 / 冰块的坐标；{@code maxDepth} 格内全是空气或不是雪 / 冰时返回 {@code null}
 	 */
-	private static double groundY(Player player) {
-		double gap = SkiGlide.groundDistance(player, GROUND_RANGE);
-		if (gap > GROUND_RANGE) {
-			return player.getY();
+	private static BlockPos snowGround(ClientLevel level, Player player, int maxDepth) {
+		BlockPos base = player.blockPosition();
+		for (int dy = 0; dy <= maxDepth; dy++) {
+			BlockPos p = (dy == 0) ? base : base.below(dy);
+			if (SkiGlide.isOnSnowOrIce(level, p.above())) {   // p.above() 的 below() 就是 p
+				return p;
+			}
 		}
-		return player.getY() - gap;
+		return null;
+	}
+
+	/**
+	 * 脚底那片「雪面」的高度（格）。
+	 *
+	 * <p>分两步，都只用来算<b>出生高度</b>（「在不在雪面上」已由 {@link #snowGround} 判掉）：
+	 * <ol>
+	 *   <li>射线命中的面（{@link SkiGlide#groundDistance}，{@code GROUND_RANGE} 格内）—— 精确的碰撞面；</li>
+	 *   <li>扫描到的那个雪面块的<b>可见表面</b>（{@code 块 y + 该方块形状的最高点}，满方块 1.0、
+	 *       1 层雪 0.125）—— 射线穿过雪层时的兜底。</li>
+	 * </ol>
+	 * 两者取<b>高的那个</b>：射线命中的面若比雪面低（穿过了 1 层雪），雪面才是真正的落脚面；
+	 * 反过来（雪层在脚下、上面还有块可踩的）射线的面对。最后一律夹到 {@code player.getY() - 0.05}，
+	 * 免得粒子生在脚以上。
+	 */
+	private static double groundY(Player player, ClientLevel level, BlockPos snow) {
+		double surface = snow.getY() + level.getBlockState(snow).getShape(level, snow).max(Direction.Axis.Y);
+		double gap = SkiGlide.groundDistance(player, GROUND_RANGE);
+		if (gap <= GROUND_RANGE) {
+			surface = Math.max(surface, player.getY() - gap);
+		}
+		return Math.min(surface, player.getY() - 0.05D);
 	}
 
 	/**
@@ -357,10 +404,10 @@ public final class SnowSpray {
 	}
 
 	/** 急减速：从脚下一圈炸开一大团抛向空中的雪屑（同样贴地起）。 */
-	private static void burst(ClientLevel level, Player player, double drop) {
+	private static void burst(ClientLevel level, Player player, double drop, BlockPos snow) {
 		RandomSource random = player.getRandom();
 		int count = Mth.clamp((int) (drop * BURST_PER_DROP), 1, BURST_MAX);
-		double y = groundY(player) + Y_OFFSET;
+		double y = groundY(player, level, snow) + Y_OFFSET;
 		for (int i = 0; i < count; i++) {
 			double angle = random.nextDouble() * Math.PI * 2.0D;
 			double radius = random.nextDouble() * BURST_RADIUS;
