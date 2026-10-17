@@ -1,5 +1,9 @@
 package com.hermes.skis;
 
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
+
 /**
  * <b>双板（skis）专属</b>的滑行数值。
  *
@@ -39,6 +43,22 @@ public final class SkisControl {
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（两板同值）
 
+	/**
+	 * <b>双板刹车</b>：按住 S（且还在往前滑）时，动量与速度每 tick 保留的比例。
+	 *
+	 * <p>0.92 → 1 秒（20 tick）剩 {@code 0.92^20 ≈ 19%}，约 1 秒内从满速刹到走。
+	 * 想更利落改 0.90、想更轻改 0.96。<b>只服务双板</b>，单板的摩擦看 {@link SnowboardControl}。
+	 */
+	private static final double BRAKE_DECAY = 0.92D;
+
+	/**
+	 * <b>双板刹车</b>的判定阈值：速度方向与视角前方（水平）的点积超过它，就算「还在往前滑」。
+	 *
+	 * <p>也就是夹角小于约 72°：此时按 S 是<b>刹车</b>（只减速、不拨方向）；
+	 * 低于它（已经横着滑 / 在倒滑）按 S 才是真的「往后走」。
+	 */
+	private static final double BRAKE_MIN_ALIGN = 0.3D;
+
 	private SkisControl() {
 	}
 
@@ -72,5 +92,22 @@ public final class SkisControl {
 	/** 双板：<b>穿板时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #GRAVITY_MULTIPLIER}）。 */
 	public static double gravityMultiplier() {
 		return GRAVITY_MULTIPLIER;
+	}
+
+	/** 双板：按 S 刹车时每 tick 保留的比例（见 {@link #BRAKE_DECAY}）。 */
+	public static double brakeDecay() {
+		return BRAKE_DECAY;
+	}
+
+	/** 速度方向与视角前方（水平）的点积 &gt; {@link #BRAKE_MIN_ALIGN} 就算「还在往前滑」。 */
+	public static boolean isMovingForward(ServerPlayer player) {
+		Vec3 motion = player.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		if (horizontal.lengthSqr() < 1.0E-6D) {
+			return false;
+		}
+		float yaw = player.getYRot() * Mth.DEG_TO_RAD;
+		Vec3 front = new Vec3(-Mth.sin(yaw), 0.0D, Mth.cos(yaw));
+		return horizontal.normalize().dot(front) > BRAKE_MIN_ALIGN;
 	}
 }

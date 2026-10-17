@@ -40,13 +40,14 @@ public final class SkiSteering {
 		if (SnowboardControl.isSnowboard(player)) {
 			return;   // 单板不参与（A / D 是平移）
 		}
-		// 左键 +1（yaw 增大 = 左转，与 SkiControl 的 forwardX = -sin(yaw) 一致）、右键 -1
+		// 左键 +1、右键 -1。MC 的水平朝向向量是 (-sin yaw, cos yaw)：yaw 0 朝 +z，yaw +90° 朝 -x，
+		// 所以 <b>yaw 增大 = 向右转</b> —— 按 A（左）要 yaw 减小，按 D（右）要 yaw 增大。
 		float turn = (client.options.keyLeft.isDown() ? 1.0F : 0.0F)
 				- (client.options.keyRight.isDown() ? 1.0F : 0.0F);
 		if (turn == 0.0F) {
 			return;
 		}
-		player.setYRot(player.getYRot() + turn * TURN_RATE_DEGREES);
+		player.setYRot(player.getYRot() - turn * TURN_RATE_DEGREES);
 		player.setYHeadRot(player.getYRot());   // 头一起转（第一人称镜头就是它）
 	}
 }

@@ -273,10 +273,24 @@ public final class SkiGlide {
 			decay = carving ? SnowboardControl.carveMomentumDecay() : SnowboardControl.momentumDecay();
 		} else {
 			// ——— 双板 ———
+			// 按 S 且还在往前滑 ＝ 刹车：动量与速度一起按 BRAKE_DECAY 衰减，方向不翻。
+			// （以前的写法把 S 也当成「想往后走」，于是高速按 S 只会把速度方向拨反，一点没减下来。）
 			momentum = Math.max(momentum, speed);
+			boolean braking = keys != null && keys.backward() && SkisControl.isMovingForward(player);
+			if (braking) {
+				// 刹车：动量与当前速度一起按 BRAKE_DECAY 衰减，方向**不翻**
+				momentum = Math.max(momentum, speed) * SkisControl.brakeDecay();
+				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+				if (horizontal.lengthSqr() > 1.0E-6D) {
+					double keep = momentum / horizontal.length();
+					player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
+					player.hurtMarked = true;
+				}
+				MOMENTUM.put(id, momentum);
+				return;   // 刹车这一 tick 不走下面「朝视角方向重写速度」那套（否则就又拨方向了）
+			}
 			decay = SkisControl.momentumDecay();
-			// 按 S <b>不是刹车</b>：它只是把滑行方向往后摆（见 SkiControl.desiredDirection 的按键转向），
-			// 速度靠动量原样托住（用户 2026-10-13：高速按 S 要「向后转向」，不是急停）。
+			// 没按 S（或已停下 / 在倒滑）时才走常规托底：动量原样托住速度。
 		}
 		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.maxGlideSpeed(player));   // 速度上限（按板）

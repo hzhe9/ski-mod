@@ -261,7 +261,7 @@ public final class SnowboardControl {
 			}
 			Vec3 front = frontLocked(entityId, entity.getYRot());
 			Vec3 target = input.forward() ? front : front.scale(-1.0D);
-			// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大＝左转
+			// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大 ＝ 向右转
 			double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
 			double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
 			double diff = Mth.wrapDegrees((float) (goal - current));
