@@ -56,7 +56,7 @@ public final class SnowSpray {
 	private static final double FLURRY_UPWARD_PER_SPEED = 0.45D;
 	/**
 	 * 上升速度上限（格/tick）。踩住是因为雪屑有重力（每 tick −0.04），
-	 * 抛起高度 ≈ 速度² / 0.08：0.40 封顶 ≈ 2 格 —— 不加的话双板顶速 1.4 会算到 0.71、抛起 6 格多，像一堵雪墙。
+	 * 抛起高度 ≈ 速度² / 0.08：0.40 封顶 ≈ 2 格 —— 不加的话双板顶速 1.0 会算到 0.53、抛起 3.5 格，像一堵雪墙。
 	 */
 	private static final double FLURRY_UPWARD_MAX = 0.40D;
 	/** 扬起雪屑出生点随速度抬高多少（格每「格/tick」）：太快的时候从高处起抛。 */

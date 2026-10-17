@@ -17,7 +17,8 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>冲刺（SkiBoost）和滑行动量（SkiGlide）都用这里的转向，规则一致。
  *
- * <p>速度上限 {@link #MAX_GLIDE_SPEED} 的现实参照（1 格 = 1 米，格/tick × 72 = km/h）：
+ * <p>速度上限（{@link #maxGlideSpeed(ServerPlayer)}，按板取各自的上限）的现实参照
+ * （1 格 = 1 米，格/tick × 72 = km/h）：
  * <ul>
  *   <li>MC 走路 0.216 格/tick ≈ 15.6 km/h；疾跑 0.28 ≈ 20.2 km/h（游戏本身已比现实快约 3 倍）；</li>
  *   <li>现实世界杯速降赛普遍 &gt;130 km/h，最快纪录 161.9 km/h（Johan Clarey，2013 Wengen）；</li>
@@ -30,14 +31,6 @@ public final class SkiControl {
 	private static final double STEER_MAX_HEIGHT = 1.0D;
 	/** 每 tick 把方向朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）。 */
 	private static final double STEER_RATE = 0.2D;
-
-	/**
-	 * 滑行 / 冲刺能达到的最高水平速度（格/tick）。换算：1 格 = 1 米，所以 {@code b/tick × 72 = km/h}。
-	 *
-	 * <p>现取值 1.4 格/tick = 28 格/秒 ≈ <b>100 km/h</b>，约 MC 疾跑速度的 5 倍，
-	 * 相当于现实里"高水平速降滑行"的量级（现实对照见类注释）。
-	 */
-	public static final double MAX_GLIDE_SPEED = 1.4D;
 
 	/** 速度上限按板分开：单板 {@code SnowboardControl.maxSpeed()}、双板 {@code SkisControl.maxSpeed()}。 */
 	public static double maxGlideSpeed(ServerPlayer player) {

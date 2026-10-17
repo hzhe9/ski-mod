@@ -49,8 +49,13 @@ public final class SkiGlide {
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
 	private static final double STEP_UP_MIN_HEIGHT = 0.5D;
-	/** 每累计下落这么多格算一次，按次均匀给速度。 */
-	private static final double STEP_BLOCKS = 1.0D;
+	/**
+	 * 每累计下落这么多格算一次，按次均匀给速度（**双板**；单板用 {@link SnowboardControl#descentStepBlocks()} 的 0.5）。
+	 *
+	 * <p>2026-10-17 起双板也改成每 0.5 格结算一次（原 1.0）：单次 = 0.12 × 0.5 = 0.06，
+	 * 每格总量仍是 0.12（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
+	 */
+	private static final double STEP_BLOCKS = 0.5D;
 	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
 	// 两边完全独立，调一个不会动到另一个。这里只留两板共用的“物理骨架”常量。
 	/** 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。 */
@@ -127,7 +132,7 @@ public final class SkiGlide {
 
 		double accumulated = DESCEND_ACCUM.getOrDefault(id, 0.0D);
 		boolean board = SnowboardControl.isSnowboard(player);
-		// 结算步长按板取：双板 1.0 格一次，单板 0.5 格一次（下坡降没半格就有第一份）
+		// 结算步长按板取：两板现在同粒度 0.5 格一次（双板 STEP_BLOCKS、单板 DESCENT_STEP_BLOCKS，各自独立）
 		double step = board ? SnowboardControl.descentStepBlocks() : STEP_BLOCKS;
 		if (accumulated < step) {
 			return;
@@ -153,7 +158,7 @@ public final class SkiGlide {
 		player.hurtMarked = true;   // 让客户端也吃到这份加速，不然会被客户端的移动预测抹掉
 	}
 
-	/** 把水平速度压到 {@link SkiControl#MAX_GLIDE_SPEED} 以内（垂直分量不动）。 */
+	/** 把水平速度压到 {@link SkiControl#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
 	/**
 	 * 设置台阶高度。26.2 里它不是 {@code setMaxUpStep}，而是属性 {@link Attributes#STEP_HEIGHT}
 	 * （原版玩家默认 0.6 格）。

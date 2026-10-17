@@ -80,7 +80,7 @@ public final class SkiBoost {
 				double progress = 1.0D - boost.ticksLeft() / (double) DURATION_TICKS;   // 0 → 1
 				double speed = Math.min(
 						boost.from() + (boost.peak() - boost.from()) * Math.pow(1.0D - progress, CURVE),
-						SkiControl.MAX_GLIDE_SPEED);
+						SkiControl.maxGlideSpeed(player));
 
 				// 方向：按了 WASD 就朝那个方向转过去（离地超过一格则锁死），松手就沿当前方向继续滑
 				Vec3 direction = SkiControl.steer(boost.direction(), player);
@@ -107,17 +107,20 @@ public final class SkiBoost {
 		PENDING.put(player.getId(), DELAY_TICKS);
 	}
 
-	/** 延迟结束后的实际发力：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。 */
-	private static void applyBurst(Player player) {
+	/**
+	 * 延迟结束后的实际发力：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。
+	 * 峰值封顶在各板自己的速度上限（{@link SkiControl#maxGlideSpeed(ServerPlayer)}）。
+	 */
+	private static void applyBurst(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double current = horizontal.length();
 
-		Vec3 desired = player instanceof ServerPlayer serverPlayer ? SkiControl.desiredDirection(serverPlayer) : null;
+		Vec3 desired = SkiControl.desiredDirection(player);
 		Vec3 direction = desired != null ? desired
 				: (current > 0.01D ? horizontal.normalize() : horizontalLook(player));
 
-		double peak = Math.min(Math.max(current + ADD, MIN_PEAK), SkiControl.MAX_GLIDE_SPEED);
+		double peak = Math.min(Math.max(current + ADD, MIN_PEAK), SkiControl.maxGlideSpeed(player));
 		// 垂直分量原样保留：撑杖只给水平推力，不会把人蹦起来（原先 +LIFT 会时不时跳一下）
 		player.setDeltaMovement(direction.x * peak, motion.y, direction.z * peak);
 		player.hurtMarked = true;

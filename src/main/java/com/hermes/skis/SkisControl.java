@@ -32,8 +32,8 @@ public final class SkisControl {
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.3D;
 
-	/** 双板速度上限（格/tick）：1.4 ≈ 100 km/h，仍是最快的那个。 */
-	private static final double MAX_SPEED = 1.4D;
+	/** 双板速度上限（格/tick）：1.0 格/tick ＝ 72 格/秒 ≈ 72 km/h（用户 2026-10-17 定：双板极速 1 格/tick）。 */
+	private static final double MAX_SPEED = 1.0D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（两板同值）
