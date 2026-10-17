@@ -11,6 +11,7 @@
 		"ClientInputMixin",
 		"EntityTiltMixin",
 		"CameraTiltMixin",
+		"CameraViewSmoothingMixin",
 		"SnowboardHeadLimitMixin"
 	],
 	"injectors": {

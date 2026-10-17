@@ -12,7 +12,6 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 
@@ -44,8 +43,8 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板：A / D 当转向键（每 tick 转视角 TURN_RATE_DEGREES 度）
-			SkiSteering.tick(client);
+			// 双板 A / D 转向（每 tick 4°）不在这里做：镜头每帧才读 yRot，
+			// 见 client/SkiViewSmoothing（挂 Camera#alignWithEntity，按帧均摊）。
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
@@ -67,8 +66,9 @@ public class SkisClient implements ClientModInitializer {
 					continue;
 				}
 				// 单板：把身体写成锁定朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
+				// yBodyRotO 故意不覆盖：baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
+				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 				player.yBodyRot = yaw;
-				player.yBodyRotO = yaw;
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			LocalPlayer self = client.player;
@@ -84,13 +84,8 @@ public class SkisClient implements ClientModInitializer {
 					int tilt = forward == backward ? 0 : (forward ? 1 : -1);
 					SnowboardControl.setTiltTarget(self.getId(), tilt);
 					SnowboardControl.tickTilt(self.getId());
-					// 身体被 carve 转了之后，视角要跟着被拉回「新朝向 ± 限制」之内（不然会甩过 180 度）
-					float head = SnowboardControl.bodyYaw(self.getId(), self.getYRot());
-					float off = Mth.wrapDegrees(self.getYRot() - head);
-					float limit = SnowboardControl.VIEW_LIMIT_DEGREES;
-					if (Math.abs(off) > limit) {
-						self.setYRot(head + Mth.clamp(off, -limit, limit));
-					}
+					// 注意：这里不再「每 tick 硬夹」视角。carve 把身体转过去之后，视角是靠
+					// client/SkiViewSmoothing 用**插值后的身体朝向**每帧夹一次的（硬夹会让镜头每 tick 跳 2°）。
 				}
 			}
 		});

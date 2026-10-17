@@ -65,7 +65,8 @@ python -m venv .venv
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳）；**双板清掉横向输入**（A/D 是转向键，前后交给原版） |
-| `client/SkiSteering.java` | **双板 A / D 转向**（纯客户端）：按住 A / D 每 tick 把 `yRot` 转 `TURN_RATE_DEGREES`（4°，≈80°/s），头一起转；单板 / 创造飞行 / 骑乘不参与。速度方向跟不跟由服务端 `SkiControl` 决定（地上跟、空中不跟） |
+| `client/SkiSteering.java` | **双板 A / D 转向**（纯客户端）：按住 A / D 把 `yRot` 每 tick 转 `TURN_RATE_DEGREES`（4°，≈80°/s），头一起转；单板 / 创造飞行 / 骑乘不参与。**实际写入按帧均摊**（`frame(player, step)`，由 `SkiViewSmoothing` 每帧调用）；`turnView` 同时给 `yRotO / yHeadRot / yHeadRotO` 加同一增量。速度方向跟不跟由服务端 `SkiControl` 决定（地上跟、空中不跟） |
+| `client/SkiViewSmoothing.java` | **转向 / 拖视角的「每帧均摊」**：在 `Camera#alignWithEntity` 的 HEAD 每帧跑一次，用 `partialTick` 的帧间增量 `step`（跨 tick +1）把双板的 4°/tick 拆到帧上；单板则把**锁定的身体朝向按帧插值**、用插值后的朝向把视角夹回 ±135°（`renderBodyYaw` 供 `SnowboardHeadLimitMixin` 共用同一基准）。**为什么必须每帧**：`LocalPlayer#getViewYRot(float)` 不是乘客时直接返回裸 `getYRot()`，本地镜头没有任何帧间插值 |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 扬起雪屑（都随速度变多，后者随速度抛得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团雪屑**（急刹/撞墙/压刃刹车）；只用 `ITEM_SNOWBALL` 一种粒子（不用雾/烟类），纯客户端观感 |
@@ -74,7 +75,8 @@ python -m venv .venv
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟） |
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
-| `mixin/client/SnowboardHeadLimitMixin.java` | 单板时在 `Entity#turn` 末尾把视角 yaw 夹到「锁定身体朝向 ± `VIEW_LIMIT_DEGREES`」 |
+| `mixin/client/CameraViewSmoothingMixin.java` | 每帧在 `Camera#alignWithEntity(F)V` 的 HEAD 调 `SkiViewSmoothing.frame`（相机读视角朝向前的最后一刻，`partialTick` 与相机随后用的是同一个）—— 只对「相机跟的就是本地玩家」生效 |
+| `mixin/client/SnowboardHeadLimitMixin.java` | 单板时在 `Entity#turn` 末尾把视角 yaw 夹到「锁定身体朝向 ± `VIEW_LIMIT_DEGREES`」；基准用 `SkiViewSmoothing.renderBodyYaw`（插值后的身体朝向），与每帧那次夹用同一个基准，不会互相拉回 |
 | `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |
 | `mixin/client/LivingEntityFallSoundMixin.java` | 穿板摔在雪 / 冰面上：`LivingEntity#causeFallDamage` **HEAD 直接取消**（那声落地闷响 + 伤害都在这里；只在 `hurtServer` 免伤拦不住声音）+ `LivingEntity#playBlockFallSound` 兜一层 |
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
@@ -89,7 +91,8 @@ python -m venv .venv
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
-- 双板：**W 前进 / 按住 S 且还在往前滑＝刹车（不拨方向）、静止或倒滑时才沿视角后退 ＋ A 左 / D 右转向**（用户 2026-10-17 定；刹车 `SkisControl.BRAKE_DECAY` 0.92、判定 `BRAKE_MIN_ALIGN` 0.3）：A/D 的横向分量在 `ClientInputMixin` 里清掉，转向由纯客户端 `client/SkiSteering` 每 tick 转视角 `TURN_RATE_DEGREES` 4°（A 让 yaw 减小、D 让 yaw 增大）；服务端 `SkiControl.desiredDirection` 只把速度方向按视角摆过去（地上摆、空中不摆），按 S 刹车时返回 `null` 交给 `SkiGlide` 的刹车分支。
+- 双板：**W 前进 / 按住 S 且还在往前滑＝刹车（不拨方向）、静止或倒滑时才沿视角后退 ＋ A 左 / D 右转向**（用户 2026-10-17 定；刹车 `SkisControl.BRAKE_DECAY` 0.92、判定 `BRAKE_MIN_ALIGN` 0.3）：A/D 的横向分量在 `ClientInputMixin` 里清掉，转向由纯客户端 `client/SkiSteering` 每 tick 转 `TURN_RATE_DEGREES` 4°（A 让 yaw 减小、D 让 yaw 增大），**写入在 `SkiViewSmoothing` 里按帧均摊**（否则镜头 20 Hz 一档一档跳，见下一节）；服务端 `SkiControl.desiredDirection` 只把速度方向按视角摆过去（地上摆、空中不摆），按 S 刹车时返回 `null` 交给 `SkiGlide` 的刹车分支。
+- **本地镜头没有帧间插值**：`Entity#getViewYRot(float)` 本来是 `Mth.rotLerp(partial, yRotO, yRot)`，但 `LocalPlayer#getViewYRot(float)` 在不是乘客时`return getYRot()`（丢 partialTick），而 `Camera#alignWithEntity` 用的就是它 —— 所以「视角类」的写入必须按帧做（`client/SkiViewSmoothing` + `mixin/client/CameraViewSmoothingMixin`），按 tick 写就是 20 Hz 一档。鼠标之所以顺，是因为 `MouseHandler.handleAccumulatedMovement`（每帧，在 `Minecraft#runTick` 里）→ `LocalPlayer#turn` 每帧都在改 yRot，且 `Entity#turn` 给 `yRot` 与 `yRotO` **同时**加同一增量 —— 我们自己的写入也要照这个来（`SkiSteering.turnView`）。
 
 ## 代码结构：单板与双板彻底分开
 
