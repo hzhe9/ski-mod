@@ -17,8 +17,8 @@ import net.minecraft.world.entity.player.Player;
  *
  * <p>判定条件三条齐了才免伤：① 是玩家；② 脚上穿着我们的板（双板 / 单板，{@link SkisMod#isSkiFeet}）；
  * ③ <b>伤害类型属于摔落</b>（{@link DamageTypeTags#IS_FALL}；别的伤害一律放行）。
- * 落点在雪面上用 {@link SkiGlide#isOnSnowOrIce} —— 与滑行判定是同一条（雪 / 雪块 / 细雪 / 各种冰），
- * 所以「落地免伤」和「能滑」永远在同一地面上。
+ * 落点在雪面上用 {@link SkiGlide#isSnowLanding} —— <b>比「能不能滑」的判定宽</b>：脚底格、上一格、下两格
+ * 任一是雪 / 冰就免，所以「石头上铺了一层雪（0.125 格）」也算雪面（用户实测：雪层太薄，落点常跨在雪层与石头之间）。
  */
 public final class SnowLanding {
 	private SnowLanding() {
@@ -39,8 +39,8 @@ public final class SnowLanding {
 		if (!source.is(DamageTypeTags.IS_FALL)) {
 			return true;   // 只免摔伤
 		}
-		if (!SkiGlide.isOnSnowOrIce(player.level(), player.blockPosition())) {
-			return true;   // 砸在石头 / 地上照旧摔伤
+		if (!SkiGlide.isSnowLanding(player.level(), player.blockPosition())) {
+			return true;   // 砸在石头 / 地上照旧摔伤（石头上面铺了雪层的算雪面，见 isSnowLanding）
 		}
 		player.resetFallDistance();   // 顺手把累计高度清掉，免得下一次落地接着算
 		return false;

@@ -64,7 +64,8 @@ python -m venv .venv
 | `SkisControl.java` | **双板专属数值**（下落基数 0.1 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 0.85 / 动量衰减 0.998）＋双板按键转向（只在地面上转，空中不转）；不持有朝向状态（视角即朝向） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
-| `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳） |
+| `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳）；**双板清掉横向输入**（A/D 是转向键，前后交给原版） |
+| `client/SkiSteering.java` | **双板 A / D 转向**（纯客户端）：按住 A / D 每 tick 把 `yRot` 转 `TURN_RATE_DEGREES`（4°，≈80°/s），头一起转；单板 / 创造飞行 / 骑乘不参与。速度方向跟不跟由服务端 `SkiControl` 决定（地上跟、空中不跟） |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 扬起雪屑（都随速度变多，后者随速度抛得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团雪屑**（急刹/撞墙/压刃刹车）；只用 `ITEM_SNOWBALL` 一种粒子（不用雾/烟类），纯客户端观感 |
@@ -88,7 +89,7 @@ python -m venv .venv
 - 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
-- 双板：**按 S ＝ 向后转向，不是刹车**（用户 2026-10-13 定）：S 只把滑行方向往后摆（`SkiControl.desiredDirection` 的按键转向，`STEER_RATE` 逐渐摆过去），动量照常托住速度。原来的 `BRAKE_DECAY` 0.90 已删 —— 高速按 S 会变成急停，与「向后转向」冲突。
+- 双板：**W 前进 / S 后退（沿视角）＋ A / D 左右转向**（用户 2026-10-17 定）：A/D 的横向分量在 `ClientInputMixin` 里清掉，转向由纯客户端 `client/SkiSteering` 每 tick 转视角 `TURN_RATE_DEGREES` 4°；服务端 `SkiControl.desiredDirection` 只把速度方向按视角摆过去（地上摆、空中不摆）。**双板没有刹车键**，动量照常托住速度。
 
 ## 代码结构：单板与双板彻底分开
 

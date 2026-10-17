@@ -44,6 +44,8 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
+			// 双板：A / D 当转向键（每 tick 转视角 TURN_RATE_DEGREES 度）
+			SkiSteering.tick(client);
 			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {

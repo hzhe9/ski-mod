@@ -37,7 +37,9 @@ public abstract class ClientInputMixin {
 			return;
 		}
 		if (!SnowboardControl.isSnowboard(player)) {
-			return;   // 双板：输入原样交给原版（视角即朝向）
+			// 双板：W / S 走前后（原版移动），A / D 不参与平移 —— 它们是转向键（见 client/SkiSteering）
+			cir.setReturnValue(new Vec2(0.0F, move.y));
+			return;
 		}
 		if (move.x == 0.0F) {
 			cir.setReturnValue(Vec2.ZERO);   // 前后（以及没按方向键）一律不动

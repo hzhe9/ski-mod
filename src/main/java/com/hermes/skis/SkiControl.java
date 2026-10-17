@@ -76,21 +76,15 @@ public final class SkiControl {
 		if (!player.onGround()) {
 			return null;
 		}
-		// 双板（2026-10 用户定案：回到最开始的状态）—— 以**视角**为基准，A / D 正常参与左右，
-		// 视角转多少人就朝哪走。不锁朝向、不夹视角。
+		// 双板（2026-10-17 用户定）：W 前进 / S 后退（沿视角），A / D 只负责转（转向在客户端 SkiSteering 里做）——
+		// 这里只回答「想往哪个方向」：按着 W/S 就按前后；只按 A/D（在转）就朝视角方向过去；都没按 = null（方向不变）。
 		double forward = (input.forward() ? 1.0D : 0.0D) - (input.backward() ? 1.0D : 0.0D);
-		double strafe = (input.left() ? 1.0D : 0.0D) - (input.right() ? 1.0D : 0.0D);
-		if (forward == 0.0D && strafe == 0.0D) {
+		if (forward == 0.0D && !input.left() && !input.right()) {
 			return null;
 		}
-		// yaw=0 朝向 +z，左手方向为 +x
+		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝视角方向转过去
 		float yaw = player.getYRot() * Mth.DEG_TO_RAD;
-		double forwardX = -Mth.sin(yaw);
-		double forwardZ = Mth.cos(yaw);
-		double leftX = Mth.cos(yaw);
-		double leftZ = Mth.sin(yaw);
-		Vec3 direction = new Vec3(forwardX * forward + leftX * strafe, 0.0D, forwardZ * forward + leftZ * strafe);
-		return direction.lengthSqr() > 1.0E-4D ? direction.normalize() : null;
+		return new Vec3(-Mth.sin(yaw) * sign, 0.0D, Mth.cos(yaw) * sign);
 	}
 
 	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格（<b>只服务单板</b>）。 */

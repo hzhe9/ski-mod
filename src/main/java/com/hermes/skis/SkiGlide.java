@@ -386,13 +386,29 @@ public final class SkiGlide {
 		return horizontal.length() > 0.01D ? horizontal.normalize() : new Vec3(0.0D, 0.0D, 1.0D);
 	}
 
-	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面（滑行、雪粒子、落地免伤共用这一条）。 */
+	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面（滑行、雪粒子共用这一条；落地另有更宽的判定）。 */
 	public static boolean isOnSnowOrIce(Level level, BlockPos standing) {
 		BlockState below = level.getBlockState(standing.below());
 		if (below.is(BlockTags.SNOW) || below.is(BlockTags.ICE)) {
 			return true;
 		}
 		return level.getBlockState(standing).is(BlockTags.SNOW);
+	}
+
+	/**
+	 * <b>落地用的雪面判定（比 {@link #isOnSnowOrIce} 宽）</b>：雪层只有 0.125 格高，落点很容易跨在
+	 * 雪层与它下面的石头上 —— 所以把脚底所在格、上一格、下两格都看一遍，任一是雪 / 冰就算砸在雪面上。
+	 */
+	public static boolean isSnowLanding(Level level, BlockPos standing) {
+		return isSnowOrIceAt(level, standing)
+				|| isSnowOrIceAt(level, standing.above())
+				|| isSnowOrIceAt(level, standing.below())
+				|| isSnowOrIceAt(level, standing.below(2));
+	}
+
+	private static boolean isSnowOrIceAt(Level level, BlockPos pos) {
+		var state = level.getBlockState(pos);
+		return state.is(BlockTags.SNOW) || state.is(BlockTags.ICE);
 	}
 
 	/**
