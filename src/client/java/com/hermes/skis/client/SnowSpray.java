@@ -8,6 +8,7 @@ import com.hermes.skis.SkisMod;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
@@ -27,7 +28,7 @@ import net.minecraft.world.phys.Vec3;
  * <ul>
  *   <li><b>贴地雪屑</b>：从板的两侧（与滑行方向垂直的左右两边）向外、略向上溅；</li>
  *   <li><b>扬起雪屑</b>：同样从板两侧起，但按<b>顶点高度</b>调 —— 每颗抽一个
- *       {@link #FLURRY_APEX_MIN}–{@link #FLURRY_APEX_MAX} 格（腰到头）的顶点高度，初速由
+ *       {@link #FLURRY_APEX_MIN}–{@link #FLURRY_APEX_MAX} 格（0.9–2.0，腰到头）的顶点高度，初速由
  *       {@link #riseFor} 按离散粒子物理反解；按 {@link #FLURRY_HIGH_FRACTION} 拆成
  *       「下半 / 上半」两档，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
  *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高
@@ -48,28 +49,31 @@ public final class SnowSpray {
 	private static final ParticleOptions SNOW = ParticleTypes.ITEM_SNOWBALL;
 	/** 速度低于这个（格/tick）就不持续扬雪 —— 慢慢挪一步不该扬雪。 */
 	private static final double MIN_SPEED = 0.10D;
-	/** 脚底离地面在这个高度以内就扬雪（格）：滑下坡时常常没踩着地，用「离地 1.5 格内」代替 `onGround`。 */
-	private static final double GROUND_RANGE = 1.5D;
-	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
-	private static final double SPRAY_PER_SPEED = 10.0D;
-	/** 贴地雪屑的每侧数量上限。 */
-	private static final int SPRAY_MAX_PER_SIDE = 3;
-	/** 扬起雪屑：每侧数量 = 速度 × 这个系数（比贴地那层涨得快）。 */
-	private static final double FLURRY_PER_SPEED = 14.0D;
-	/** 扬起雪屑的每侧数量上限。 */
-	private static final int FLURRY_MAX_PER_SIDE = 3;
 	/**
-	 * 扬起雪屑的顶点高度区间（格，从地面算）：0.7 = 腰 / 膝，1.8 = 头顶。
+	 * 脚底离<b>脚下那片地面</b>在这个高度以内就扬雪（格）：滑下坡、跳起来时常常没踩着地，
+	 * 用「离地 1 格内」代替 `onGround` —— 离脚下的雪面 1 格以内就扬雪（含跳起后的小滞空）。
+	 */
+	private static final double GROUND_RANGE = 1.0D;
+	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
+	private static final double SPRAY_PER_SPEED = 16.0D;
+	/** 贴地雪屑的每侧数量上限。 */
+	private static final int SPRAY_MAX_PER_SIDE = 5;
+	/** 扬起雪屑：每侧数量 = 速度 × 这个系数（比贴地那层涨得快）。 */
+	private static final double FLURRY_PER_SPEED = 26.0D;
+	/** 扬起雪屑的每侧数量上限。 */
+	private static final int FLURRY_MAX_PER_SIDE = 8;
+	/**
+	 * 扬起雪屑的顶点高度区间（格，从地面算）：0.9 = 腰 / 膝，2.0 = 头顶。
 	 *
 	 * <p>这里写的是<b>「雪飘到多高」</b>，不是初速度 —— 初速由 {@link #riseFor} 按离散粒子物理反解，
 	 * 所以调这两个数就能把雪屑抬到身体那么高，不用再猜 vy。
 	 */
-	private static final double FLURRY_APEX_MIN = 0.7D;
-	private static final double FLURRY_APEX_MAX = 1.8D;
+	private static final double FLURRY_APEX_MIN = 0.9D;
+	private static final double FLURRY_APEX_MAX = 2.0D;
 	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）。 */
-	private static final double FLURRY_APEX_TURN_BONUS = 0.3D;
+	private static final double FLURRY_APEX_TURN_BONUS = 0.4D;
 	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
-	private static final double FLURRY_APEX_CAP = 2.0D;
+	private static final double FLURRY_APEX_CAP = 2.2D;
 	/**
 	 * 雪粒子的重力（格/tick²）。原版 {@code Particle.tick} 里是 {@code yd -= 0.04 * gravity}，
 	 * 而雪球（{@code BreakingItemParticle} 构造器）的 {@code gravity} 是 1.0 —— 即每 tick −0.04。
@@ -78,9 +82,9 @@ public final class SnowSpray {
 	/** 雪粒子的每 tick 阻尼：原版 {@code Particle} 构造器里 {@code friction} 默认 0.98（每 tick 速度 ×0.98）。 */
 	private static final double PARTICLE_DRAG = 0.98D;
 	/** 扬起层里走高飞档（顶点取区间上半）的比例，其余抽下半。 */
-	private static final double FLURRY_HIGH_FRACTION = 0.60D;
+	private static final double FLURRY_HIGH_FRACTION = 0.70D;
 	/** 转向时：扬起层每侧再多几颗。 */
-	private static final int TURN_EXTRA_PER_SIDE = 2;
+	private static final int TURN_EXTRA_PER_SIDE = 5;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
 	/** 板两边的横向偏移（格）：撒在脚的两侧，而不是脚底下。 */
@@ -170,8 +174,15 @@ public final class SnowSpray {
 			if (cooldown > 0) {
 				BURST_COOLDOWN.put(id, cooldown - 1);
 			}
-			if (!SkiGlide.isOnSnowOrIce(level, player.blockPosition())) {
-				continue;   // 没在雪面上就没有雪可扬
+			// 雪面判定看「脚下真正的地面块」，不看 player.blockPosition()：人一跳起来（哪怕只离地 0.3 格）
+			// 那一格就是空气，旧写法会让整个空中阶段颗粒无收（急刹那一团也被同一行堵住）。
+			double gap = SkiGlide.groundDistance(player, GROUND_RANGE);
+			if (gap > GROUND_RANGE) {
+				continue;   // 离脚下那片地面超过 GROUND_RANGE 格：真飞起来了，没有雪可扬
+			}
+			BlockPos ground = BlockPos.containing(player.getX(), player.getY() - gap - 0.05D, player.getZ());
+			if (!SkiGlide.isOnSnowOrIce(level, ground.above())) {
+				continue;   // 脚下那片地面不是雪 / 冰：没有雪可扬
 			}
 			// 急减速：炸一团雪屑抛向空中（急刹、撞墙、压刃刹车都是这个形状）
 			if (last != null && cooldown == 0
@@ -179,8 +190,8 @@ public final class SnowSpray {
 				burst(level, player, last - speed);
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
 			}
-			if (speed < MIN_SPEED || SkiGlide.groundDistance(player, GROUND_RANGE) > GROUND_RANGE) {
-				continue;   // 太慢、或离地超过 1.5 格：不持续扬雪（贴地飞下坡照样扬）
+			if (speed < MIN_SPEED) {
+				continue;   // 太慢：不持续扬雪（离地门槛上面已经判过，贴地飞下坡照样扬）
 			}
 			spray(level, player, speed, turning);
 		}
