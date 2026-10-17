@@ -14,9 +14,13 @@ import net.minecraft.world.phys.Vec3;
  * 允许共用的只有“平台级”的东西（{@link SkisMod} 的物品判定、{@link SkiGlide} 的 tick 循环骨架）。
  * 以后调双板的手感只改这里，不会碰到单板。
  *
- * <p><b>朝向（2026-10-17 用户定）</b>：视角<b>只听鼠标</b>，A / D 只转<b>身体朝向</b>
+ * <p><b>朝向（2026-10-17 用户定）</b>：A / D 只转<b>身体朝向</b>
  * （{@link #BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
  * 和单板一样是「锁住 + 按键转」，区别是双板的 W / S 仍然沿身体前后滑（单板的 W / S 只改姿态）。
+ *
+ * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
+ * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
+ * 不动（身体在下面转）；顶到之后头被身体拖着走。
  */
 public final class SkisControl {
 	private static final int MAX_ENTRIES = 64;
@@ -25,6 +29,14 @@ public final class SkisControl {
 	private static final Map<Integer, Float> BODY_YAW = new ConcurrentHashMap<>();
 	/** 双板：按住 A / D 时每 tick 转身体多少度（8°/tick ≈ 160°/s，180° 约 1.1 s）。 */
 	private static final float TURN_RATE_DEGREES = 8.0F;
+	/**
+	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 135} 度，合计 270 ——
+	 * 扭不到背后去（背后留 90° 禁区）。
+	 *
+	 * <p>与单板的 {@link SnowboardControl#VIEW_LIMIT_DEGREES} <b>同值但各自一份常量</b>：两块板各改各的，
+	 * 改这里不会动单板。<b>限的是视角，不是转向</b> —— A / D 的 {@link #TURN_RATE_DEGREES} 一点没变。
+	 */
+	public static final float VIEW_LIMIT_DEGREES = 135.0F;
 
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。

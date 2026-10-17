@@ -12,7 +12,7 @@
 		"EntityTiltMixin",
 		"CameraTiltMixin",
 		"CameraViewSmoothingMixin",
-		"SnowboardHeadLimitMixin"
+		"SkiHeadLimitMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

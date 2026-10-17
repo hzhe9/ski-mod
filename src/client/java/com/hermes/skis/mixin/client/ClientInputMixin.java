@@ -27,6 +27,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>改输入而不是改速度：原版走路 / 服务端同步全走同一条路，不会和客户端移动预测互抢。
  *
+ * <p>这里的 δ 用 {@code 身体朝向 − 视角}：双板的视角可以转（限在身体 ±135° 内，见
+ * {@code client/SkiViewSmoothing}），所以 δ 不恒为 0 —— 视角怎么转，W / S 都还是沿身体前后。
+ *
  * <p><b>空格照旧（单板也能跳）</b>：原来这里把单板的 {@code makeJump} 取消了，2026-10-15 按用户要求
  * 去掉 —— 现在「按空格跳出去」是穿板时唯一的主动离地方式（其余情况由 {@code SkiGlide} 贴着坡面走）。
  */

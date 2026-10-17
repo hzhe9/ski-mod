@@ -37,14 +37,21 @@ public class SkisClient implements ClientModInitializer {
 		// 每 tick：推进「一次摆臂」的动画计时（手臂本身不做持续摆动）
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			SkiState.tick();
+			// 视角限位（单板 / 双板同一套）的客户端状态：脱板 / 退出世界 / 换人时清掉，
+			// 重新穿板时按当时的视角重新起算（SkiViewSmoothing 内部还会按板块种类再判一次）。
+			LocalPlayer self = client.player;
+			if (client.level == null || self == null
+					|| !SkisMod.isSkiFeet(self.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
+				SkiViewSmoothing.reset();
+			}
 			if (client.level == null) {
 				return;
 			}
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），视角完全听鼠标 —— 没有「转视角」这回事了
-			// （原 client/SkiSteering 已删）。
+			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW）；视角由鼠标转、并被限在身体 ±135°
+			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
 					SnowboardControl.forget(player.getId());
@@ -77,7 +84,6 @@ public class SkisClient implements ClientModInitializer {
 				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
-			LocalPlayer self = client.player;
 			if (self != null) {
 				if (!SnowboardControl.isSnowboard(self)) {
 					SnowboardControl.setTiltTarget(self.getId(), 0);
@@ -90,8 +96,8 @@ public class SkisClient implements ClientModInitializer {
 					int tilt = forward == backward ? 0 : (forward ? 1 : -1);
 					SnowboardControl.setTiltTarget(self.getId(), tilt);
 					SnowboardControl.tickTilt(self.getId());
-					// 注意：这里不再「每 tick 硬夹」视角。carve 把身体转过去之后，视角是靠
-					// client/SkiViewSmoothing 用**插值后的身体朝向**每帧夹一次的（硬夹会让镜头每 tick 跳 2°）。
+					// 注意：这里不「每 tick 硬夹」视角。视角限位只有一处权威状态
+					// （client/SkiViewSmoothing 的 headOffset），按帧写、按帧判断，不会有两处基准互相拉回。
 				}
 			}
 		});
