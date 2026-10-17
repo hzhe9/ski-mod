@@ -26,16 +26,18 @@ import net.minecraft.world.phys.Vec3;
  * <p>三层效果，数量都随速度涨：
  * <ul>
  *   <li><b>贴地雪屑</b>：从板的两侧（与滑行方向垂直的左右两边）向外、略向上溅；</li>
- *   <li><b>扬起雪屑</b>：同样从板两侧起，向上的初速度随速度线性增加 —— <b>越快抛得越高</b>，
- *       数量涨得比贴地那层快；按 {@link #FLURRY_HIGH_FRACTION} 拆成「低飞 / 高飞」两档，
- *       高飞版给 0.45–0.85 的上升初速，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
- *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、更高；</li>
+ *   <li><b>扬起雪屑</b>：同样从板两侧起，但按<b>顶点高度</b>调 —— 每颗抽一个
+ *       {@link #FLURRY_APEX_MIN}–{@link #FLURRY_APEX_MAX} 格（腰到头）的顶点高度，初速由
+ *       {@link #riseFor} 按离散粒子物理反解；按 {@link #FLURRY_HIGH_FRACTION} 拆成
+ *       「下半 / 上半」两档，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
+ *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高
+ *       {@link #FLURRY_APEX_TURN_BONUS} 格（封顶 {@link #FLURRY_APEX_CAP}）；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。</li>
  * </ul>
  *
  * <p><b>所有粒子的出生点都在脚底那片「地面」上</b>（{@code groundY + 0.05 ± 0.05}，{@code groundY} 来自
- * {@link SkiGlide#groundDistance}），<b>不跟着人身子抬</b> —— 高度层次只靠上升初速度做出来，
+ * {@link SkiGlide#groundDistance}），<b>不跟着人身子抬</b> —— 高度层次只靠顶点高度做出来，
  * 所以看着是雪从地面被卷起来、抛上去，而不是从人身上冒出来。
  *
  * <p>「板的两侧」＝与当前滑行方向<b>垂直</b>的左右两边（沿速度方向求左向量），落点在地面高度，
@@ -56,24 +58,28 @@ public final class SnowSpray {
 	private static final double FLURRY_PER_SPEED = 14.0D;
 	/** 扬起雪屑的每侧数量上限。 */
 	private static final int FLURRY_MAX_PER_SIDE = 3;
-	/** 扬起雪屑的基础上升速度。 */
-	private static final double FLURRY_UPWARD = 0.08D;
-	/** 上升速度里随速度线性增加的那份 —— 这就是「越快抛得越高」。 */
-	private static final double FLURRY_UPWARD_PER_SPEED = 0.45D;
 	/**
-	 * 上升速度上限（格/tick）。踩住是因为雪屑有重力（每 tick −0.04），
-	 * 抛起高度 ≈ 速度² / 0.08：0.55 封顶 ≈ 3.8 格 —— 不加的话双板顶速 0.85 会算到 0.46，
-	 * 也不至于像一堵雪墙。
+	 * 扬起雪屑的顶点高度区间（格，从地面算）：0.7 = 腰 / 膝，1.8 = 头顶。
+	 *
+	 * <p>这里写的是<b>「雪飘到多高」</b>，不是初速度 —— 初速由 {@link #riseFor} 按离散粒子物理反解，
+	 * 所以调这两个数就能把雪屑抬到身体那么高，不用再猜 vy。
 	 */
-	private static final double FLURRY_UPWARD_MAX = 0.55D;
-	/** 扬起层里走高飞版的比例，其余沿用原来的低飞版。 */
+	private static final double FLURRY_APEX_MIN = 0.7D;
+	private static final double FLURRY_APEX_MAX = 1.8D;
+	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）。 */
+	private static final double FLURRY_APEX_TURN_BONUS = 0.3D;
+	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
+	private static final double FLURRY_APEX_CAP = 2.0D;
+	/**
+	 * 雪粒子的重力（格/tick²）。原版 {@code Particle.tick} 里是 {@code yd -= 0.04 * gravity}，
+	 * 而雪球（{@code BreakingItemParticle} 构造器）的 {@code gravity} 是 1.0 —— 即每 tick −0.04。
+	 */
+	private static final double PARTICLE_GRAVITY = 0.04D;
+	/** 雪粒子的每 tick 阻尼：原版 {@code Particle} 构造器里 {@code friction} 默认 0.98（每 tick 速度 ×0.98）。 */
+	private static final double PARTICLE_DRAG = 0.98D;
+	/** 扬起层里走高飞档（顶点取区间上半）的比例，其余抽下半。 */
 	private static final double FLURRY_HIGH_FRACTION = 0.60D;
-	/** 高飞版的上升初速度随机区间（格/tick）：撒在这个区间里才有「均匀撒向空中」的层次。 */
-	private static final double FLURRY_UPWARD_HIGH_MIN = 0.45D;
-	private static final double FLURRY_UPWARD_HIGH_MAX = 0.85D;
-	/** 转向时：上升初速额外加这么多、上限提到 FLURRY_UPWARD_TURN_MAX、每侧再多几颗。 */
-	private static final double TURN_UPWARD_BONUS = 0.30D;
-	private static final double FLURRY_UPWARD_TURN_MAX = 1.0D;
+	/** 转向时：扬起层每侧再多几颗。 */
 	private static final int TURN_EXTRA_PER_SIDE = 2;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
@@ -180,7 +186,7 @@ public final class SnowSpray {
 		}
 	}
 
-	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多、后者还随速度抛得更高；转向时扬起层更多更高。 */
+	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多；扬起层的顶点高度在固定区间里抽（见 {@link #FLURRY_APEX_MIN}）。 */
 	private static void spray(ClientLevel level, Player player, double speed, boolean turning) {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
@@ -191,15 +197,9 @@ public final class SnowSpray {
 		int flecks = Mth.clamp((int) (speed * SPRAY_PER_SPEED), 1, SPRAY_MAX_PER_SIDE);
 		int flurries = Mth.clamp((int) (speed * FLURRY_PER_SPEED), 1, FLURRY_MAX_PER_SIDE)
 				+ (turning ? TURN_EXTRA_PER_SIDE : 0);
-		// 越快：向上初速度越大 —— 于是雪屑抛得越来越高（上限见 FLURRY_UPWARD_MAX；
-		// 转向时上限提到 FLURRY_UPWARD_TURN_MAX，把「转弯甩起来的雪」再抬高一层）。
-		// 出生高度**不随速度和档位变**：全部贴地起，高度层次只靠上升初速做出来。
-		double riseCap = turning ? FLURRY_UPWARD_TURN_MAX : FLURRY_UPWARD_MAX;
-		double rise = Math.min(FLURRY_UPWARD + speed * FLURRY_UPWARD_PER_SPEED, riseCap);
-		if (turning) {
-			rise = Math.min(rise + TURN_UPWARD_BONUS, FLURRY_UPWARD_TURN_MAX);
-		}
-		// 三层（贴地 / 低飞 / 高飞）共用同一个出生高度：脚下那片地面 + Y_OFFSET，再 ±Y_JITTER 抖动。
+		// 顶点高度（格）→ 上升初速：每颗自己抽一个顶点，由 riseFor 按离散粒子物理反解出 vy。
+		// 出生高度**不随速度和档位变**：全部贴地起，层次只靠顶点高度做出来。
+		// 两层（贴地 / 扬起）共用同一个出生高度：脚下那片地面 + Y_OFFSET，再 ±Y_JITTER 抖动。
 		double spawnY = groundY(player) + Y_OFFSET;
 		for (int side = -1; side <= 1; side += 2) {
 			double baseX = player.getX() + leftX * SIDE_OFFSET * side;
@@ -212,22 +212,75 @@ public final class SnowSpray {
 						outX, UPWARD * (0.5D + random.nextDouble()), outZ);
 			}
 			for (int i = 0; i < flurries; i++) {
-				if (random.nextDouble() < FLURRY_HIGH_FRACTION) {
-					// 高飞版：只有上升初速在区间里随机抽（0.45–0.85），出生点还是地面 ——
-					// 「均匀撒向空中」的层次靠的是抛得快、不是起得高（0.85 ≈ 9 格、0.45 ≈ 2.5 格）。
-					double vy = FLURRY_UPWARD_HIGH_MIN
-							+ random.nextDouble() * (FLURRY_UPWARD_HIGH_MAX - FLURRY_UPWARD_HIGH_MIN)
-							+ (turning ? TURN_UPWARD_BONUS : 0.0D);
-					level.addParticle(SNOW,
-							baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
-							outX * 0.9D, vy, outZ * 0.9D);
-				} else {
-					level.addParticle(SNOW,
-							baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
-							outX * 0.6D, rise * (0.7D + random.nextDouble() * 0.6D), outZ * 0.6D);
-				}
+				// 每颗雪屑自己抽一个「顶点高度」：低飞档抽区间下半（腰 / 膝），高飞档抽上半（胸到头），
+				// 混起来才有层次 —— 不再是「要么贴地皮、要么 9 格雪柱」。
+				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
+				double vy = riseFor(randomApex(random, high, turning));
+				double scatter = high ? 0.9D : 0.6D;   // 横向溅射沿用原来两档的系数
+				level.addParticle(SNOW,
+						baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
+						outX * scatter, vy, outZ * scatter);
 			}
 		}
+	}
+
+	/**
+	 * 抽一颗扬起雪屑的顶点高度（格）：高飞档取区间上半、低飞档取下半，转向再 +{@link #FLURRY_APEX_TURN_BONUS}，
+	 * 最后一律夹到 {@link #FLURRY_APEX_CAP}。
+	 */
+	private static double randomApex(RandomSource random, boolean high, boolean turning) {
+		double mid = (FLURRY_APEX_MIN + FLURRY_APEX_MAX) * 0.5D;
+		double lo = high ? mid : FLURRY_APEX_MIN;
+		double hi = high ? FLURRY_APEX_MAX : mid;
+		double apex = lo + random.nextDouble() * (hi - lo);
+		if (turning) {
+			apex += FLURRY_APEX_TURN_BONUS;
+		}
+		return Math.min(apex, FLURRY_APEX_CAP);
+	}
+
+	/**
+	 * 反解：要让雪屑飘到 {@code apexBlocks} 格高，出生时该给多大的向上初速（格/tick）。
+	 *
+	 * <p><b>用离散积分、不用解析式 {@code sqrt(2gh)}</b>：原版每 tick 先 {@code yd -= 0.04 * gravity}、
+	 * 再用新的 yd 位移、最后 {@code yd *= 0.98}（阻尼）—— 阻尼会把顶点压低一截，
+	 * 解析式会系统性高估。这里把整个上升过程逐 tick 复刻一遍（{@link #apexOf}），再二分搜初速。
+	 */
+	private static double riseFor(double apexBlocks) {
+		double target = Mth.clamp(apexBlocks, 0.0D, FLURRY_APEX_CAP);
+		double lo = 0.0D;
+		double hi = 0.1D;
+		while (apexOf(hi) < target && hi < 4.0D) {
+			hi *= 2.0D;
+		}
+		for (int i = 0; i < 24; i++) {
+			double mid = (lo + hi) * 0.5D;
+			if (apexOf(mid) < target) {
+				lo = mid;
+			} else {
+				hi = mid;
+			}
+		}
+		return (lo + hi) * 0.5D;
+	}
+
+	/** 给一个向上初速，逐 tick 复刻原版粒子物理，返回它最终能升到多高（格，从出生点算）。 */
+	private static double apexOf(double vy) {
+		double y = 0.0D;
+		double v = vy;
+		double apex = 0.0D;
+		for (int t = 0; t < 240; t++) {
+			v -= PARTICLE_GRAVITY;          // 原版：yd -= 0.04 * gravity
+			y += v;                         // 原版：move(0, yd, 0)
+			if (y > apex) {
+				apex = y;
+			}
+			if (v <= 0.0D && y <= 0.0D) {
+				break;                      // 已经落回出生高度，不用再算
+			}
+			v *= PARTICLE_DRAG;             // 原版：yd *= friction(0.98)
+		}
+		return apex;
 	}
 
 	/**
