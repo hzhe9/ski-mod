@@ -18,6 +18,10 @@ import net.minecraft.world.phys.Vec3;
  * （{@link #BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
  * 和单板一样是「锁住 + 按键转」，区别是双板的 W / S 仍然沿身体前后滑（单板的 W / S 只改姿态）。
  *
+ * <p><b>按 W 时身体朝视角转</b>：{@link #turnTowardView} 每 tick 把身体朝视角方向拨
+ * {@link #VIEW_TURN_RATE_DEGREES} 度（限幅、不越过目标）——<b>转的是身体，视角在世界坐标里仍然不动</b>，
+ * 与 A / D 转身体是同一种事，位移只跟身体前方走。
+ *
  * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
  * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
  * 不动（身体在下面转）；顶到之后头被身体拖着走。
@@ -30,13 +34,19 @@ public final class SkisControl {
 	/** 双板：按住 A / D 时每 tick 转身体多少度（8°/tick ≈ 160°/s，180° 约 1.1 s）。 */
 	private static final float TURN_RATE_DEGREES = 8.0F;
 	/**
-	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 135} 度，合计 270 ——
-	 * 扭不到背后去（背后留 90° 禁区）。
+	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
+	 * 刚好看到正侧方，背后整片都是禁区。
 	 *
-	 * <p>与单板的 {@link SnowboardControl#VIEW_LIMIT_DEGREES} <b>同值但各自一份常量</b>：两块板各改各的，
+	 * <p>与单板的 {@link SnowboardControl#VIEW_LIMIT_DEGREES} <b>各自一份常量</b>：两块板各改各的，
 	 * 改这里不会动单板。<b>限的是视角，不是转向</b> —— A / D 的 {@link #TURN_RATE_DEGREES} 一点没变。
 	 */
-	public static final float VIEW_LIMIT_DEGREES = 135.0F;
+	public static final float VIEW_LIMIT_DEGREES = 90.0F;
+
+	/** W 时身体每 tick 朝视角方向转多少度（4°/tick ≈ 80°/s；90° 残余约 1.15 s 对齐）。 */
+	private static final float VIEW_TURN_RATE_DEGREES = 4.0F;
+
+	/** 残余偏角小于它就当成对齐（防抖，不要每 tick 无限逼近）。 */
+	private static final float VIEW_TURN_MIN_DEGREES = 0.5F;
 
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
@@ -112,6 +122,28 @@ public final class SkisControl {
 	 */
 	public static float turnBody(int entityId, float fallback, double side) {
 		float yaw = BODY_YAW.getOrDefault(entityId, fallback) - (float) side * TURN_RATE_DEGREES;
+		BODY_YAW.put(entityId, yaw);
+		return yaw;
+	}
+
+	/**
+	 * <b>W：把身体朝视角方向转一步</b>（步长限幅、不越过目标），返回新朝向。
+	 *
+	 * <p>只转 {@link #BODY_YAW}，<b>不碰视角</b>：视角在世界坐标里不动，身体在下面转过去；
+	 * 「视角相对身体」的偏角因此每 tick 收窄 {@link #VIEW_TURN_RATE_DEGREES} 度，
+	 * 由 {@code client/SkiViewSmoothing} 的 {@code headOffset -= bodyStep} 自动收敛。
+	 * 残余偏角小于 {@link #VIEW_TURN_MIN_DEGREES} 就不动（防抖）。
+	 *
+	 * <p>客户端与服务端各跑一次同一条规则（顺序：先 A / D 的 {@link #turnBody}，再这里）。
+	 */
+	public static float turnTowardView(int entityId, float fallback, float viewYaw) {
+		float yaw = BODY_YAW.getOrDefault(entityId, fallback);
+		float delta = Mth.wrapDegrees(viewYaw - yaw);
+		if (Float.isNaN(delta) || Math.abs(delta) < VIEW_TURN_MIN_DEGREES) {
+			return yaw;
+		}
+		float step = Mth.clamp(delta, -VIEW_TURN_RATE_DEGREES, VIEW_TURN_RATE_DEGREES);
+		yaw += step;
 		BODY_YAW.put(entityId, yaw);
 		return yaw;
 	}

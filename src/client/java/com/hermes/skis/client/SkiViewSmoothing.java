@@ -153,7 +153,7 @@ public final class SkiViewSmoothing {
 		turnStart = Float.NaN;
 	}
 
-	/** 这块板的视角限位（单板 / 双板各一份常量，值同为 135）。 */
+	/** 这块板的视角限位（单板 / 双板各一份常量：双板 90 / 单板 135）。 */
 	private static float limit(boolean snowboard) {
 		return snowboard ? SnowboardControl.VIEW_LIMIT_DEGREES : SkisControl.VIEW_LIMIT_DEGREES;
 	}

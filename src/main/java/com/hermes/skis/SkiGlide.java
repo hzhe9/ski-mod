@@ -91,11 +91,16 @@ public final class SkiGlide {
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					carve(player);
 				} else {
-					// ——— 双板：A / D 只转身体（SkisControl.BODY_YAW），视角一律不动 ———
+					// ——— 双板：A / D 转身体（8°/tick）；W 再朝视角方向补 4°/tick。视角一律不动 ———
 					SkisControl.ensureLocked(player.getId(), player.getYRot());
-					double side = SnowboardControl.sideSign(player.getLastClientInput());
+					Input input = player.getLastClientInput();
+					double side = SnowboardControl.sideSign(input);
 					if (side != 0.0D) {
 						SkisControl.turnBody(player.getId(), player.getYRot(), side);
+					}
+					// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛
+					if (input != null && input.forward()) {
+						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
 					}
 				}
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）

@@ -50,7 +50,7 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW）；视角由鼠标转、并被限在身体 ±135°
+			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），W 时身体再朝视角追 4°/tick；视角由鼠标转、并被限在身体 ±90°
 			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
@@ -69,9 +69,14 @@ public class SkisClient implements ClientModInitializer {
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				} else {
-					// ——— 双板：A / D 只转身体，视角一点都不跟（与服务端同一份按键、同一个速率）———
+					// ——— 双板：A / D 转身体 8°/tick，W 再朝视角方向补 4°/tick ——
+					// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
 					SkisControl.ensureLocked(player.getId(), player.getYRot());
 					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys));
+					if (keys != null && keys.forward()) {
+						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
+					}
+					// yaw 必须在 turnTowardView 之后取
 					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot());
 				}
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
