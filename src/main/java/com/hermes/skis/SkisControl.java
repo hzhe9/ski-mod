@@ -15,11 +15,12 @@ public final class SkisControl {
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
 	 *
-	 * <p>0.1 → 0.12（用户 2026-10-13：单板与双板都增加 0.02）。
+	 * <p>0.1 → 0.12（2026-10-13）→ <b>0.08</b>（用户 2026-10-17 定）。
+	 * 每格 ≈ 5.8 km/h；每 0.5 格结算一次 ＝ 单次 0.04。
 	 * 实际增量 = {@code 基数 × 累计下落格数^指数}（见 {@link SkiGlide} 的 {@code FALL_GAIN_EXPONENT}，
 	 * 现在指数是 1.0 ＝ 线性；指数 < 1 时才是「越掉越快不起来」）。
 	 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.12D;
+	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
 
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
@@ -27,10 +28,10 @@ public final class SkisControl {
 	/**
 	 * <b>穿双板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
 	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
-	 * 1.0 = 原版；1.3 = 0.104 格/tick²（用户 2026-10-15 定：比平时重力更快，又不至于跳得太矮/落地太砸）。
-	 * 1.5 / 2.0 都试过——值越大下落越干脆，但跳高与滞空跟着被压（1.3 时跳高 ≈1.05 格）。
+	 * 1.0 = 原版；1.3 = 0.104 格/tick²；<b>1.5 = 0.12 格/tick²（用户 2026-10-17 定）</b>。
+	 * 值越大下落越干脆，但跳高与滞空跟着被压（1.5 时跳高 ≈0.93 格）。
 	 */
-	private static final double GRAVITY_MULTIPLIER = 1.3D;
+	private static final double GRAVITY_MULTIPLIER = 1.5D;
 
 	/** 双板速度上限（格/tick）：1.0 格/tick ＝ 72 格/秒 ≈ 72 km/h（用户 2026-10-17 定：双板极速 1 格/tick）。 */
 	private static final double MAX_SPEED = 1.0D;
