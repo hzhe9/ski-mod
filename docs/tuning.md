@@ -136,7 +136,16 @@
 
 ### 落到雪面免摔伤 `SnowLanding.java`
 
-穿着任一种板**摔落在雪 / 冰面上不掉血**：走 Fabric 的 `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（在 `hurtServer` 上），三条齐了才免 —— ① 是玩家 ② 脚上是我们的板 ③ 伤害类型属于 `DamageTypeTags.IS_FALL`；落点用 `SkiGlide.isSnowLanding`。**判定比「能不能滑」宽**：脚底格、上一格、下两格任一是雪/冰就免 —— 石头上铺一层雪（0.125 格）也算雪面。非雪面照旧摔伤，别的伤害类型一律放行。命中时顺手 `resetFallDistance()`。**没有可调常量。**
+穿着任一种板**落地前 60 tick 内踩过雪面，或落点本身就是雪 / 冰面，就不掉血**：走 Fabric 的 `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（在 `hurtServer` 上），公共前提三条 —— ① 是玩家 ② 脚上是我们的板 ③ 伤害类型属于 `DamageTypeTags.IS_FALL`；满足后两条落点判定**取或**：
+
+- **落点本身是雪 / 冰**：用 `SkiGlide.isSnowLanding`，**判定比「能不能滑」宽** —— 脚底格、上一格、下两格任一是雪/冰就免，石头上铺一层雪（0.125 格）也算雪面（落地那一 tick 脚就踩在雪上，本身也属于「踩在雪地上」；也是从没被 tick 记到的玩家的兜底）。
+- **落地前 `SNOW_GRACE_TICKS` 60 tick（3 秒）内踩过雪地**：每服务器 tick（`END_SERVER_TICK`）遍历在线玩家，**穿板 + `onGround()` + 脚下是雪/冰** 才把 `level().getGameTime()` 记进 `LAST_SNOW_TICK`（玩家 id → tick）；比对时算 `0 ≤ now - last ≤ 60`。所以「雪坡冲下来、腾空两秒、砸在石头上」免伤，「在石头地上站够 3 秒再摔」照旧掉血。脱板 / 断线 `remove`，超 `MAX_ENTRIES` 整表清空；退出 / 换维度残留的旧记录靠时间戳自然过期，不会错免。
+
+非雪面且 60 tick 内没踩过雪照旧摔伤，别的伤害类型一律放行。命中时顺手 `resetFallDistance()`。
+
+| 常量 | 值 | 作用 |
+|---|---|---|
+| `SNOW_GRACE_TICKS` | 60 tick | 落地时距上次「穿板站上雪/冰面」多少 tick 内仍免摔落伤害（60 tick = 3 秒）；调大＝雪地缓冲更宽容，调小＝更要求贴着雪落地 |
 
 ### 滑行音效 `GlideSounds.java`（纯客户端）
 
