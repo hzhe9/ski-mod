@@ -28,7 +28,7 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>贴地雪屑</b>：从板的两侧（与滑行方向垂直的左右两边）向外、略向上溅；</li>
  *   <li><b>扬起雪屑</b>：同样从板两侧起，向上的初速度随速度线性增加 —— <b>越快抛得越高</b>，
  *       数量涨得比贴地那层快；按 {@link #FLURRY_HIGH_FRACTION} 拆成「低飞 / 高飞」两档，
- *       高飞版给 0.30–0.55 的上升初速，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
+ *       高飞版给 0.45–0.85 的上升初速，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
  *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、更高；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。</li>
@@ -62,17 +62,18 @@ public final class SnowSpray {
 	private static final double FLURRY_UPWARD_PER_SPEED = 0.45D;
 	/**
 	 * 上升速度上限（格/tick）。踩住是因为雪屑有重力（每 tick −0.04），
-	 * 抛起高度 ≈ 速度² / 0.08：0.40 封顶 ≈ 2 格 —— 不加的话双板顶速 1.0 会算到 0.53、抛起 3.5 格，像一堵雪墙。
+	 * 抛起高度 ≈ 速度² / 0.08：0.55 封顶 ≈ 3.8 格 —— 不加的话双板顶速 0.85 会算到 0.46，
+	 * 也不至于像一堵雪墙。
 	 */
-	private static final double FLURRY_UPWARD_MAX = 0.40D;
+	private static final double FLURRY_UPWARD_MAX = 0.55D;
 	/** 扬起层里走高飞版的比例，其余沿用原来的低飞版。 */
-	private static final double FLURRY_HIGH_FRACTION = 0.45D;
+	private static final double FLURRY_HIGH_FRACTION = 0.60D;
 	/** 高飞版的上升初速度随机区间（格/tick）：撒在这个区间里才有「均匀撒向空中」的层次。 */
-	private static final double FLURRY_UPWARD_HIGH_MIN = 0.30D;
-	private static final double FLURRY_UPWARD_HIGH_MAX = 0.55D;
+	private static final double FLURRY_UPWARD_HIGH_MIN = 0.45D;
+	private static final double FLURRY_UPWARD_HIGH_MAX = 0.85D;
 	/** 转向时：上升初速额外加这么多、上限提到 FLURRY_UPWARD_TURN_MAX、每侧再多几颗。 */
-	private static final double TURN_UPWARD_BONUS = 0.20D;
-	private static final double FLURRY_UPWARD_TURN_MAX = 0.75D;
+	private static final double TURN_UPWARD_BONUS = 0.30D;
+	private static final double FLURRY_UPWARD_TURN_MAX = 1.0D;
 	private static final int TURN_EXTRA_PER_SIDE = 2;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
@@ -80,8 +81,8 @@ public final class SnowSpray {
 	private static final double SIDE_OFFSET = 0.34D;
 	/** 贴地雪屑向外（垂直于滑行方向）的溅出速度。 */
 	private static final double OUTWARD = 0.18D;
-	/** 贴地雪屑的向上分量。 */
-	private static final double UPWARD = 0.12D;
+	/** 贴地雪屑的向上分量（从地面起跳的初速：0.20 · 0.5–1.5 倍 ≈ 0.1–0.3 格/tick，真的能飞起来）。 */
+	private static final double UPWARD = 0.20D;
 	/** 向后（与滑行相反）的分量 —— 雪是往后飞的。 */
 	private static final double BACKWARD = 0.16D;
 	/** 出生点随机散布（格）。 */
@@ -212,8 +213,8 @@ public final class SnowSpray {
 			}
 			for (int i = 0; i < flurries; i++) {
 				if (random.nextDouble() < FLURRY_HIGH_FRACTION) {
-					// 高飞版：只有上升初速在区间里随机抽（0.30–0.55），出生点还是地面 ——
-					// 「均匀撒向空中」的层次靠的是抛得快、不是起得高。
+					// 高飞版：只有上升初速在区间里随机抽（0.45–0.85），出生点还是地面 ——
+					// 「均匀撒向空中」的层次靠的是抛得快、不是起得高（0.85 ≈ 9 格、0.45 ≈ 2.5 格）。
 					double vy = FLURRY_UPWARD_HIGH_MIN
 							+ random.nextDouble() * (FLURRY_UPWARD_HIGH_MAX - FLURRY_UPWARD_HIGH_MIN)
 							+ (turning ? TURN_UPWARD_BONUS : 0.0D);

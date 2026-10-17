@@ -61,12 +61,11 @@ python -m venv .venv
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、**穿板时的重力加重（`Attributes.GRAVITY` ×倍数，全程生效）**、低摩擦动量、雪面推进、脚上装备的台阶高度；`isOnSnowOrIce` 是「雪面」的唯一定义（滑行 / 雪粒子 / 落地免伤共用） |
 | `SnowLanding.java` | 穿板摔在雪 / 冰面上免摔伤：Fabric `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（挂在 `hurtServer` 上，不需要 mixin），只拦 `DamageTypeTags.IS_FALL` |
-| `SkisControl.java` | **双板专属数值**（下落基数 0.1 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 0.85 / 动量衰减 0.998）＋双板按键转向（只在地面上转，空中不转）；不持有朝向状态（视角即朝向） |
+| `SkisControl.java` | **双板专属数值**（下落基数 0.1 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 0.85 / 动量衰减 0.998 / 刹车 0.92）＋**身体朝向锁表 `BODY_YAW`** 与按键转向 `turnBody`（A / D 每 tick `TURN_RATE_DEGREES` 8°，只转身体、不改视角；地面转向、空中不转） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
-| `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳）；**双板清掉横向输入**（A/D 是转向键，前后交给原版） |
-| `client/SkiSteering.java` | **双板 A / D 转向**（纯客户端）：按住 A / D 把 `yRot` 每 tick 转 `TURN_RATE_DEGREES`（4°，≈80°/s），头一起转；单板 / 创造飞行 / 骑乘不参与。**实际写入按帧均摊**（`frame(player, step)`，由 `SkiViewSmoothing` 每帧调用）；`turnView` 同时给 `yRotO / yHeadRot / yHeadRotO` 加同一增量。速度方向跟不跟由服务端 `SkiControl` 决定（地上跟、空中不跟） |
-| `client/SkiViewSmoothing.java` | **转向 / 拖视角的「每帧均摊」**：在 `Camera#alignWithEntity` 的 HEAD 每帧跑一次，用 `partialTick` 的帧间增量 `step`（跨 tick +1）把双板的 4°/tick 拆到帧上；单板则把**锁定的身体朝向按帧插值**、用插值后的朝向把视角夹回 ±135°（`renderBodyYaw` 供 `SnowboardHeadLimitMixin` 共用同一基准）。**为什么必须每帧**：`LocalPlayer#getViewYRot(float)` 不是乘客时直接返回裸 `getYRot()`，本地镜头没有任何帧间插值 |
+| `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳）；**双板把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系**（W/S 沿身体前后走）并清掉横向输入（A/D 只转身体）；**没穿板原样交回原版** |
+| `client/SkiViewSmoothing.java` | **单板「身体拖视角」的每帧插值 + `turnView` 工具**：在 `Camera#alignWithEntity` 的 HEAD 每帧跑一次，把**锁定的身体朝向按 `partialTick` 插值**、用插值后的朝向把视角夹回 ±135°（`renderBodyYaw` 供 `SnowboardHeadLimitMixin` 共用同一基准）；`turnView` 给 `yRot / yRotO / yHeadRot / yHeadRotO` 同量偏移（只有单板用它）。**双板不经过这里**（A/D 只转身体，视角只听鼠标）。**为什么单板必须每帧**：`LocalPlayer#getViewYRot(float)` 不是乘客时直接返回裸 `getYRot()`，本地镜头没有任何帧间插值 |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 扬起雪屑（都随速度变多，后者随速度抛得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团雪屑**（急刹/撞墙/压刃刹车）；只用 `ITEM_SNOWBALL` 一种粒子（不用雾/烟类），纯客户端观感 |
@@ -87,19 +86,19 @@ python -m venv .venv
 
 - 穿板时 `Attributes.STEP_HEIGHT` 设为 **1.0**（原版玩家默认 0.6），脱板恢复 0.6 —— 26.2 里**没有** `setMaxUpStep`，台阶高度是属性。
 - ⚠️ **MC 里 yaw 增大是「往右转」**（yaw=0 朝 +z，yaw=90 朝 -x）：单板 carve 的侧压符号按这条写（`turn = -side` 前倾 / `side` 后倾）。
-- 双板需求拆成两件独立的事：① **视角不影响模型左右朝向** ② **A/D 要转模型朝向**。做法就是 `ensureLocked` + `steerSkis`(turnBody) + `SkisClient` 写 `yBodyRot`；`desiredDirection` 对双板只认 W/S（沿锁定朝向），**不要**把 A/D 当横向分量（那样就成了“只摆滑行方向、模型不动”）。
-- 双板：**转视角只转视角**，板的方向＝锁定朝向，只有 A/D 改它（`SnowboardControl.turnBody`）；`SkiControl.desiredDirection` 对双板用 `frontLocked` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
+- 双板需求拆成两件独立的事：① **视角不影响模型左右朝向** ② **A/D 要转模型朝向**。做法就是 `ensureLocked` + `turnBody` + `SkisClient` 写 `yBodyRot`；`desiredDirection` 对双板只认 W/S（沿身体前方），**不要**把 A/D 当横向分量（那样就成了“只摆滑行方向、模型不动”）。
+- 双板：**转视角只转视角**，板的方向＝锁定朝向（`SkisControl.BODY_YAW`），只有 A/D 改它（`SkisControl.turnBody`，8°/tick）；`SkiControl.desiredDirection` 用 `SkisControl.bodyYaw` 而不是玩家 yaw，并且忽略 A/D 的横移分量。
 - **光改逻辑方向不够**：模型的朝向来自 `yBodyRot`，双板不写它就会被原版拉着跟视角转 —— `SkisClient` 的每 tick 锁朝向必须对**单板 + 双板**都执行（判断用 `SkisMod.isSkiFeet(player.getItemBySlot(FEET))`，`isSkiFeet` 收的是 ItemStack 不是 Player）。
 - 单板：只用 W/S（没按 A/D）时，转向目标是「身体前方 / 后方」（按当前滑行方向就近摆），**不是**固定左转 / 右转 —— 否则往左滑按 W 朝前、往右滑按 W 朝后。
-- 双板：**W 前进 / 按住 S 且还在往前滑＝刹车（不拨方向）、静止或倒滑时才沿视角后退 ＋ A 左 / D 右转向**（用户 2026-10-17 定；刹车 `SkisControl.BRAKE_DECAY` 0.92、判定 `BRAKE_MIN_ALIGN` 0.3）：A/D 的横向分量在 `ClientInputMixin` 里清掉，转向由纯客户端 `client/SkiSteering` 每 tick 转 `TURN_RATE_DEGREES` 4°（A 让 yaw 减小、D 让 yaw 增大），**写入在 `SkiViewSmoothing` 里按帧均摊**（否则镜头 20 Hz 一档一档跳，见下一节）；服务端 `SkiControl.desiredDirection` 只把速度方向按视角摆过去（地上摆、空中不摆），按 S 刹车时返回 `null` 交给 `SkiGlide` 的刹车分支。
-- **本地镜头没有帧间插值**：`Entity#getViewYRot(float)` 本来是 `Mth.rotLerp(partial, yRotO, yRot)`，但 `LocalPlayer#getViewYRot(float)` 在不是乘客时`return getYRot()`（丢 partialTick），而 `Camera#alignWithEntity` 用的就是它 —— 所以「视角类」的写入必须按帧做（`client/SkiViewSmoothing` + `mixin/client/CameraViewSmoothingMixin`），按 tick 写就是 20 Hz 一档。鼠标之所以顺，是因为 `MouseHandler.handleAccumulatedMovement`（每帧，在 `Minecraft#runTick` 里）→ `LocalPlayer#turn` 每帧都在改 yRot，且 `Entity#turn` 给 `yRot` 与 `yRotO` **同时**加同一增量 —— 我们自己的写入也要照这个来（`SkiSteering.turnView`）。
+- 双板：**W 前进 / 按住 S 且还在往前滑＝刹车（不拨方向）、静止或倒滑时才沿身体后方后退 ＋ A 左 / D 右只转身体**（用户 2026-10-17 定；刹车 `SkisControl.BRAKE_DECAY` 0.92、判定 `BRAKE_MIN_ALIGN` 0.3）：转向由 `SkisControl.turnBody` 每 tick 转 `TURN_RATE_DEGREES` 8°（A 让身体 yaw 减小、D 让 yaw 增大），**服务端 `SkiGlide` 与客户端 `SkisClient` 各跑一步、写进 `yBodyRot / yBodyRotO`，视角（`yRot`）一点都不动**；`ClientInputMixin` 清掉横向分量、把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系（W/S 沿身体前后）；服务端 `SkiControl.desiredDirection` 只把速度方向按**身体前方**摆过去（地上摆、空中不摆），按 S 刹车时返回 `null` 交给 `SkiGlide` 的刹车分支。
+- **本地镜头没有帧间插值**：`Entity#getViewYRot(float)` 本来是 `Mth.rotLerp(partial, yRotO, yRot)`，但 `LocalPlayer#getViewYRot(float)` 在不是乘客时`return getYRot()`（丢 partialTick），而 `Camera#alignWithEntity` 用的就是它 —— 所以「视角类」的写入必须按帧做（`client/SkiViewSmoothing` + `mixin/client/CameraViewSmoothingMixin`），按 tick 写就是 20 Hz 一档。鼠标之所以顺，是因为 `MouseHandler.handleAccumulatedMovement`（每帧，在 `Minecraft#runTick` 里）→ `LocalPlayer#turn` 每帧都在改 yRot，且 `Entity#turn` 给 `yRot` 与 `yRotO` **同时**加同一增量 —— 我们自己的写入也要照这个来（`SkiViewSmoothing.turnView`，现在只有单板的「身体拖视角」用它）。
 
 ## 代码结构：单板与双板彻底分开
 
 | 归属 | 类 | 内容 |
 |---|---|---|
 | **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制（±135°）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.15 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 0.999 / `DESCENT_STEP_BLOCKS` 0.5） |
-| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.12 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `BRAKE_DECAY` 0.92 / `BRAKE_MIN_ALIGN` 0.3。不持有朝向状态（视角即朝向）；按住 S 且还在往前滑＝刹车（`BRAKE_DECAY`，不拨方向） |
+| **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `BRAKE_DECAY` 0.92 / `BRAKE_MIN_ALIGN` 0.3 ＋ **身体朝向锁表 `BODY_YAW` 与转向 `TURN_RATE_DEGREES` 8°/tick**（`ensureLocked` / `turnBody` / `forgetBody`）；按住 S 且还在往前滑＝刹车（`BRAKE_DECAY`，不拨方向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。

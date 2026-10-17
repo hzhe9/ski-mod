@@ -7,7 +7,11 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 
 /**
- * <b>把「转向 / 拖视角」从每 tick 一档拆到每一帧</b>（纯客户端观感，不改任何物理数值、不改 carve 符号）。
+ * <b>单板：把「身体拖视角」从每 tick 一档拆到每一帧</b>（纯客户端观感，不改任何物理数值、不改 carve 符号）。
+ *
+ * <p>双板不再经过这里：它的 A / D 只转<b>身体朝向</b>（{@code SkisControl.turnBody}，由 {@code SkisClient}
+ * 每 tick 写进 {@code yBodyRot / yBodyRotO}），<b>视角一律不碰</b>（只听鼠标），所以没有「按帧转视角」这回事了
+ * （原 {@code client/SkiSteering} 已删）。
  *
  * <p><b>为什么必须每帧做</b>：原版 {@code Entity#getViewYRot(float)} 本来是插值的
  * （{@code getYRot(partial)} → {@code Mth.rotLerp(partial, yRotO, yRot)}），
@@ -16,11 +20,11 @@ import net.minecraft.world.entity.EquipmentSlot;
  * {@code getViewYRot(partial)}，所以<b>本地玩家的镜头朝向是「每 tick 的原始 yRot」，没有任何帧间插值</b>。
  * 原版鼠标之所以顺，是因为 {@code MouseHandler.handleAccumulatedMovement()}（每帧，在
  * {@code Minecraft#runTick} 里）→ {@code turnPlayer} → {@code LocalPlayer#turn} 每帧都在改 yRot。
- * 我们在 {@code END_CLIENT_TICK} 里一次改 4° / 2°，镜头就只能 20 Hz 一档一档地跳。
+ * 单板的身体朝向是每 tick 转 2°，若在 {@code END_CLIENT_TICK} 里一次夹到位，
+ * 镜头就只能 20 Hz 一档一档地跳。
  *
- * <p>所以这里按帧均摊：每帧取 {@code partialTick} 的增量 {@code step}（跨 tick 时 +1），
- * 把「每 tick 的转角」乘 {@code step} 加上去 —— 总量不变（仍是每 tick {@code TURN_RATE_DEGREES}），
- * 只是拆到帧上。写入时 {@code yRot / yRotO / yHeadRot / yHeadRotO} 同量偏移，插值不会下沉、
+ * <p>所以这里按帧插值身体的转动：每帧用 {@code partialTick} 在 {@code bodyPrev → bodyNow} 之间取一个值，
+ * 再用它夹视角。写入时 {@code yRot / yRotO / yHeadRot / yHeadRotO} 同量偏移，插值不会下沉、
  * 也不会被二次插值拖慢。
  *
  * <p>单板那边没有「按键转角」，它的问题是<b>身体朝向每 tick 转 2°、头顶在 ±135° 限制上时被硬夹着走</b>
@@ -37,8 +41,6 @@ public final class SkiViewSmoothing {
 	/** 夹角误差容限（度）：别因为 1e-4 的浮点误差每帧都去动 yaw。 */
 	private static final float LIMIT_EPSILON = 0.01F;
 
-	/** 上一帧的 partialTick（NaN = 还没跑过，第一帧只记不发，免得一进世界甩一下）。 */
-	private static float lastPartial = Float.NaN;
 	/** 单板：上一 tick 的身体朝向（本段插值的起点）。 */
 	private static float bodyPrev;
 	/** 单板：上一帧看到的身体朝向（用来判断 tick 有没有翻页）。 */
@@ -58,16 +60,6 @@ public final class SkiViewSmoothing {
 	 * @param partialTick 本帧的 tick 内插值 0..1（{@code Camera} 用的就是这个值）
 	 */
 	public static void frame(LocalPlayer player, float partialTick) {
-		float step = 0.0F;
-		if (!Float.isNaN(lastPartial)) {
-			step = partialTick - lastPartial;
-			if (step < 0.0F) {
-				step += 1.0F;   // 跨 tick：本 tick 的尾巴 + 下 tick 的头
-			}
-			step = Mth.clamp(step, 0.0F, 1.0F);
-		}
-		lastPartial = partialTick;
-
 		if (player == null || !SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			bodyTracked = false;
 			return;
@@ -79,8 +71,7 @@ public final class SkiViewSmoothing {
 		if (SnowboardControl.isSnowboard(player)) {
 			dragHeadWithBody(player, partialTick);
 		} else {
-			bodyTracked = false;
-			SkiSteering.frame(player, step);   // 双板：A / D 的每 tick 角度按帧均摊
+			bodyTracked = false;   // 双板只在 tick 上转身体（SkisClient 写 yBodyRot），视角完全不碰
 		}
 	}
 
@@ -105,8 +96,29 @@ public final class SkiViewSmoothing {
 		float limit = SnowboardControl.VIEW_LIMIT_DEGREES;
 		float off = Mth.wrapDegrees(player.getYRot() - bodyRender);
 		if (Math.abs(off) > limit + LIMIT_EPSILON) {
-			SkiSteering.turnView(player, Mth.clamp(off, -limit, limit) - off);
+			turnView(player, Mth.clamp(off, -limit, limit) - off);
 		}
+	}
+
+	/**
+	 * 转视角一个「增量」，<b>四个朝向字段一起挪同样的量</b>：
+	 * {@code yRot}（朝向本体）+ {@code yRotO}（上一 tick 的朝向＝帧间插值起点）+
+	 * {@code yHeadRot} / {@code yHeadRotO}（头）。
+	 *
+	 * <p>只动 {@code yRot} 的话 {@code yRotO} 会拖在后面（原版 {@code Entity#turn} 是两者同加），
+	 * 任何走 {@code getYRot(partial)} / {@code Mth.rotLerp} 的地方（乘客分支、第三人称模型）都会被拖慢。
+	 *
+	 * <p><b>只有单板的「身体拖视角」用它</b>（视角被 ±135° 夹住时补回差值）；
+	 * 双板的转向不碰视角（{@code SkisControl.turnBody} 只转身体朝向）。
+	 */
+	public static void turnView(LocalPlayer player, float degrees) {
+		if (degrees == 0.0F || !Float.isFinite(degrees)) {
+			return;
+		}
+		player.setYRot(player.getYRot() + degrees);
+		player.yRotO += degrees;
+		player.setYHeadRot(player.getYHeadRot() + degrees);
+		player.yHeadRotO += degrees;
 	}
 
 	/**

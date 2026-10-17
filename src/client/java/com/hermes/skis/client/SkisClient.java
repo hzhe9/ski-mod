@@ -43,32 +43,38 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板 A / D 转向（每 tick 4°）不在这里做：镜头每帧才读 yRot，
-			// 见 client/SkiViewSmoothing（挂 Camera#alignWithEntity，按帧均摊）。
-			// 单板：人板一体 —— 锁住身体朝向（头 / 视角随便转，身体不跟着转）
+			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），视角完全听鼠标 —— 没有「转视角」这回事了
+			// （原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
 					SnowboardControl.forget(player.getId());
-					SkisControl.forget(player.getId());
+					SkisControl.forgetBody(player.getId());
 					continue;
 				}
 				// 单板 / 双板各自一套，互不干涉
+				Input keys = player == client.player && client.player != null
+						? client.player.input.keyPresses : null;
+				boolean board = SnowboardControl.isSnowboard(player);
 				float yaw;
-				if (SnowboardControl.isSnowboard(player)) {
+				if (board) {
 					// ——— 单板：carve（前倾 + 横移 → 身体朝向持续转），与服务端同一套规则 ———
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
-					Input keys = player == client.player && client.player != null
-							? client.player.input.keyPresses : null;
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				} else {
-					// ——— 双板：什么都别管 —— 朝向就是视角（用户定案回到最开始的状态）———
-					continue;
+					// ——— 双板：A / D 只转身体，视角一点都不跟（与服务端同一份按键、同一个速率）———
+					SkisControl.ensureLocked(player.getId(), player.getYRot());
+					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys));
+					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot());
 				}
-				// 单板：把身体写成锁定朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
-				// yBodyRotO 故意不覆盖：baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
-				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
+				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
 				player.yBodyRot = yaw;
+				if (!board) {
+					// 双板：连 yBodyRotO 一起对齐。每 tick 8° 的步长不小，让它插值反而拖泥带水（用户要干脆的转身）。
+					player.yBodyRotO = yaw;
+				}
+				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
+				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			LocalPlayer self = client.player;

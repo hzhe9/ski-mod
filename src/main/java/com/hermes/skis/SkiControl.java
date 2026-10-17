@@ -76,17 +76,18 @@ public final class SkiControl {
 		if (!player.onGround()) {
 			return null;
 		}
-		// 双板（2026-10-17 用户定）：W 前进 / S 刹车或后退（沿视角），A / D 只负责转（转向在客户端 SkiSteering 里做）。
+		// 双板（2026-10-17 用户定）：W 前进 / S 刹车或后退（沿**身体前方**），A / D 只转身体
+		// （身体朝向由 SkisControl.BODY_YAW 持有，客户端与服务端每 tick 各转一步；**视角完全不跟**）。
 		// 这里只回答「想往哪个方向」：
-		//   W        → 沿视角前方；
-		//   S 且还在往前滑（速度与视角同向）→ 返回 null ＝ 交给 SkiGlide 的刹车分支减速，**不拨方向**；
-		//   S 且已经停住 / 在倒滑     → 沿视角后方（真的往后走）；
-		//   只按 A/D（在转）          → 朝视角前方把速度方向摆过去；
+		//   W        → 沿身体前方；
+		//   S 且还在往前滑（速度与身体同向）→ 返回 null ＝ 交给 SkiGlide 的刹车分支减速，**不拨方向**；
+		//   S 且已经停住 / 在倒滑     → 沿身体后方（真的往后走）；
+		//   只按 A/D（在转）          → 朝身体前方把速度方向摆过去；
 		//   都没按                    → null（方向不变）。
 		// 注意：MC 的水平朝向向量是 (-sin yaw, cos yaw)，yaw 增大 ＝ 向右转（不是左转）。
 		double forward = (input.forward() ? 1.0D : 0.0D) - (input.backward() ? 1.0D : 0.0D);
 		if (forward < 0.0D) {
-			// S：还在往前滑（速度与视角同向）就当作刹车 —— 不返回方向，交给 SkiGlide 的刹车分支减速
+			// S：还在往前滑（速度与身体同向）就当作刹车 —— 不返回方向，交给 SkiGlide 的刹车分支减速
 			if (SkisControl.isMovingForward(player)) {
 				return null;
 			}
@@ -94,8 +95,8 @@ public final class SkiControl {
 		if (forward == 0.0D && !input.left() && !input.right()) {
 			return null;
 		}
-		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝视角方向转过去
-		float yaw = player.getYRot() * Mth.DEG_TO_RAD;
+		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝身体前方转过去
+		float yaw = SkisControl.bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(yaw) * sign, 0.0D, Mth.cos(yaw) * sign);
 	}
 

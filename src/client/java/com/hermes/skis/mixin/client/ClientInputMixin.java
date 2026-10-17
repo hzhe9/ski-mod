@@ -1,10 +1,13 @@
 package com.hermes.skis.mixin.client;
 
+import com.hermes.skis.SkisControl;
+import com.hermes.skis.SkisMod;
 import com.hermes.skis.SnowboardControl;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -37,8 +40,17 @@ public abstract class ClientInputMixin {
 			return;
 		}
 		if (!SnowboardControl.isSnowboard(player)) {
-			// 双板：W / S 走前后（原版移动），A / D 不参与平移 —— 它们是转向键（见 client/SkiSteering）
-			cir.setReturnValue(new Vec2(0.0F, move.y));
+			if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+				return;   // 没穿板：原版移动原样交回
+			}
+			// ——— 双板 ———
+			// A / D 只转身体（SkisControl.turnBody），横向分量在这里清掉；前后分量按 δ = 身体朝向 − 视角
+			// 旋到视角坐标系 —— 原版是按视角解释输入的，转完之后 W / S 就是沿身体前后走
+			// （身体转过身后按 W 仍朝身体前方溜，而不是朝镜头前方）。δ = 0 时退化成 (0, move.y)。
+			// F(身体) = cos δ·F(视角) − sin δ·L(视角)：所以输入写成 (−y·sin δ, y·cos δ)。
+			float delta = (SkisControl.bodyYaw(player.getId(), player.getYRot()) - player.getYRot())
+					* Mth.DEG_TO_RAD;
+			cir.setReturnValue(new Vec2(-move.y * Mth.sin(delta), move.y * Mth.cos(delta)));
 			return;
 		}
 		if (move.x == 0.0F) {

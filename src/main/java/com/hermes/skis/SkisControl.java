@@ -1,20 +1,30 @@
 package com.hermes.skis;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * <b>双板（skis）专属</b>的滑行数值。
+ * <b>双板（skis）专属</b>的滑行数值与身体朝向。
  *
  * <p>这个类和单板的 {@link SnowboardControl} <b>完全独立</b>：只有双板自己的参数、自己的方法。
  * 允许共用的只有“平台级”的东西（{@link SkisMod} 的物品判定、{@link SkiGlide} 的 tick 循环骨架）。
  * 以后调双板的手感只改这里，不会碰到单板。
  *
- * <p><b>朝向</b>：双板<b>不锁朝向</b> —— 视角转多少人就朝哪走，滑行方向也不额外锁定
- * （2026-10 用户定案：回到最开始的状态）。所以这里没有朝向表、没有转向方法。
+ * <p><b>朝向（2026-10-17 用户定）</b>：视角<b>只听鼠标</b>，A / D 只转<b>身体朝向</b>
+ * （{@link #BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
+ * 和单板一样是「锁住 + 按键转」，区别是双板的 W / S 仍然沿身体前后滑（单板的 W / S 只改姿态）。
  */
 public final class SkisControl {
+	private static final int MAX_ENTRIES = 64;
+
+	/** 实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
+	private static final Map<Integer, Float> BODY_YAW = new ConcurrentHashMap<>();
+	/** 双板：按住 A / D 时每 tick 转身体多少度（8°/tick ≈ 160°/s，180° 约 1.1 s）。 */
+	private static final float TURN_RATE_DEGREES = 8.0F;
 
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
@@ -62,9 +72,44 @@ public final class SkisControl {
 	private SkisControl() {
 	}
 
-	/** 脱下板时清一下（当前双板不持有任何朝向状态，留着是为了脱板路径的统一调用）。 */
+	/** 脱下板时清一下（脱板路径的统一调用入口，实际清的是身体朝向）。 */
 	public static void forget(int entityId) {
-		// 双板是“视角即朝向”，没有需要忘掉的锁定状态。
+		forgetBody(entityId);
+	}
+
+	// ---------------------------------------------------------------- 身体朝向
+
+	/** 穿双板时锁住身体朝向：<b>第一次调用</b>记下当时的朝向，之后只由 {@link #turnBody} 改。 */
+	public static void ensureLocked(int entityId, float yaw) {
+		BODY_YAW.putIfAbsent(entityId, yaw);
+		if (BODY_YAW.size() > MAX_ENTRIES) {
+			BODY_YAW.clear();
+		}
+	}
+
+	/** 拿不到锁时用传入的视角兜底。 */
+	public static float bodyYaw(int entityId, float fallback) {
+		return BODY_YAW.getOrDefault(entityId, fallback);
+	}
+
+	/**
+	 * 按输入转身体一步（+1 左 / -1 右 / 0 不转），返回新朝向。
+	 *
+	 * <p>MC 的水平朝向向量是 {@code (-sin yaw, cos yaw)}：<b>yaw 增大 ＝ 向右转</b>，
+	 * 所以按 A（左）要<b>减</b>、按 D（右）要加。这里<b>只动身体朝向</b>，视角一律不碰。
+	 */
+	public static float turnBody(int entityId, float fallback, double side) {
+		float yaw = BODY_YAW.getOrDefault(entityId, fallback) - (float) side * TURN_RATE_DEGREES;
+		BODY_YAW.put(entityId, yaw);
+		return yaw;
+	}
+
+	public static void forgetBody(int entityId) {
+		BODY_YAW.remove(entityId);
+	}
+
+	public static void forgetBodyAll() {
+		BODY_YAW.clear();
 	}
 
 	// ---------------------------------------------------------------- 参数
@@ -99,14 +144,15 @@ public final class SkisControl {
 		return BRAKE_DECAY;
 	}
 
-	/** 速度方向与视角前方（水平）的点积 &gt; {@link #BRAKE_MIN_ALIGN} 就算「还在往前滑」。 */
+	/** 速度方向与<b>身体前方</b>（水平）的点积 &gt; {@link #BRAKE_MIN_ALIGN} 就算「还在往前滑」。 */
 	public static boolean isMovingForward(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		if (horizontal.lengthSqr() < 1.0E-6D) {
 			return false;
 		}
-		float yaw = player.getYRot() * Mth.DEG_TO_RAD;
+		// 用身体朝向而不是视角：双板现在视角可以独立于滑行方向，拿视角判「在往前滑」会在转过身后失效
+		float yaw = bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
 		Vec3 front = new Vec3(-Mth.sin(yaw), 0.0D, Mth.cos(yaw));
 		return horizontal.normalize().dot(front) > BRAKE_MIN_ALIGN;
 	}

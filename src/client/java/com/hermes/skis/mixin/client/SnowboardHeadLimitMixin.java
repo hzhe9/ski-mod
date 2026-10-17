@@ -1,7 +1,6 @@
 package com.hermes.skis.mixin.client;
 
 import com.hermes.skis.SnowboardControl;
-import com.hermes.skis.client.SkiSteering;
 import com.hermes.skis.client.SkiViewSmoothing;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
@@ -33,7 +32,7 @@ public abstract class SnowboardHeadLimitMixin {
 		float delta = Mth.wrapDegrees(player.getYRot() - bodyYaw);
 		float limit = SnowboardControl.VIEW_LIMIT_DEGREES;
 		if (Math.abs(delta) > limit) {
-			SkiSteering.turnView(player, Mth.clamp(delta, -limit, limit) - delta);
+			SkiViewSmoothing.turnView(player, Mth.clamp(delta, -limit, limit) - delta);
 		}
 	}
 }

@@ -83,15 +83,21 @@ public final class SkiGlide {
 					resetGravity(player);          // 恢复原版重力
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId());
-					SkisControl.forget(player.getId());
+					SkisControl.forgetBody(player.getId());
 					continue;
 				}
 				if (SnowboardControl.isSnowboard(player)) {
 					// ——— 单板 ———
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					carve(player);
+				} else {
+					// ——— 双板：A / D 只转身体（SkisControl.BODY_YAW），视角一律不动 ———
+					SkisControl.ensureLocked(player.getId(), player.getYRot());
+					double side = SnowboardControl.sideSign(player.getLastClientInput());
+					if (side != 0.0D) {
+						SkisControl.turnBody(player.getId(), player.getYRot(), side);
+					}
 				}
-				// 双板不做任何朝向锁定：朝向＝视角（用户 2026-10 定案回到最开始的状态）
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
 				setStepHeight(player, 1.0D);
 				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
@@ -459,5 +465,6 @@ public final class SkiGlide {
 		DESCEND_ACCUM.clear();
 		MOMENTUM.clear();
 		SnowboardControl.forgetAll();
+		SkisControl.forgetBodyAll();
 	}
 }
