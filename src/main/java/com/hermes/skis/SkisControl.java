@@ -15,12 +15,12 @@ public final class SkisControl {
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
 	 *
-	 * <p>0.1 → 0.12（2026-10-13）→ <b>0.08</b>（用户 2026-10-17 定）。
-	 * 每格 ≈ 5.8 km/h；每 0.5 格结算一次 ＝ 单次 0.04。
+	 * <p>0.1 → 0.12（2026-10-13）→ 0.08（2026-10-17 上午）→ <b>0.1</b>（2026-10-17 用户回调）。
+	 * 每格 ≈ 7.2 km/h；每 0.5 格结算一次 ＝ 单次 0.05。
 	 * 实际增量 = {@code 基数 × 累计下落格数^指数}（见 {@link SkiGlide} 的 {@code FALL_GAIN_EXPONENT}，
 	 * 现在指数是 1.0 ＝ 线性；指数 < 1 时才是「越掉越快不起来」）。
 	 */
-	private static final double FALL_GAIN_PER_BLOCK = 0.08D;
+	private static final double FALL_GAIN_PER_BLOCK = 0.1D;
 
 	/** 单 tick 下落加速上限（防止悬崖一瞬间给爆）。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
@@ -33,8 +33,8 @@ public final class SkisControl {
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.5D;
 
-	/** 双板速度上限（格/tick）：1.0 格/tick ＝ 72 格/秒 ≈ 72 km/h（用户 2026-10-17 定：双板极速 1 格/tick）。 */
-	private static final double MAX_SPEED = 1.0D;
+	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（用户 2026-10-17 定；撑杖冲刺的峰值也封顶在这里）。 */
+	private static final double MAX_SPEED = 0.85D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（两板同值）

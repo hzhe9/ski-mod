@@ -26,8 +26,11 @@ import net.minecraft.world.phys.Vec3;
  * <p>三层效果，数量都随速度涨：
  * <ul>
  *   <li><b>贴地雪屑</b>：从板的两侧（与滑行方向垂直的左右两边）向外、略向上溅；</li>
- *   <li><b>扬起雪屑</b>：同样从板两侧起，但向上的初速度与出生高度都随速度线性增加
- *       —— <b>越快抛得越高</b>，数量涨得比贴地那层快；</li>
+ *   <li><b>扬起雪屑</b>：同样从板两侧起，向上的初速度与出生高度都随速度线性增加
+ *       —— <b>越快抛得越高</b>，数量涨得比贴地那层快；按 {@link #FLURRY_HIGH_FRACTION}
+ *       拆成「低飞 / 高飞」两档，高飞版在 0.30–0.55 的上升初速、0.5–1.5 格的出生高度里
+ *       随机撒 —— 于是雪是<b>均匀撒向空中</b>的层次，不是贴着地面一层皮。转向（滑行方向
+ *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、更高、起得更离地；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。</li>
  * </ul>
@@ -40,8 +43,8 @@ public final class SnowSpray {
 	private static final ParticleOptions SNOW = ParticleTypes.ITEM_SNOWBALL;
 	/** 速度低于这个（格/tick）就不持续扬雪 —— 慢慢挪一步不该扬雪。 */
 	private static final double MIN_SPEED = 0.10D;
-	/** 脚底离地面在这个高度以内就扬雪（格）：滑下坡时常常没踩着地，用「离地一格内」代替 `onGround`。 */
-	private static final double GROUND_RANGE = 1.0D;
+	/** 脚底离地面在这个高度以内就扬雪（格）：滑下坡时常常没踩着地，用「离地 1.5 格内」代替 `onGround`。 */
+	private static final double GROUND_RANGE = 1.5D;
 	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
 	private static final double SPRAY_PER_SPEED = 10.0D;
 	/** 贴地雪屑的每侧数量上限。 */
@@ -61,6 +64,21 @@ public final class SnowSpray {
 	private static final double FLURRY_UPWARD_MAX = 0.40D;
 	/** 扬起雪屑出生点随速度抬高多少（格每「格/tick」）：太快的时候从高处起抛。 */
 	private static final double FLURRY_HEIGHT_PER_SPEED = 0.35D;
+	/** 扬起层里走高飞版的比例，其余沿用原来的低飞版。 */
+	private static final double FLURRY_HIGH_FRACTION = 0.45D;
+	/** 高飞版的上升初速度随机区间（格/tick）：撒在这个区间里才有「均匀撒向空中」的层次。 */
+	private static final double FLURRY_UPWARD_HIGH_MIN = 0.30D;
+	private static final double FLURRY_UPWARD_HIGH_MAX = 0.55D;
+	/** 高飞版的出生高度（相对脚底，格），随机撒：0.5–1.5 格。 */
+	private static final double FLURRY_SPAWN_HIGH_MIN = 0.5D;
+	private static final double FLURRY_SPAWN_HIGH_MAX = 1.5D;
+	/** 转向时：上升初速额外加这么多、上限提到 TURN_MAX、出生点再抬高、每侧再多几颗。 */
+	private static final double TURN_UPWARD_BONUS = 0.20D;
+	private static final double FLURRY_UPWARD_TURN_MAX = 0.75D;
+	private static final double TURN_SPAWN_LIFT = 0.35D;
+	private static final int TURN_EXTRA_PER_SIDE = 2;
+	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
+	private static final double TURN_DEGREES_PER_TICK = 2.0D;
 	/** 板两边的横向偏移（格）：撒在脚的两侧，而不是脚底下。 */
 	private static final double SIDE_OFFSET = 0.34D;
 	/** 贴地雪屑向外（垂直于滑行方向）的溅出速度。 */
@@ -93,13 +111,15 @@ public final class SnowSpray {
 
 	/** 实体 id → 上一 tick 的水平速度（用来发现「突然减速」）。 */
 	private static final Map<Integer, Double> LAST_SPEED = new ConcurrentHashMap<>();
+	/** 实体 id → 上一 tick 的水平滑行方向角（弧度）。 */
+	private static final Map<Integer, Double> LAST_DIR = new ConcurrentHashMap<>();
 	/** 实体 id → 雪屑冷却剩余 tick。 */
 	private static final Map<Integer, Integer> BURST_COOLDOWN = new ConcurrentHashMap<>();
 
 	private SnowSpray() {
 	}
 
-	/** 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、在雪面上、脚底离地一格以内的人扬雪。 */
+	/** 每客户端 tick 跑一次：遍历场上的玩家，只给穿着板、在雪面上、脚底离地 {@link #GROUND_RANGE} 格以内的人扬雪。 */
 	public static void tick(Minecraft client) {
 		ClientLevel level = client.level;
 		if (level == null) {
@@ -107,6 +127,7 @@ public final class SnowSpray {
 		}
 		if (LAST_SPEED.size() > MAX_ENTRIES) {
 			LAST_SPEED.clear();
+			LAST_DIR.clear();
 			BURST_COOLDOWN.clear();
 		}
 		for (Player player : level.players()) {
@@ -117,6 +138,24 @@ public final class SnowSpray {
 			}
 			double speed = player.getDeltaMovement().horizontalDistance();
 			Double last = LAST_SPEED.put(id, speed);
+			// 转向检测（两板通用）：滑行方向这一 tick 摆了多少。每 tick 都写回（即使这 tick 不喷粒子），
+			// 否则重新开始喷的那一刻会拿一个几秒前的方向去比，误判成「在转向」。
+			boolean turning = false;
+			if (speed >= 1.0E-4D) {
+				Vec3 motion = player.getDeltaMovement();
+				double dir = Math.atan2(motion.z, motion.x);
+				Double lastDir = LAST_DIR.put(id, dir);
+				if (lastDir != null) {
+					double delta = dir - lastDir;
+					while (delta > Math.PI) {
+						delta -= Math.PI * 2.0D;
+					}
+					while (delta < -Math.PI) {
+						delta += Math.PI * 2.0D;
+					}
+					turning = Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK);
+				}
+			}
 			int cooldown = BURST_COOLDOWN.getOrDefault(id, 0);
 			if (cooldown > 0) {
 				BURST_COOLDOWN.put(id, cooldown - 1);
@@ -131,14 +170,14 @@ public final class SnowSpray {
 				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
 			}
 			if (speed < MIN_SPEED || SkiGlide.groundDistance(player, GROUND_RANGE) > GROUND_RANGE) {
-				continue;   // 太慢、或离地超过一格：不持续扬雪（贴地飞下坡照样扬）
+				continue;   // 太慢、或离地超过 1.5 格：不持续扬雪（贴地飞下坡照样扬）
 			}
-			spray(level, player, speed);
+			spray(level, player, speed, turning);
 		}
 	}
 
-	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多、后者还随速度抛得更高。 */
-	private static void spray(ClientLevel level, Player player, double speed) {
+	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，两层都随速度变多、后者还随速度抛得更高；转向时扬起层更多更高。 */
+	private static void spray(ClientLevel level, Player player, double speed, boolean turning) {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
 		double dirZ = motion.z / speed;
@@ -146,10 +185,18 @@ public final class SnowSpray {
 		double leftZ = dirX;
 		RandomSource random = player.getRandom();
 		int flecks = Mth.clamp((int) (speed * SPRAY_PER_SPEED), 1, SPRAY_MAX_PER_SIDE);
-		int flurries = Mth.clamp((int) (speed * FLURRY_PER_SPEED), 1, FLURRY_MAX_PER_SIDE);
-		// 越快：向上初速度越大、出生点越高 —— 于是雪屑抛得越来越高（上限见 FLURRY_UPWARD_MAX）
-		double rise = Math.min(FLURRY_UPWARD + speed * FLURRY_UPWARD_PER_SPEED, FLURRY_UPWARD_MAX);
+		int flurries = Mth.clamp((int) (speed * FLURRY_PER_SPEED), 1, FLURRY_MAX_PER_SIDE)
+				+ (turning ? TURN_EXTRA_PER_SIDE : 0);
+		// 越快：向上初速度越大、出生点越高 —— 于是雪屑抛得越来越高（上限见 FLURRY_UPWARD_MAX；
+		// 转向时上限提到 FLURRY_UPWARD_TURN_MAX，把「转弯甩起来的雪」再抬高一层）
+		double riseCap = turning ? FLURRY_UPWARD_TURN_MAX : FLURRY_UPWARD_MAX;
+		double rise = Math.min(FLURRY_UPWARD + speed * FLURRY_UPWARD_PER_SPEED, riseCap);
+		if (turning) {
+			rise = Math.min(rise + TURN_UPWARD_BONUS, FLURRY_UPWARD_TURN_MAX);
+		}
 		double riseY = player.getY() + Y_OFFSET + speed * FLURRY_HEIGHT_PER_SPEED;
+		// 转向时扬起层整体再抬高一点（贴地那层不动）
+		double turnLift = turning ? TURN_SPAWN_LIFT : 0.0D;
 		for (int side = -1; side <= 1; side += 2) {
 			double baseX = player.getX() + leftX * SIDE_OFFSET * side;
 			double baseZ = player.getZ() + leftZ * SIDE_OFFSET * side;
@@ -161,9 +208,22 @@ public final class SnowSpray {
 						outX, UPWARD * (0.5D + random.nextDouble()), outZ);
 			}
 			for (int i = 0; i < flurries; i++) {
-				level.addParticle(SNOW,
-						baseX + jitter(random), riseY, baseZ + jitter(random),
-						outX * 0.6D, rise * (0.7D + random.nextDouble() * 0.6D), outZ * 0.6D);
+				if (random.nextDouble() < FLURRY_HIGH_FRACTION) {
+					// 高飞版：上升初速与出生高度都在区间里随机抽 —— 雪才有「均匀撒向空中」的层次，
+					// 而不是全挤在脚边到一个固定高度之间。
+					double vy = FLURRY_UPWARD_HIGH_MIN
+							+ random.nextDouble() * (FLURRY_UPWARD_HIGH_MAX - FLURRY_UPWARD_HIGH_MIN)
+							+ (turning ? TURN_UPWARD_BONUS : 0.0D);
+					double highY = riseY + turnLift + FLURRY_SPAWN_HIGH_MIN
+							+ random.nextDouble() * (FLURRY_SPAWN_HIGH_MAX - FLURRY_SPAWN_HIGH_MIN);
+					level.addParticle(SNOW,
+							baseX + jitter(random), highY, baseZ + jitter(random),
+							outX * 0.9D, vy, outZ * 0.9D);
+				} else {
+					level.addParticle(SNOW,
+							baseX + jitter(random), riseY + turnLift, baseZ + jitter(random),
+							outX * 0.6D, rise * (0.7D + random.nextDouble() * 0.6D), outZ * 0.6D);
+				}
 			}
 		}
 	}
@@ -191,6 +251,7 @@ public final class SnowSpray {
 	/** 脱板 / 换人：把该实体的记录清掉，免得 id 复用串状态。 */
 	private static void forget(int id) {
 		LAST_SPEED.remove(id);
+		LAST_DIR.remove(id);
 		BURST_COOLDOWN.remove(id);
 	}
 }

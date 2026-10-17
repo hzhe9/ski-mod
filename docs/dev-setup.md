@@ -61,7 +61,7 @@ python -m venv .venv
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、**穿板时的重力加重（`Attributes.GRAVITY` ×倍数，全程生效）**、低摩擦动量、雪面推进、脚上装备的台阶高度；`isOnSnowOrIce` 是「雪面」的唯一定义（滑行 / 雪粒子 / 落地免伤共用） |
 | `SnowLanding.java` | 穿板摔在雪 / 冰面上免摔伤：Fabric `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（挂在 `hurtServer` 上，不需要 mixin），只拦 `DamageTypeTags.IS_FALL` |
-| `SkisControl.java` | **双板专属数值**（下落基数 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 1.0 / 动量衰减 0.998）＋双板按键转向；不持有朝向状态（视角即朝向） |
+| `SkisControl.java` | **双板专属数值**（下落基数 0.1 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 0.85 / 动量衰减 0.998）＋双板按键转向（只在地面上转，空中不转）；不持有朝向状态（视角即朝向） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳） |
@@ -77,7 +77,7 @@ python -m venv .venv
 | `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |
 | `mixin/client/LivingEntityFallSoundMixin.java` | 穿板摔在雪 / 冰面上：`LivingEntity#causeFallDamage` **HEAD 直接取消**（那声落地闷响 + 伤害都在这里；只在 `hurtServer` 免伤拦不住声音）+ `LivingEntity#playBlockFallSound` 兜一层 |
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
-| `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地一格内」而不是 `onGround` |
+| `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地 1.5 格内」而不是 `onGround` |
 | `client/GlideSounds.java` | 滑行音效：按速度调的间隔播切雪声（`SNOW_STEP`），音量/音高随速度；**无风声**（原先那条 `ELYTRA_FLYING` 循环已删）；**暂停时主动 `silence()`**（声音引擎暂停时不再推进游戏内声音，不主动停会一直响） |
 | `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |

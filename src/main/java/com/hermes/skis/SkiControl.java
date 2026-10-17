@@ -14,6 +14,8 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>能不能换方向 = 踩在地上，或者脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格
  * （贴地滑行 / 刚起跳 / 快落地）；再高就锁死方向，沿当前方向继续滑。
+ * <b>2026-10-17 起这套「离地也能转」的判定只服务单板</b>：双板在空中速度方向完全不转
+ * （视角 / 身体随便转），落地后才按 {@link #STEER_RATE} 渐渐摆过去。
  *
  * <p>冲刺（SkiBoost）和滑行动量（SkiGlide）都用这里的转向，规则一致。
  *
@@ -27,7 +29,12 @@ import net.minecraft.world.phys.Vec3;
  * </ul>
  */
 public final class SkiControl {
-	/** 离地不超过这个高度（格）才允许换方向。 */
+	/**
+	 * 离地不超过这个高度（格）才允许换方向。
+	 *
+	 * <p><b>现在只服务单板</b>（双板只在地面上转向，见 {@link #desiredDirection}）；
+	 * {@link #canSteer} 也还被单板的前倾推进用着，所以数值保留 1.0。
+	 */
 	private static final double STEER_MAX_HEIGHT = 1.0D;
 	/** 每 tick 把方向朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）。 */
 	private static final double STEER_RATE = 0.2D;
@@ -53,7 +60,7 @@ public final class SkiControl {
 		return current.lerp(desired, STEER_RATE).normalize();
 	}
 
-	/** 玩家按键在世界坐标下的水平方向；没按方向键、离地太高、拿不到输入都返回 null。 */
+	/** 玩家按键在世界坐标下的水平方向；没按方向键、双板在空中、离地太高、拿不到输入都返回 null。 */
 	public static Vec3 desiredDirection(ServerPlayer player) {
 		if (!canSteer(player)) {
 			return null;
@@ -64,6 +71,10 @@ public final class SkiControl {
 		}
 		if (SnowboardControl.isSnowboard(player)) {
 			return null;   // 单板：人板一体站定，按键不参与方向
+		}
+		// 双板（2026-10-17 用户定）：空中只让视角 / 身体转，速度方向不动；落地后才开始跟着转。
+		if (!player.onGround()) {
+			return null;
 		}
 		// 双板（2026-10 用户定案：回到最开始的状态）—— 以**视角**为基准，A / D 正常参与左右，
 		// 视角转多少人就朝哪走。不锁朝向、不夹视角。
@@ -82,7 +93,7 @@ public final class SkiControl {
 		return direction.lengthSqr() > 1.0E-4D ? direction.normalize() : null;
 	}
 
-	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格。单板的前倾推进也用它。 */
+	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格（<b>只服务单板</b>）。 */
 	public static boolean canSteer(ServerPlayer player) {
 		return player.onGround() || groundDistance(player) <= STEER_MAX_HEIGHT;
 	}
