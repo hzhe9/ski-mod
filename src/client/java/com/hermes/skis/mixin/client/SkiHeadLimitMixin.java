@@ -1,6 +1,7 @@
 package com.hermes.skis.mixin.client;
 
 import com.hermes.skis.SkisMod;
+import com.hermes.skis.client.ShoulderSurfingCompat;
 import com.hermes.skis.client.SkiViewSmoothing;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
@@ -38,6 +39,9 @@ public abstract class SkiHeadLimitMixin {
 		if (player.isPassenger() || !SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			return;
 		}
+		if (ShoulderSurfingCompat.isActive()) {
+			return;   // 越肩视角：相机自由，这一帧的鼠标转角不记账、也不撤
+		}
 		SkiViewSmoothing.turnStart(player);
 	}
 
@@ -48,6 +52,9 @@ public abstract class SkiHeadLimitMixin {
 		}
 		if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			return;
+		}
+		if (ShoulderSurfingCompat.isActive()) {
+			return;   // 越肩视角：不限位 —— 一个字节都不写回 yRot
 		}
 		SkiViewSmoothing.turnEnd(player);
 	}

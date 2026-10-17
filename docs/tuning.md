@@ -71,6 +71,8 @@
 
 双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `MAX_ENTRIES` 整表清空；双板的 A / D 每 tick 转 8°（`SkisControl.TURN_RATE_DEGREES`），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
 
+**越肩视角模式（Shoulder Surfing 打开时）**：**相机完全自由** —— `client/SkiViewSmoothing` 不再每帧写视角、`SkiHeadLimitMixin` 不再按 `VIEW_LIMIT_DEGREES` 限位（判定走反射 `IShoulderSurfing#isShoulderSurfing()`，见 `client/ShoulderSurfingCompat`；对方没装就与原来完全一致）；**头模型固定朝行进方向** —— 双板 = 身体朝向（正前方，偏移 0），单板 = 身体朝向 + `SNOWBOARD_HEAD_OFFSET_DEGREES`（**80°**，朝身体右侧；改符号即朝左，只动这一个常量）；**按 W 也不再让身体追视角**（客户端 `turnTowardView` 跳过）。退出越肩后限位与 W 追视角立刻按原规则恢复（状态在退出后第一帧按当时的视角重新起算）。
+
 ### 滑行雪粒子 `SnowSpray.java`（纯客户端观感）
 
 穿着任一种板、在雪 / 冰面上滑行时扬起的雪，**纯客户端观感**（`particleEngine.createParticle` + `Particle#setParticleSpeed`）：服务端不参与，粒子多少不影响速度 —— 速度只决定粒子。
@@ -173,6 +175,7 @@
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.8 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
 | `TILT_LERP` | `SnowboardControl` | 0.25 | 俯仰姿态每 tick 向目标靠拢的比例（≈10 tick 到位）—— 倾斜是渐进的 |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
+| `SNOWBOARD_HEAD_OFFSET_DEGREES` | `SnowboardControl` | 80.0 度 | **越肩视角模式下单板的头**相对身体朝向的固定偏角：正 = 朝身体右侧（yaw 增大，与 D 同向），改符号即朝左，只动这一个数；双板在该模式下是 0°（正前方，不设常量）。只在越肩开启时生效 |
 | `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 135.0 度 | **单板**：视角相对锁定身体朝向的最大偏转，左右各一份（合计 270°；留 90° 背后视线禁区）。限位状态只有 `client/SkiViewSmoothing.headOffset` 一处 |
 | `VIEW_LIMIT_DEGREES` | `SkisControl` | 90.0 度 | **双板**：同一项，**各自一份常量**（改这里不动单板）。左右各 90°、合计 180° —— 刚好看到正侧方。限的是视角、不是 A/D 的 8°/tick 转向；按 W 时身体会朝视角追上 4°/tick（`VIEW_TURN_RATE_DEGREES`） |
 | `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |

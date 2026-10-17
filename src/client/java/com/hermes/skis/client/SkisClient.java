@@ -73,7 +73,8 @@ public class SkisClient implements ClientModInitializer {
 					// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
 					SkisControl.ensureLocked(player.getId(), player.getYRot());
 					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys));
-					if (keys != null && keys.forward()) {
+					// 越肩视角下跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）
+					if (keys != null && keys.forward() && !ShoulderSurfingCompat.isActive()) {
 						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
 					}
 					// yaw 必须在 turnTowardView 之后取
@@ -87,6 +88,15 @@ public class SkisClient implements ClientModInitializer {
 				}
 				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
 				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
+				// ——— 越肩视角：头模型固定朝行进方向 ———
+				// 相机自由后「视角」不再代表朝向，头改跟身体走：双板 = 正前方（身体朝向 + 0），
+				// 单板 = 身体朝向 + SNOWBOARD_HEAD_OFFSET_DEGREES（默认 +80°，朝身体右侧）。
+				// 只写本地玩家（别人的头不该被本机的越肩状态改造）；
+				// yHeadRotO 不写成等于当前值 —— 原版 tickHeadTurn 每 tick 会把它记成上一 tick 的头朝向，
+				// 留着插值头才是平滑转过去的，覆盖成同值会硬跳。
+				if (player == self && ShoulderSurfingCompat.isActive()) {
+					player.setYHeadRot(yaw + (board ? SnowboardControl.SNOWBOARD_HEAD_OFFSET_DEGREES : 0.0F));
+				}
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			if (self != null) {

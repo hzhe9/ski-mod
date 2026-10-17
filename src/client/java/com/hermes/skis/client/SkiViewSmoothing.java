@@ -77,6 +77,14 @@ public final class SkiViewSmoothing {
 			reset();
 			return;
 		}
+		if (ShoulderSurfingCompat.isActive()) {
+			// ——— 越肩视角：相机完全自由 ———
+			// 限位、插值、每帧写视角全部停手（也不改 yRot / yHeadRot），否则会和对面模组的相机打架。
+			// reset() 顺手清状态：退出越肩后下一次 frame 走「初次接手」分支，
+			// 按当时的视角重新起算 headOffset（并夹一次），限位是干净重启的。
+			reset();
+			return;
+		}
 		boolean snowboard = SnowboardControl.isSnowboard(player);
 		float bodyNow = snowboard
 				? SnowboardControl.bodyYaw(player.getId(), player.getYRot())

@@ -40,6 +40,12 @@ public final class SnowboardControl {
 	private static final float TILT_DEGREES = 15.0F;
 	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 135} 度，合计 270 —— 扭不到背后去。 */
 	public static final float VIEW_LIMIT_DEGREES = 135.0F;
+	/**
+	 * <b>越肩视角模式</b>下，单板的头相对<b>身体朝向</b>固定偏多少度（默认朝身体右侧：yaw 增大 = 向右，
+	 * 与 A / D 的「D 增大」同一个方向约定）。双板是 0（正前方，那一侧不设常量）。
+	 * 想让它朝左侧就把值改成 {@code -80.0F} —— 只需要动这一个数。
+	 */
+	public static final float SNOWBOARD_HEAD_OFFSET_DEGREES = 80.0F;
 
 	/**
 	 * <b>carve（切雪转向）</b>：前倾（W）＋ 横移（A / D）同时按住时，身体朝向每 tick 朝那一侧转多少度。
