@@ -35,17 +35,40 @@ public final class SnowboardControl {
 	private static final Map<Integer, Float> TILT_VALUE = new ConcurrentHashMap<>();
 	/** 实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
 	private static final Map<Integer, Integer> TILT_TARGET = new ConcurrentHashMap<>();
+	/** 实体 id → 头上一次被判定朝哪一侧（+1 身体右侧 / -1 左侧）；速度和按键都给不出方向时锁存它。 */
+	private static final Map<Integer, Integer> HEAD_SIDE = new ConcurrentHashMap<>();
+	/** 实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
+	private static final Map<Integer, Float> HEAD_OFFSET = new ConcurrentHashMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
 	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 135} 度，合计 270 —— 扭不到背后去。 */
 	public static final float VIEW_LIMIT_DEGREES = 135.0F;
 	/**
-	 * <b>越肩视角模式</b>下，单板的头相对<b>身体朝向</b>固定偏多少度（默认朝身体右侧：yaw 增大 = 向右，
-	 * 与 A / D 的「D 增大」同一个方向约定）。双板是 0（正前方，那一侧不设常量）。
-	 * 想让它朝左侧就把值改成 {@code -80.0F} —— 只需要动这一个数。
+	 * <b>越肩视角模式</b>下，单板头相对<b>身体朝向</b>的偏角幅度：<b>默认（没按 W / S，或 W 与 S 同按）</b>
+	 * 为 {@code 75} 度。符号不在这里 —— 朝哪一侧滑就朝哪一侧（见 {@link #tickHead}）：
+	 * yaw 增大 = 向右，所以朝右滑用 {@code +75}、朝左滑用 {@code -75}。
 	 */
-	public static final float SNOWBOARD_HEAD_OFFSET_DEGREES = 80.0F;
+	public static final float SNOWBOARD_HEAD_NEUTRAL_DEGREES = 75.0F;
+	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 90} 度 —— 人俯下去，头再往外扭一点。 */
+	public static final float SNOWBOARD_HEAD_FORWARD_DEGREES = 90.0F;
+	/** 按住 <b>S（后倾）</b>时的头偏角幅度：{@code 60} 度 —— 人后仰，头收回一点。 */
+	public static final float SNOWBOARD_HEAD_BACKWARD_DEGREES = 60.0F;
+	/** 当前头偏角每 tick 吃掉「与目标差距」的多少（比例项：快到位时自动变慢，不会在目标附近抖）。 */
+	private static final float HEAD_OFFSET_LERP = 0.45F;
+	/**
+	 * 每 tick 最多挪多少度（限幅项）。比例项单独用会在 150° 的左右翻转时起步冲到 60°/tick，
+	 * 所以翻转靠这一项匀速扫过去：{@code 9} → 150° 约 25 tick（≈1.25 s），经过 0°（正前方），
+	 * 看得出「头从右往左扭过去」；幅度变化（15° / 30°）够小，只吃比例项，约 9–12 tick。
+	 */
+	private static final float HEAD_OFFSET_MAX_STEP_DEGREES = 9.0F;
+	/** 与目标的差距小于它就当作到位（收敛成干净的目标值，省掉无意义的末位抖动）。 */
+	private static final float HEAD_OFFSET_EPSILON = 0.05F;
+	/**
+	 * 横向速度（水平速度投到身体左轴上的分量）超过它才算「正在往那一侧滑」；再小就当没在横移，
+	 * 改看 A / D 输入，再没有就锁存上一次的判定（一停下来头不能自己回正）。
+	 */
+	private static final double HEAD_SIDE_MIN_SPEED = 0.05D;
 
 	/**
 	 * <b>carve（切雪转向）</b>：前倾（W）＋ 横移（A / D）同时按住时，身体朝向每 tick 朝那一侧转多少度。
@@ -127,12 +150,16 @@ public final class SnowboardControl {
 		BODY_YAW.remove(entityId);
 		TILT_VALUE.remove(entityId);
 		TILT_TARGET.remove(entityId);
+		HEAD_SIDE.remove(entityId);
+		HEAD_OFFSET.remove(entityId);
 	}
 
 	public static void forgetAll() {
 		BODY_YAW.clear();
 		TILT_VALUE.clear();
 		TILT_TARGET.clear();
+		HEAD_SIDE.clear();
+		HEAD_OFFSET.clear();
 	}
 
 	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
@@ -163,6 +190,74 @@ public final class SnowboardControl {
 	/** 当前俯仰姿态（平滑后的浮点值：1 = 完全前倾，-1 = 完全后倾），模型与相机用它。 */
 	public static float tiltValue(int entityId) {
 		return TILT_VALUE.getOrDefault(entityId, 0.0F);
+	}
+
+	/**
+	 * 越肩视角下单板头的<b>目标幅度</b>（度，恒正）：按住 <b>W（前倾）</b> 用
+	 * {@link #SNOWBOARD_HEAD_FORWARD_DEGREES}、按住 <b>S（后倾）</b> 用
+	 * {@link #SNOWBOARD_HEAD_BACKWARD_DEGREES}，其余（都没按 / W 与 S 同按 / 拿不到按键）
+	 * 用 {@link #SNOWBOARD_HEAD_NEUTRAL_DEGREES}。
+	 */
+	public static float headMagnitude(Input input) {
+		if (input == null || input.forward() == input.backward()) {
+			return SNOWBOARD_HEAD_NEUTRAL_DEGREES;
+		}
+		return input.forward() ? SNOWBOARD_HEAD_FORWARD_DEGREES : SNOWBOARD_HEAD_BACKWARD_DEGREES;
+	}
+
+	/**
+	 * 头朝哪一侧：<b>+1 = 朝身体右侧（yaw 增大，与 D 同向）</b>、<b>-1 = 朝左侧（yaw 减小）</b>。
+	 *
+	 * <p>判定顺序：① <b>实际横移方向</b> —— 水平速度投到身体左轴 {@link #sideLocked} 上，往左滑给 -1；
+	 * ② 侧向分量太小（&lt; {@link #HEAD_SIDE_MIN_SPEED}）时看最近按的 <b>A / D</b>（{@link #sideSign}，
+	 * A = 左 → -1，D = 右 → +1）；③ 两者都拿不到就<b>锁存</b>上一次的判定 —— 一停下滑行头不能自己回正。
+	 */
+	public static int headSide(Entity entity, Input input) {
+		int entityId = entity.getId();
+		Vec3 motion = entity.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		// 身体左轴（sideLocked 的 sign=+1），与 sideLocked / A 键同一个「左」的约定
+		double lateral = horizontal.dot(sideLocked(entityId, entity.getYRot(), 1.0D));
+		double press = sideSign(input);
+		int side;
+		if (Math.abs(lateral) >= HEAD_SIDE_MIN_SPEED) {
+			side = lateral > 0.0D ? -1 : 1;   // 往身体左侧滑 → 头朝左
+		} else if (press != 0.0D) {
+			side = press > 0.0D ? -1 : 1;
+		} else {
+			return HEAD_SIDE.getOrDefault(entityId, 1);   // 锁存（默认朝右，与旧的固定 +80 同侧）
+		}
+		HEAD_SIDE.put(entityId, side);
+		return side;
+	}
+
+	/**
+	 * 越肩视角下推进单板头的偏角（客户端每 tick 对本地玩家调一次）：目标 =
+	 * {@link #headSide} × {@link #headMagnitude}，当前值按「比例 {@link #HEAD_OFFSET_LERP} ＋ 单步上限
+	 * {@link #HEAD_OFFSET_MAX_STEP_DEGREES}」趋近目标。
+	 *
+	 * <p>比例项让快到位时自动变慢（不会在目标附近一顿一顿），限幅项把 150° 的左右翻转压成匀速扫过，
+	 * 中途经过 <b>0°（正前方）</b> —— 所以看到的是「头从右边慢慢扭到左边」，不是瞬间翻面。
+	 * 幅度变化（75↔90、75↔60）幅度小，只吃比例项，也是渐进的。
+	 *
+	 * <p>首次调用（表里没这个实体）直接取目标值：刚穿板 / 刚开越肩时不做一段无意义的入场扫动。
+	 */
+	public static void tickHead(Entity entity, Input input) {
+		int entityId = entity.getId();
+		float target = headSide(entity, input) * headMagnitude(input);
+		float current = HEAD_OFFSET.getOrDefault(entityId, target);
+		float step = Mth.clamp((target - current) * HEAD_OFFSET_LERP,
+				-HEAD_OFFSET_MAX_STEP_DEGREES, HEAD_OFFSET_MAX_STEP_DEGREES);
+		float next = current + step;
+		if (Math.abs(target - next) < HEAD_OFFSET_EPSILON) {
+			next = target;
+		}
+		HEAD_OFFSET.put(entityId, next);
+	}
+
+	/** 当前头偏角（度；正 = 朝身体右侧、负 = 朝左）—— 越肩视角下 {@code yHeadRot = 身体朝向 + 它}。 */
+	public static float headOffset(int entityId) {
+		return HEAD_OFFSET.getOrDefault(entityId, 0.0F);
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */

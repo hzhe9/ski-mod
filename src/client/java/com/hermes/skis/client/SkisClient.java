@@ -88,14 +88,21 @@ public class SkisClient implements ClientModInitializer {
 				}
 				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
 				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
-				// ——— 越肩视角：头模型固定朝行进方向 ———
+				// ——— 越肩视角：头模型朝横移方向 ———
 				// 相机自由后「视角」不再代表朝向，头改跟身体走：双板 = 正前方（身体朝向 + 0），
-				// 单板 = 身体朝向 + SNOWBOARD_HEAD_OFFSET_DEGREES（默认 +80°，朝身体右侧）。
+				// 单板 = 身体朝向 + 带符号的头偏角（朝哪侧滑就朝哪侧；幅度 75 / 前倾 90 / 后倾 60，
+				// 翻转与幅度变化都由 SnowboardControl.tickHead 平滑推进，不瞬跳）。
 				// 只写本地玩家（别人的头不该被本机的越肩状态改造）；
 				// yHeadRotO 不写成等于当前值 —— 原版 tickHeadTurn 每 tick 会把它记成上一 tick 的头朝向，
 				// 留着插值头才是平滑转过去的，覆盖成同值会硬跳。
-				if (player == self && ShoulderSurfingCompat.isActive()) {
-					player.setYHeadRot(yaw + (board ? SnowboardControl.SNOWBOARD_HEAD_OFFSET_DEGREES : 0.0F));
+				if (player == self) {
+					if (board) {
+						// 偏角状态每 tick 都推进（不在越肩时也保持热态：开关越肩不会突然从 0° 扫过来）
+						SnowboardControl.tickHead(player, keys);
+					}
+					if (ShoulderSurfingCompat.isActive()) {
+						player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId()) : 0.0F));
+					}
 				}
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体

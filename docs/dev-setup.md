@@ -81,7 +81,7 @@ python -m venv .venv
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
 | `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地 1.5 格内」而不是 `onGround` |
 | `client/GlideSounds.java` | 滑行音效：按速度调的间隔播切雪声（`SNOW_STEP`），音量/音高随速度；**无风声**（原先那条 `ELYTRA_FLYING` 循环已删）；**暂停时主动 `silence()`**（声音引擎暂停时不再推进游戏内声音，不主动停会一直响） |
-| `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调；脱板 / 退出世界时清 `SkiViewSmoothing` 的限位状态；**越肩视角下跳过客户端的 `turnTowardView`**（W 不再让身体追相机）并把 `yHeadRot` 写死成「双板 = 身体朝向 / 单板 = 身体朝向 + `SnowboardControl.SNOWBOARD_HEAD_OFFSET_DEGREES`」（只写本地玩家，`yHeadRotO` 不动、交给原版插值） |
+| `client/SkisClient.java` | 客户端入口：注册模型层、渲染器、tick 回调；脱板 / 退出世界时清 `SkiViewSmoothing` 的限位状态；**越肩视角下跳过客户端的 `turnTowardView`**（W 不再让身体追相机）并把 `yHeadRot` 写成「双板 = 身体朝向 / 单板 = 身体朝向 + `SnowboardControl.headOffset(id)`」（带符号、随横移方向，幅度 75 / 前倾 90 / 后倾 60，由同类的 `tickHead` 平滑推进；只写本地玩家，`yHeadRotO` 不动、交给原版插值） |
 | `client/ShoulderSurfingCompat.java` | **越肩视角探测（无编译依赖）**：反射 `Class.forName("com.github.exopandora.shouldersurfing.api.client.IShoulderSurfing")` → `getInstance()` → `isShoulderSurfing()`；类 / 方法句柄只解析一次（任一步抛异常就永久 `false`，没装该模组时行为与不兼容时完全一致），但 `isShoulderSurfing()` 每次现问（玩家随时开关的活状态）。为真时：`SkiViewSmoothing.frame` 与 `SkiHeadLimitMixin` 不写视角、不限位 |
 | `SwingHooks.java` | main→client 的动画钩子（源集方向限制，见下） |
 
