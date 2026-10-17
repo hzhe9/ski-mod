@@ -8,6 +8,7 @@ import com.hermes.skis.SkisMod;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.particle.Particle;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -18,8 +19,15 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * <b>滑行雪粒子</b>：穿着滑雪板在雪面上滑时扬起的雪，纯客户端观感（{@link ClientLevel#addParticle}），
+ * <b>滑行雪粒子</b>：穿着滑雪板在雪面上滑时扬起的雪，纯客户端观感（见 {@link #spawn}），
  * 服务端不参与、也不影响任何速度 —— 速度只决定粒子，粒子不决定速度。
+ *
+ * <p><b>初速只能经 {@code ParticleEngine#createParticle} + {@code Particle#setParticleSpeed} 给</b>：
+ * {@code ITEM_SNOWBALL} 的 provider（{@code BreakingItemParticle$SnowballProvider}）在
+ * {@code createParticle(...)} 里**根本不读**后三个 `xSpeed/ySpeed/zSpeed` 参数（字节码只读 x/y/z），
+ * 直接 `new BreakingItemParticle(level, x, y, z, sprite)`，而那个构造器把速度写成随机 ±0.1。
+ * 所以走 {@code ClientLevel#addParticle} 传初速**永远无效**（曾经所有顶点调参都白调，粒子只会飘到
+ * 十几厘米高）；必须拿回 {@link Particle} 再硬写一次速度。
  *
  * <p><b>只用 {@link #SNOW} 一种粒子</b>：{@code ITEM_SNOWBALL}＝雪球崩碎的小白屑（雪地就该是这种实心碎屑）。
  * 模组里**不用**任何雾 / 烟 / 云类粒子（`SNOWFLAKE`、`POOF`、`CLOUD` 这些看着像一团白雾，用户不要）。
@@ -28,9 +36,10 @@ import net.minecraft.world.phys.Vec3;
  * <ul>
  *   <li><b>贴地雪屑</b>：从板的两侧（与滑行方向垂直的左右两边）向外、略向上溅；</li>
  *   <li><b>扬起雪屑</b>：同样从板两侧起，但按<b>顶点高度</b>调 —— 每颗抽一个
- *       {@link #FLURRY_APEX_MIN}–{@link #FLURRY_APEX_MAX} 格（0.9–2.0，腰到头）的顶点高度，初速由
+ *       {@link #FLURRY_APEX_MIN}–{@link #FLURRY_APEX_MAX} 格（1.5–3.0，腰到头再高一头）的顶点高度，初速由
  *       {@link #riseFor} 按离散粒子物理反解；按 {@link #FLURRY_HIGH_FRACTION} 拆成
- *       「下半 / 上半」两档，于是在空中形成<b>均匀的层次</b>。转向（滑行方向
+ *       「下半 / 上半」两档，于是在空中形成<b>均匀的层次</b>。高飞档的粒子寿命会被抬到
+ *       {@link #FLURRY_HIGH_LIFETIME} tick（默认寿命随机 4–40 tick、均值约 10，飞不到顶点就没了）。转向（滑行方向
  *       一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高
  *       {@link #FLURRY_APEX_TURN_BONUS} 格（封顶 {@link #FLURRY_APEX_CAP}）；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
@@ -51,29 +60,37 @@ public final class SnowSpray {
 	private static final double MIN_SPEED = 0.10D;
 	/**
 	 * 脚底离<b>脚下那片地面</b>在这个高度以内就扬雪（格）：滑下坡、跳起来时常常没踩着地，
-	 * 用「离地 1 格内」代替 `onGround` —— 离脚下的雪面 1 格以内就扬雪（含跳起后的小滞空）。
+	 * 用「离地 2 格内」代替 `onGround`。取 2.0 是因为**一个普通跳跃的顶点约 1.25 格**（起跳 0.42 格/tick、
+	 * 0.08 重力），旧值 1.0 连正常一跳都盖不住 —— 一跳就没粒子，用户说的「跳起来就没雪」就是这么来的。
 	 */
-	private static final double GROUND_RANGE = 1.0D;
+	private static final double GROUND_RANGE = 2.0D;
 	/** 贴地雪屑：每侧数量 = 速度 × 这个系数（再夹到上限）。 */
-	private static final double SPRAY_PER_SPEED = 16.0D;
+	private static final double SPRAY_PER_SPEED = 20.0D;
 	/** 贴地雪屑的每侧数量上限。 */
-	private static final int SPRAY_MAX_PER_SIDE = 5;
+	private static final int SPRAY_MAX_PER_SIDE = 6;
 	/** 扬起雪屑：每侧数量 = 速度 × 这个系数（比贴地那层涨得快）。 */
-	private static final double FLURRY_PER_SPEED = 26.0D;
+	private static final double FLURRY_PER_SPEED = 32.0D;
 	/** 扬起雪屑的每侧数量上限。 */
-	private static final int FLURRY_MAX_PER_SIDE = 8;
+	private static final int FLURRY_MAX_PER_SIDE = 10;
 	/**
-	 * 扬起雪屑的顶点高度区间（格，从地面算）：0.9 = 腰 / 膝，2.0 = 头顶。
+	 * 扬起雪屑的顶点高度区间（格，从地面算）：1.5 = 胸口以上，3.0 = 头顶再高一头。
 	 *
 	 * <p>这里写的是<b>「雪飘到多高」</b>，不是初速度 —— 初速由 {@link #riseFor} 按离散粒子物理反解，
-	 * 所以调这两个数就能把雪屑抬到身体那么高，不用再猜 vy。
+	 * 所以调这两个数就能把雪屑抬到想要的高度，不用再猜 vy。
 	 */
-	private static final double FLURRY_APEX_MIN = 0.9D;
-	private static final double FLURRY_APEX_MAX = 2.0D;
+	private static final double FLURRY_APEX_MIN = 1.5D;
+	private static final double FLURRY_APEX_MAX = 3.0D;
 	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）。 */
-	private static final double FLURRY_APEX_TURN_BONUS = 0.4D;
+	private static final double FLURRY_APEX_TURN_BONUS = 0.5D;
 	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
-	private static final double FLURRY_APEX_CAP = 2.2D;
+	private static final double FLURRY_APEX_CAP = 3.2D;
+	/**
+	 * 高飞档雪屑的最低寿命（tick）。原版 {@code Particle} 构造器里
+	 * {@code lifetime = (int)(4.0 / (rand*0.9 + 0.1))}＝<b>随机 4–40 tick、均值约 10</b>，
+	 * 而顶点 3.0 格要 ≈25 tick 才走完上升+回落（上升到顶 ≈14 tick）—— 默认寿命会让粒子在半空凭空消失，
+	 * 这正是「飘得低」的第二半原因。高飞档统一抬到 40（只抬不降：{@code getLifetime() < 40} 时才写）。
+	 */
+	private static final int FLURRY_HIGH_LIFETIME = 40;
 	/**
 	 * 雪粒子的重力（格/tick²）。原版 {@code Particle.tick} 里是 {@code yd -= 0.04 * gravity}，
 	 * 而雪球（{@code BreakingItemParticle} 构造器）的 {@code gravity} 是 1.0 —— 即每 tick −0.04。
@@ -84,15 +101,15 @@ public final class SnowSpray {
 	/** 扬起层里走高飞档（顶点取区间上半）的比例，其余抽下半。 */
 	private static final double FLURRY_HIGH_FRACTION = 0.70D;
 	/** 转向时：扬起层每侧再多几颗。 */
-	private static final int TURN_EXTRA_PER_SIDE = 5;
+	private static final int TURN_EXTRA_PER_SIDE = 6;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
 	/** 板两边的横向偏移（格）：撒在脚的两侧，而不是脚底下。 */
 	private static final double SIDE_OFFSET = 0.34D;
 	/** 贴地雪屑向外（垂直于滑行方向）的溅出速度。 */
 	private static final double OUTWARD = 0.18D;
-	/** 贴地雪屑的向上分量（从地面起跳的初速：0.20 · 0.5–1.5 倍 ≈ 0.1–0.3 格/tick，真的能飞起来）。 */
-	private static final double UPWARD = 0.20D;
+	/** 贴地雪屑的向上分量（从地面起跳的初速：0.30 · 0.5–1.5 倍 ≈ 0.15–0.45 格/tick，顶点约 0.5–2 格）。 */
+	private static final double UPWARD = 0.30D;
 	/** 向后（与滑行相反）的分量 —— 雪是往后飞的。 */
 	private static final double BACKWARD = 0.16D;
 	/** 出生点随机散布（格）。 */
@@ -116,8 +133,8 @@ public final class SnowSpray {
 	private static final int BURST_MAX = 160;
 	/** 两团雪屑之间的最短间隔（tick）—— 持续刹车时就是「每隔几 tick 炸一团」。 */
 	private static final int BURST_COOLDOWN_TICKS = 3;
-	/** 雪屑炸开时的上升速度（抛向空中）。 */
-	private static final double BURST_UPWARD = 0.35D;
+	/** 雪屑炸开时的上升速度（抛向空中，顶点约 2 格）。 */
+	private static final double BURST_UPWARD = 0.5D;
 	/** 雪屑炸开时的随机散布半径（格）。 */
 	private static final double BURST_RADIUS = 0.75D;
 
@@ -218,19 +235,18 @@ public final class SnowSpray {
 			double outX = leftX * OUTWARD * side - dirX * BACKWARD;
 			double outZ = leftZ * OUTWARD * side - dirZ * BACKWARD;
 			for (int i = 0; i < flecks; i++) {
-				level.addParticle(SNOW,
-						baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
-						outX, UPWARD * (0.5D + random.nextDouble()), outZ);
+				spawn(baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
+						outX, UPWARD * (0.5D + random.nextDouble()), outZ, 0);
 			}
 			for (int i = 0; i < flurries; i++) {
-				// 每颗雪屑自己抽一个「顶点高度」：低飞档抽区间下半（腰 / 膝），高飞档抽上半（胸到头），
+				// 每颗雪屑自己抽一个「顶点高度」：低飞档抽区间下半（腰 / 胸），高飞档抽上半（胸到头），
 				// 混起来才有层次 —— 不再是「要么贴地皮、要么 9 格雪柱」。
 				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
 				double vy = riseFor(randomApex(random, high, turning));
 				double scatter = high ? 0.9D : 0.6D;   // 横向溅射沿用原来两档的系数
-				level.addParticle(SNOW,
-						baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
-						outX * scatter, vy, outZ * scatter);
+				// 高飞档要活到顶点（≈25 tick），默认寿命均值才 10 tick —— 只抬这一档。
+				spawn(baseX + jitter(random), spawnY + yJitter(random), baseZ + jitter(random),
+						outX * scatter, vy, outZ * scatter, high ? FLURRY_HIGH_LIFETIME : 0);
 			}
 		}
 	}
@@ -309,6 +325,37 @@ public final class SnowSpray {
 		return player.getY() - gap;
 	}
 
+	/**
+	 * 生成一颗雪粒子，并<b>把初速真的写进去</b>。
+	 *
+	 * <p>两条路都不能少，这是这层的全部要害：
+	 * <ol>
+	 *   <li>{@code ParticleEngine#createParticle} —— 它内部 {@code makeParticle} 之后<b>已经</b>把这个粒子
+	 *       {@code add} 进引擎并返回引用，所以<b>不要</b>再调 {@code add}/{@code addParticle}（会出两颗）；</li>
+	 *   <li>{@code Particle#setParticleSpeed} —— {@code ITEM_SNOWBALL} 的 provider 把传进去的
+	 *       {@code xSpeed/ySpeed/zSpeed} 直接丢了（构造器给的是随机 ±0.1），只有这里硬写回
+	 *       {@code xd/yd/zd} 才有效。</li>
+	 * </ol>
+	 *
+	 * <p>走引擎而不走 {@code ClientLevel#addParticle}，就绕过了那边的「离相机 32 格 / ParticleStatus.MINIMAL」
+	 * 两道筛子，所以这里自己补一条同样的距离判据，免得给远处的玩家扬雪。
+	 *
+	 * @param lifetime 0 = 用原版随机寿命（{@code (int)(4 / (rand*0.9 + 0.1))}；&gt;0 = 至少活这么多 tick）
+	 */
+	private static void spawn(double x, double y, double z, double vx, double vy, double vz, int lifetime) {
+		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		if (camera.distanceToSqr(x, y, z) > 1024.0D) {
+			return;   // 与 ClientLevel#addParticle 同一道 32 格筛子
+		}
+		Particle particle = Minecraft.getInstance().particleEngine.createParticle(SNOW, x, y, z, vx, vy, vz);
+		if (particle != null) {
+			particle.setParticleSpeed(vx, vy, vz);   // provider 丢了初速，这里硬写回去
+			if (lifetime > 0 && particle.getLifetime() < lifetime) {
+				particle.setLifetime(lifetime);      // 只抬不降：别把别人原本更长的寿命砍短
+			}
+		}
+	}
+
 	/** 急减速：从脚下一圈炸开一大团抛向空中的雪屑（同样贴地起）。 */
 	private static void burst(ClientLevel level, Player player, double drop) {
 		RandomSource random = player.getRandom();
@@ -319,9 +366,8 @@ public final class SnowSpray {
 			double radius = random.nextDouble() * BURST_RADIUS;
 			double dx = Math.cos(angle) * radius;
 			double dz = Math.sin(angle) * radius;
-			level.addParticle(SNOW,
-					player.getX() + dx, y + yJitter(random), player.getZ() + dz,
-					dx * 0.8D, BURST_UPWARD * (0.6D + random.nextDouble()), dz * 0.8D);
+			spawn(player.getX() + dx, y + yJitter(random), player.getZ() + dz,
+					dx * 0.8D, BURST_UPWARD * (0.6D + random.nextDouble()), dz * 0.8D, 0);
 		}
 	}
 

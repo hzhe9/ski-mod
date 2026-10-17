@@ -73,41 +73,44 @@
 
 ### 滑行雪粒子 `SnowSpray.java`（纯客户端观感）
 
-穿着任一种板、在雪 / 冰面上滑行时扬起的雪，**纯客户端观感**（`addParticle`）：服务端不参与，粒子多少不影响速度 —— 速度只决定粒子。
+穿着任一种板、在雪 / 冰面上滑行时扬起的雪，**纯客户端观感**（`particleEngine.createParticle` + `Particle#setParticleSpeed`）：服务端不参与，粒子多少不影响速度 —— 速度只决定粒子。
+
+> **初速必须经 `ParticleEngine#createParticle` 拿回 `Particle` 再 `setParticleSpeed`**（`SnowSpray.spawn`）。`ITEM_SNOWBALL` 的 provider（`BreakingItemParticle$SnowballProvider`）在 `createParticle(...)` 里**根本不读** `xSpeed/ySpeed/zSpeed` 三个参数（字节码只读 x/y/z），直接 `new BreakingItemParticle(level, x, y, z, sprite)`，构造器把速度写成随机 ±0.1 —— 所以走 `ClientLevel#addParticle` 传初速**永远无效**：2026-10-17 之前所有「顶点高度 → 初速」的调参一颗都没接上，粒子只会飘十几厘米。另外原版粒子寿命是 `lifetime = (int)(4 / (rand*0.9 + 0.1))`＝**随机 4–40 tick、均值约 10**，顶点 3 格要 ≈25 tick 才走完，所以高飞档用 `FLURRY_HIGH_LIFETIME` 40 兜住（只抬不降）。
 
 **只用一种粒子**：`SNOW` = `ParticleTypes.ITEM_SNOWBALL`（雪球崩碎的白色碎屑，重力 1.0、会落回雪面）。模组里**不用任何雾 / 烟 / 云类粒子** —— `SNOWFLAKE`、`POOF`、`CLOUD` 这些看着像一团白雾，用户明确不要。（原先撑杖时脚下的 8 颗 `SNOWFLAKE` 已整段删掉。）
 
 三层，数量都随速度涨：
 
-1. **贴地雪屑**：从**板的两侧**（与滑行方向垂直的左右两边）向外、略向上溅，数量随速度增加；0.32 格/tick 起每侧满 5 颗。
-2. **扬起雪屑**：同样从板两侧起，但**按「顶点高度」调（单位：格）**—— 每颗自己抽一个 `FLURRY_APEX_MIN`–`FLURRY_APEX_MAX`（0.9–2.0 格 = 腰到头顶）的顶点，出生初速由 `riseFor` 用离散粒子物理**反解**出来（不是手调 vy）。按 `FLURRY_HIGH_FRACTION` 0.70 拆成**下半 / 上半两档**：下半抽 0.9–1.45（腰 / 膝）、上半抽 1.45–2.0（胸到头），混起来才有层次 —— 大部分走「上半」档，雪**飘到胸 / 头高度**，既不是贴着地面一层皮、也不是 4–9 格的雪柱。**转向时这一层更多、顶点再 +0.40 格**（封顶 2.2 格）。
+1. **贴地雪屑**：从**板的两侧**（与滑行方向垂直的左右两边）向外、略向上溅，数量随速度增加；0.30 格/tick 起每侧满 6 颗。
+2. **扬起雪屑**：同样从板两侧起，但**按「顶点高度」调（单位：格）**—— 每颗自己抽一个 `FLURRY_APEX_MIN`–`FLURRY_APEX_MAX`（1.5–3.0 格 = 胸口到头顶再高一头）的顶点，出生初速由 `riseFor` 用离散粒子物理**反解**出来（不是手调 vy）。按 `FLURRY_HIGH_FRACTION` 0.70 拆成**下半 / 上半两档**：下半抽 1.5–2.25（胸 / 头）、上半抽 2.25–3.0（头顶到更高），混起来才有层次 —— 大部分走「上半」档，雪**飘过头顶**，既不是贴着地面一层皮、也不是 4–9 格的雪柱。高飞档寿命抬到 `FLURRY_HIGH_LIFETIME` 40 tick（默认均值 10 tick 会半空消失）。**转向时这一层更多、顶点再 +0.50 格**（封顶 3.2 格）。
 3. **急减速雪屑**：一 tick 内水平速度掉了 `BURST_DROP` 以上（急刹车 / 撞墙 / 压刃刹车都是这个形状）就从脚下一圈炸开一大团雪屑，粒子数随掉落量增加，带 `BURST_COOLDOWN_TICKS` 冷却。阈值取 0.08 是为了**兜住双板按 S 的持续刹车**（动量每 tick ×`BRAKE_DECAY` 0.92，高速时每 tick 掉约 8%）—— 持续刹车会每隔几 tick 炸一团，不是只响一次。
 
-**所有粒子出生在脚底那片地面**上（`groundY + 0.05 ± 0.05`，`groundY = player.getY() - SkiGlide.groundDistance(player, GROUND_RANGE)`，探不到地面或离地超过 `GROUND_RANGE` 时退回 `player.getY()`）—— **出生点不跟着人身子抬**，高度层次只看**顶点高度**（`FLURRY_APEX_MIN`–`FLURRY_APEX_MAX` 0.9–2.0 格，转向再 +`FLURRY_APEX_TURN_BONUS` 0.4、封顶 `FLURRY_APEX_CAP` 2.2；初速按 `PARTICLE_GRAVITY` / `PARTICLE_DRAG` 离散反解）。所以看着是雪从地面被卷起来、飘到身体高度，而不是从人身上冒出来；**别为了「飘得高」去抬出生点**（用户明确：出发点在地面）。
+**所有粒子出生在脚底那片地面**上（`groundY + 0.05 ± 0.05`，`groundY = player.getY() - SkiGlide.groundDistance(player, GROUND_RANGE)`，探不到地面或离地超过 `GROUND_RANGE` 时退回 `player.getY()`）—— **出生点不跟着人身子抬**，高度层次只看**顶点高度**（`FLURRY_APEX_MIN`–`FLURRY_APEX_MAX` 1.5–3.0 格，转向再 +`FLURRY_APEX_TURN_BONUS` 0.5、封顶 `FLURRY_APEX_CAP` 3.2；初速按 `PARTICLE_GRAVITY` / `PARTICLE_DRAG` 离散反解）。所以看着是雪从地面被卷起来、飘过头顶，而不是从人身上冒出来；**别为了「飘得高」去抬出生点**（用户明确：出发点在地面）。
 
-**触发层（前两层）不看 `onGround`，也不看 `player.blockPosition()`**，而是先用 `SkiGlide.groundDistance` 向下射线量出**离脚下那片地面**的距离 `gap`（`GROUND_RANGE` 1 格以内），再把 `gap` 反推成脚下那块**实心地面块** `BlockPos.containing(x, y − gap − 0.05, z)`，用 `isOnSnowOrIce(level, ground.above())` 判它是不是雪 / 冰。
+**触发层（前两层）不看 `onGround`，也不看 `player.blockPosition()`**，而是先用 `SkiGlide.groundDistance` 向下射线量出**离脚下那片地面**的距离 `gap`（`GROUND_RANGE` 2 格以内），再把 `gap` 反推成脚下那块**实心地面块** `BlockPos.containing(x, y − gap − 0.05, z)`，用 `isOnSnowOrIce(level, ground.above())` 判它是不是雪 / 冰。
 
-> 早先这里是 `isOnSnowOrIce(level, player.blockPosition())` —— 那一格**是人的身体格**：人一跳起来（哪怕只离地 0.3 格）那里就是空气、`below()` 也可能是空气，于是整个滞空阶段一颗粒子都不出（急刹爆发层也被同一行堵住）。用户原话「离了地面就没有粒子」。改看地面块之后，**人在空中但离雪面 ≤1 格照样扬雪**，且仍然只在自己脚下是雪面时才扬。
+> 早先这里是 `isOnSnowOrIce(level, player.blockPosition())` —— 那一格**是人的身体格**：人一跳起来（哪怕只离地 0.3 格）那里就是空气、`below()` 也可能是空气，于是整个滞空阶段一颗粒子都不出（急刹爆发层也被同一行堵住）。用户原话「离了地面就没有粒子」。改看地面块之后，**人在空中但离雪面 ≤2 格照样扬雪**，且仍然只在自己脚下是雪面时才扬。门槛从 1.0 提到 2.0 是因为**一个普通跳跃的顶点就约 1.25 格** —— 1.0 连正常一跳都盖不住，所以当时「一跳就没雪」依旧。
 
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `MIN_SPEED` | 0.10 格/tick | 低于这个速度不持续扬雪（慢慢挪一步不该扬雪） |
-| `GROUND_RANGE` | 1.0 格 | 离**脚下那片地面**不超过这个高度就持续扬雪（向下射线 `ClipContext.Block.COLLIDER` 实测；超过 = 真的飞起来了）；跳起后 ≤1 格的小滞空照样扬 |
-| `SPRAY_PER_SPEED` / `SPRAY_MAX_PER_SIDE` | 16.0 / 5 | 贴地雪屑每侧数量 = 速度 × 系数，夹到上限 |
-| `FLURRY_PER_SPEED` / `FLURRY_MAX_PER_SIDE` | 26.0 / 8 | 扬起雪屑每侧数量（涨得更快）—— **要「更多」先加这两个上限** |
-| `FLURRY_APEX_MIN` / `FLURRY_APEX_MAX` | 0.9 / 2.0 | 扬起雪屑的**顶点高度区间**（格，从地面算）：0.9 = 腰 / 膝、2.0 = 头顶 —— 每颗粒子自己抽一个值，**改这两个就是「飘多高」**（出生初速由 `riseFor` 反解，不用手调 vy） |
-| `FLURRY_HIGH_FRACTION` | 0.70 | 扬起层里走「上半」档的比例（顶点抽 1.45–2.0 格）；其余抽下半（0.9–1.45 格）：**大部分走胸到头，两档混着才有层次** |
-| `FLURRY_APEX_TURN_BONUS` / `FLURRY_APEX_CAP` | 0.4 / 2.2 | 转向时顶点再 +0.4 格；任何情况下封顶 2.2 格（避免又变成雪柱）—— **转弯甩起来的雪更高** |
-| `PARTICLE_GRAVITY` / `PARTICLE_DRAG` | 0.04 / 0.98 | 反解用的原版粒子物理：每 tick `yd -= 0.04 × gravity`（雪球 `gravity` = 1.0）、位移后再 ×0.98 阻尼 —— 顶点 0.9 / 1.17 / 1.45 / 2.0 / 2.2 格对应初速 ≈ 0.300 / 0.341 / 0.379 / 0.445 / 0.467 格/tick |
-| `TURN_EXTRA_PER_SIDE` | 5 | 转向时扬起层每侧再多 5 颗（**转向时更多**；这一层原有上限 8，转向时每侧 13） |
+| `GROUND_RANGE` | 2.0 格 | 离**脚下那片地面**不超过这个高度就持续扬雪（向下射线 `ClipContext.Block.COLLIDER` 实测；超过 = 真的飞起来了）；2.0 才盖得住**普通跳跃顶点 ≈1.25 格**（旧值 1.0 一跳就没粒子） |
+| `SPRAY_PER_SPEED` / `SPRAY_MAX_PER_SIDE` | 20.0 / 6 | 贴地雪屑每侧数量 = 速度 × 系数，夹到上限（0.30 格/tick 起满 6 颗） |
+| `FLURRY_PER_SPEED` / `FLURRY_MAX_PER_SIDE` | 32.0 / 10 | 扬起雪屑每侧数量（涨得更快）—— **要「更多」先加这两个上限** |
+| `FLURRY_APEX_MIN` / `FLURRY_APEX_MAX` | 1.5 / 3.0 | 扬起雪屑的**顶点高度区间**（格，从地面算）：1.5 = 胸口以上、3.0 = 头顶再高一头 —— 每颗粒子自己抽一个值，**改这两个就是「飘多高」**（出生初速由 `riseFor` 反解，不用手调 vy） |
+| `FLURRY_HIGH_FRACTION` | 0.70 | 扬起层里走「上半」档的比例（顶点抽 2.25–3.0 格）；其余抽下半（1.5–2.25 格）：**大部分飘过头顶，两档混着才有层次** |
+| `FLURRY_APEX_TURN_BONUS` / `FLURRY_APEX_CAP` | 0.5 / 3.2 | 转向时顶点再 +0.5 格；任何情况下封顶 3.2 格（避免又变成雪柱）—— **转弯甩起来的雪更高** |
+| `FLURRY_HIGH_LIFETIME` | 40 tick | 高飞档雪屑的最低寿命（只抬不降）。原版寿命 `(int)(4 / (rand*0.9 + 0.1))`＝随机 4–40 tick、均值 ≈10，而顶点 3 格要 ≈25 tick（升到顶 ≈14 tick）—— 不抬这一档，粒子会在半空凭空消失 |
+| `PARTICLE_GRAVITY` / `PARTICLE_DRAG` | 0.04 / 0.98 | 反解用的原版粒子物理：每 tick `yd -= 0.04 × gravity`（雪球 `gravity` = 1.0）、位移后再 ×0.98 阻尼 —— 顶点 1.5 / 1.875 / 2.25 / 3.0 / 3.2 格对应初速 ≈ 0.385 / 0.431 / 0.473 / 0.548 / 0.567 格/tick |
+| `TURN_EXTRA_PER_SIDE` | 6 | 转向时扬起层每侧再多 6 颗（**转向时更多**；这一层原有上限 10，转向时每侧 16） |
 | `TURN_DEGREES_PER_TICK` | 2.0 度 | 滑行方向一 tick 转 2° 以上就算「在转向」（两板通用，只看速度方向的变化，不读按键） |
 | `SIDE_OFFSET` | 0.34 格 | 出生点离身体中线的横向距离（撒在脚的两侧，不是脚底下） |
-| `OUTWARD` / `UPWARD` / `BACKWARD` | 0.18 / 0.20 / 0.16 | 贴地雪屑溅出速度的三个分量：向外、向上、向后（与滑行相反）—— `UPWARD` 0.20 才真的离地（0.12 时几乎贴着雪面滚） |
+| `OUTWARD` / `UPWARD` / `BACKWARD` | 0.18 / 0.30 / 0.16 | 贴地雪屑溅出速度的三个分量：向外、向上、向后（与滑行相反）—— `UPWARD` 0.30 时每颗顶点约 0.5–2 格（之前被 provider 吞掉，现在才真生效） |
 | `SPREAD` / `Y_OFFSET` / `Y_JITTER` | 0.16 / 0.05 / 0.05 格 | 出生点的水平随机散布 / 离地高度 / 高度抖动（`groundY + Y_OFFSET ± Y_JITTER`） |
 | `BURST_DROP` / `BURST_MIN_SPEED` | 0.08 / 0.12 格/tick | 急减速的判定：一 tick 掉超过 `BURST_DROP`、且掉之前快过 `BURST_MIN_SPEED` 才炸 |
 | `BURST_PER_DROP` / `BURST_MAX` | 450.0 / 160 | 一团雪屑的粒子数 = 掉落量 × 系数，夹到上限（掉 0.08 → 36 颗，掉 0.15 → 67 颗，0.36 以上 → 满 160 颗）—— **急刹车不够狠就加这两个** |
 | `BURST_COOLDOWN_TICKS` | 3 | 两团之间的最短间隔（持续刹车时 = 每隔 3 tick 炸一团） |
-| `BURST_UPWARD` / `BURST_RADIUS` | 0.35 / 0.75 格 | 炸开时的上升速度（≈1.5 格高）/ 随机散布半径 |
+| `BURST_UPWARD` / `BURST_RADIUS` | 0.5 / 0.75 格 | 炸开时的上升速度（≈2 格高，之前被 provider 吞掉、现在才真生效）/ 随机散布半径 |
 
 ### 落到雪面免摔伤 `SnowLanding.java`
 
@@ -115,7 +118,7 @@
 
 ### 滑行音效 `GlideSounds.java`（纯客户端）
 
-雪面上滑行时只有**切雪声**：按速度调的间隔播原版雪地脚步 `SNOW_STEP`，音量与音高也随速度抬。触发条件与雪粒子同一条（穿着板 + 雪 / 冰面 + 有速度），但**声音这边的离地门槛是 `GlideSounds.GROUND_RANGE` 1.0 格**（雪粒子 `SnowSpray.GROUND_RANGE` 现在也是 1.0 格，不过雪粒子量的是到**脚下地面块**的距离、且雪面判定看地面块，声音仍看 `blockPosition()`；两者各一个常量，没有联动）。原版踏雪脚步/落地声仍是静音的（那几条 mixin 只管原版走路与摔落，不管这里直接播的音效）。
+雪面上滑行时只有**切雪声**：按速度调的间隔播原版雪地脚步 `SNOW_STEP`，音量与音高也随速度抬。触发条件与雪粒子同一条（穿着板 + 雪 / 冰面 + 有速度），但**声音这边的离地门槛是 `GlideSounds.GROUND_RANGE` 1.0 格**（雪粒子 `SnowSpray.GROUND_RANGE` 是 2.0 格，不过雪粒子量的是到**脚下地面块**的距离、且雪面判定看地面块，声音仍看 `blockPosition()`；两者各一个常量，没有联动 —— 所以跳起来像石子一样平飞时，雪还在扬、声音已经停了）。原版踏雪脚步/落地声仍是静音的（那几条 mixin 只管原版走路与摔落，不管这里直接播的音效）。
 
 **没有风声** —— 原先那条循环的风（`ELYTRA_FLYING`）已按用户 2026-10-13 的要求删掉，相关常量（`WIND_PER_SPEED` / `WIND_MAX` / `WIND_START_VOLUME`）与那个 `WindSound` 内部类一起删了。
 
