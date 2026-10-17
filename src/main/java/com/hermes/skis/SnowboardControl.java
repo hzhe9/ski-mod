@@ -65,11 +65,12 @@ public final class SnowboardControl {
 	/** 单板：单 tick 下落加速上限。 */
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
 	/**
-	 * <b>穿单板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值。
-	 * 只影响<b>腾空段</b>（按空格跳起来 / 脚下没地面时）；贴地滑行由 {@code SkiGlide} 的贴地控制器负责，不经重力。
-	 * 1.0 = 跳跃与原版一样高（用户 2026-10-15 定）；想空中更沉就往上加（1.5 曾用过）。
+	 * <b>穿单板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
+	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
+	 * 1.0 = 原版；1.3 = 0.104 格/tick²（用户 2026-10-15 定：比平时重力更快，又不至于跳得太矮/落地太砸）。
+	 * 1.5 / 2.0 都试过——值越大下落越干脆，但跳高与滞空跟着被压（1.3 时跳高 ≈1.05 格）。
 	 */
-	private static final double GRAVITY_MULTIPLIER = 1.0D;
+	private static final double GRAVITY_MULTIPLIER = 1.3D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（与双板同值）
 	/**

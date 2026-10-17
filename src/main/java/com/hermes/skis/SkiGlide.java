@@ -1,7 +1,6 @@
 package com.hermes.skis;
 
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -29,10 +28,7 @@ import net.minecraft.world.level.block.state.BlockState;
  *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
  *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算）；
  *   <li><b>重力加重</b>：穿着板时把原版重力（{@code Attributes.GRAVITY}）改成该板倍数的值 ——
- *       真的改重力，不是每 tick 补一份向下的速度（只影响<b>腾空段</b>：跳起来的上升与下落）；</li>
- *   <li><b>贴地滑行</b>：默认贴着坡面走 —— 用「脚下地面下降得多快」直接写出本 tick 需要的下坠速度，
- *       不再靠重力攒，所以 30–45° 坡上不再一格一格地弹、陡坡也不会被甩飞；
- *       只有<b>按空格</b>或<b>脚下没地面</b>才进入腾空态交给重力（用户 2026-10-15 定的手感）；</li>
+ *       真的改重力，不是每 tick 补一份向下的速度（全程生效：上升段也一起变沉，跳得更矮、落得更快）；</li>
  *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。
  * </ul>
  *
@@ -49,18 +45,6 @@ public final class SkiGlide {
 
 	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
 	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性（用户要求先去掉衰减，试手感）
-	/**
-	 * <b>贴地判定</b>：脚底离地不超过这么多格，就算「还在坡面上」，一切按地面走（见 {@link #glideOnSurface}）。
-	 */
-	private static final double STICK_RANGE = 2.5D;
-	/** 贴地时单 tick 最多下降这么多格（比这更陡／更快＝真的跟不上，交给重力自由落体）。 */
-	private static final double STICK_MAX_NEEDED = 3.0D;
-	/** 坡面下降速率的平滑系数：每 tick 向「刚测到的地面下降量」靠拢这个比例（台阶锯齿靠它吃掉）。 */
-	private static final double STICK_SLOPE_SMOOTH = 0.5D;
-	/** 腾空后「落回贴地态」的判定：正在下落、且脚底离地不超过这么多格。 */
-	private static final double LAND_GAP = 0.25D;
-	/** 空气阻力（原版每 tick ×0.98），写速度时先除以它，下一 tick 走出来的位移才正好是想要的量。 */
-	private static final double AIR_DRAG = 0.98D;
 	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
@@ -82,12 +66,6 @@ public final class SkiGlide {
 	private static final Map<Integer, Double> DESCEND_ACCUM = new ConcurrentHashMap<>();
 	/** 玩家实体 id → 当前滑行动量（水平速度）。 */
 	private static final Map<Integer, Double> MOMENTUM = new ConcurrentHashMap<>();
-	/** 玩家实体 id → 是否处在<b>腾空态</b>（按了空格跳起来，或脚下没地面）。不在表里 ＝ 贴地态。 */
-	private static final Set<Integer> AIRBORNE = ConcurrentHashMap.newKeySet();
-	/** 玩家实体 id → 上一 tick 采到的地面 Y（脚下射线的落点）。 */
-	private static final Map<Integer, Double> GROUND_Y = new ConcurrentHashMap<>();
-	/** 玩家实体 id → 平滑后的坡面下降速率（格/tick）。 */
-	private static final Map<Integer, Double> SLOPE = new ConcurrentHashMap<>();
 
 	private SkiGlide() {
 	}
@@ -112,7 +90,6 @@ public final class SkiGlide {
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
 				setStepHeight(player, 1.0D);
 				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
-				glideOnSurface(player);   // 贴地 / 腾空 两态：默认贴着坡面走，按空格或脚下没地面才交给重力
 				trackDescent(player);
 				applyMomentum(player);
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
@@ -193,8 +170,10 @@ public final class SkiGlide {
 	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
 	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
 	 *
-	 * <p>改的是真重力，不是每 tick 补一份向下的速度 —— 所以上升段一起变沉（跳得更矮、滞空更短）。
-	 * 用户 2026-10-15 报：「骑着板下落太慢、像飘在空里」，要求比平时重力更快。
+	 * <p>改的是真重力，不是每 tick 补一份向下的速度 —— 所以上升段一起变沉（跳得更矮、滞空更短），
+	 * 全程生效。用户 2026-10-15 报：「骑着板下落太慢、像飘在空里」，要求比平时重力更快。
+	 * （同一天试过「贴地/腾空两态 + 前馈地形跟随」的控制器，用户实测判定「贴太紧、会瞬间吸到下一格」，
+	 * 已回退到这条重力方案 —— 别再自作主张加贴地控制。）
 	 * 与 {@link #setStepHeight} 同一套做法：只在穿板时生效，脱板由 {@link #resetGravity} 还原。
 	 */
 	private static void applyGravity(ServerPlayer player) {
@@ -236,67 +215,6 @@ public final class SkiGlide {
 		} else {
 			MOMENTUM.put(id, momentum);
 		}
-	}
-
-	/**
-	 * <b>贴地滑行（单板 / 双板同一套骨架）</b>：默认认为玩家<b>贴着地面</b>走，每 tick 用
-	 * 「脚下地面自己下降了多快」（前馈，{@link #SLOPE}）＋「还差多少格贴上」（修正，{@code gap}）
-	 * 直接算出<b>本 tick 需要多少下坠速度</b>并一步写上去 —— 不再靠重力慢慢攒。
-	 *
-	 * <p>于是：既不会「掉出去 → 追上 → 砸回来」那种一格一格的顿挫（旧机制在 30–45° 坡上每 8–20 tick
-	 * 弹一次、离地 1.2–5.0 格），也不会在陡坡上被横着甩飞 —— 复刻模型里 20–45° 的离地间隙都压在 0.3 格内。
-	 *
-	 * <p>只有两种情形才交给原版重力（<b>腾空态</b>）：① <b>按了空格</b>（主动跳出去）、
-	 * ② 脚下 {@link #STICK_RANGE} 格内真的没有地面（悬崖 / 飞出坡面）。落地（正在下落 + 脚底贴住）自动回到贴地态。
-	 *
-	 * <p>块状台阶的锯齿靠两件事吃掉：坡面速率做了一次平滑（{@link #STICK_SLOPE_SMOOTH}），
-	 * 以及穿板时台阶高度已经是 1.0（1 格以内的坎直接走上去）。
-	 */
-	private static void glideOnSurface(ServerPlayer player) {
-		Integer id = player.getId();
-		Vec3 motion = player.getDeltaMovement();
-		double gap = groundDistance(player, STICK_RANGE);   // 探不到＝Double.MAX_VALUE
-
-		if (isJumping(player) || motion.y > 0.0D) {
-			AIRBORNE.add(id);   // 按空格 / 正在上升（跳、被弹）＝腾空
-		}
-		if (!AIRBORNE.contains(id) && gap > STICK_RANGE) {
-			AIRBORNE.add(id);   // 脚下没地面＝真的离开坡面
-		}
-		if (AIRBORNE.contains(id)) {
-			if (motion.y < 0.0D && (player.onGround() || gap <= LAND_GAP)) {
-				AIRBORNE.remove(id);   // 落地 → 回到贴地态
-			} else {
-				// 腾空期间不采地面：重新贴合时从头估坡面速率（否则会拿几秒前的地面数据去算）
-				GROUND_Y.remove(id);
-				SLOPE.remove(id);
-				return;                // 腾空＝完全不插手，交给重力做抛物线
-			}
-		}
-		if (player.isInWater() || player.isInLava() || player.onClimbable() || player.isFallFlying()) {
-			return;   // 水里 / 梯子 / 鞘翅：别硬贴
-		}
-
-		// ——— 贴地态 ———
-		double groundY = player.getY() - gap;
-		Double lastGroundY = GROUND_Y.put(id, groundY);
-		double slope = SLOPE.getOrDefault(id, 0.0D);
-		if (lastGroundY != null) {
-			double drop = Math.max(0.0D, lastGroundY - groundY);   // 地面自己下降了多少（台阶锯齿都在这里）
-			slope += (drop - slope) * STICK_SLOPE_SMOOTH;
-		}
-		SLOPE.put(id, slope);
-
-		// 本 tick 要下降这么多格，才能既不离开坡面、又正好贴上地面
-		double needed = Math.min(slope + Math.max(0.0D, gap), STICK_MAX_NEEDED);
-		player.setDeltaMovement(motion.x, -(needed / AIR_DRAG), motion.z);
-		player.hurtMarked = true;
-	}
-
-	/** 玩家这一 tick 是否按着跳跃键（拿不到输入就当作没按）。 */
-	private static boolean isJumping(ServerPlayer player) {
-		Input keys = player.getLastClientInput();
-		return keys != null && keys.jump();
 	}
 
 	private static void clampToMaxSpeed(ServerPlayer player) {
@@ -499,18 +417,12 @@ public final class SkiGlide {
 		LAST_Y.remove(id);
 		DESCEND_ACCUM.remove(id);
 		MOMENTUM.remove(id);
-		AIRBORNE.remove(id);
-		GROUND_Y.remove(id);
-		SLOPE.remove(id);
 	}
 
 	private static void forgetAll() {
 		LAST_Y.clear();
 		DESCEND_ACCUM.clear();
 		MOMENTUM.clear();
-		AIRBORNE.clear();
-		GROUND_Y.clear();
-		SLOPE.clear();
 		SnowboardControl.forgetAll();
 	}
 }

@@ -59,9 +59,9 @@ python -m venv .venv
 | `SkisMod.java` | 物品注册、独立创造标签页（`itemGroup.skis`）、装备资源；`isModernSki` / `isSkiFeet` 判定 |
 | `item/SkiPoleItem.java` | 滑雪杖右键行为（客户端摆臂 + 服务端冲刺） |
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
-| `SkiGlide.java` | 每 tick 滑行物理：**贴地滑行（贴地 / 腾空两态）**、下落加速、**穿板时的重力加重**、低摩擦动量、雪面推进、脚上装备的台阶高度；`isOnSnowOrIce` 是「雪面」的唯一定义（滑行 / 雪粒子 / 落地免伤共用） |
+| `SkiGlide.java` | 每 tick 滑行物理：下落加速、**穿板时的重力加重（`Attributes.GRAVITY` ×倍数，全程生效）**、低摩擦动量、雪面推进、脚上装备的台阶高度；`isOnSnowOrIce` 是「雪面」的唯一定义（滑行 / 雪粒子 / 落地免伤共用） |
 | `SnowLanding.java` | 穿板摔在雪 / 冰面上免摔伤：Fabric `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（挂在 `hurtServer` 上，不需要 mixin），只拦 `DamageTypeTags.IS_FALL` |
-| `SkisControl.java` | **双板专属数值**（下落基数 / 单 tick 上限 / 重力倍数 1.0 / 速度上限 1.4 / 动量衰减 0.998）＋双板按键转向；不持有朝向状态（视角即朝向） |
+| `SkisControl.java` | **双板专属数值**（下落基数 / 单 tick 上限 / 重力倍数 1.3 / 速度上限 1.4 / 动量衰减 0.998）＋双板按键转向；不持有朝向状态（视角即朝向） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
 | `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳） |
