@@ -10,8 +10,7 @@
 | 护甲 | `Attributes.ARMOR +2`（`EquipmentSlotGroup.FEET`，ADD_VALUE） |
 | 移速 | `Attributes.MOVEMENT_SPEED +0.010`（ADD_VALUE；原版玩家基础 0.1 → 0.11，即穿上快约 10%） |
 | 装备音效 / 装备资源 | `ARMOR_EQUIP_LEATHER` / `equipment/modern_ski.json`（`skis:modern_ski`） |
-| 创造标签页 | 独立页「滑雪装备」（`itemGroup.skis`，不再塞原版工具页）：每款板各一条（`VARIANTS` 6 × 2）+ 1 根滑雪杖 + 1 个滑雪头盔 |
-| 滑雪头盔（`ski_helmet`） | **普通物品**：`stacksTo(1)`、无耐久、无属性修正，也不带 `EQUIPPABLE` —— 不可穿戴、不参与滑行物理；只有图标 / 显示名 / 配方 / 创造页条目 |
+| 创造标签页 | 独立页「滑雪装备」（`itemGroup.skis`，不再塞原版工具页）：每款板各一条（`VARIANTS` 6 × 2）+ 1 根滑雪杖 |
 
 ## 可调旋钮
 

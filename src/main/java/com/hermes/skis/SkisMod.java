@@ -30,7 +30,6 @@ import org.slf4j.LoggerFactory;
  *
  * <p>滑雪板：装备在脚部（靴子槽）——右键从手里穿上；穿着站在雪/冰上自动进入滑行状态，逻辑见 {@link SkiGlide}。
  * <p>滑雪杖：拿在手里的实体长杖，手臂平时不动；右键撑杖 = 摆臂一次 + 一段逐渐衰减的冲刺（{@link SkiBoost}）。
- * <p>滑雪头盔：普通物品（有图标 / 显示名 / 配方，**不可穿戴**），不参与滑行物理。
  */
 public class SkisMod implements ModInitializer {
 	public static final String MOD_ID = "skis";
@@ -38,7 +37,6 @@ public class SkisMod implements ModInitializer {
 
 	public static final ResourceKey<Item> MODERN_SKI_KEY = itemKey("modern_ski");
 	public static final ResourceKey<Item> SKI_POLE_KEY = itemKey("ski_pole");
-	public static final ResourceKey<Item> SKI_HELMET_KEY = itemKey("ski_helmet");
 	public static final ResourceKey<Item> SNOWBOARD_KEY = itemKey("snowboard");
 
 	/** 脚部外观资源：assets/skis/equipment/modern_ski.json（人形护甲层贴图）。 */
@@ -85,13 +83,6 @@ public class SkisMod implements ModInitializer {
 	public static final Item SKI_POLE = registerItem(SKI_POLE_KEY,
 			new SkiPoleItem(new Item.Properties().stacksTo(1).setId(SKI_POLE_KEY)));
 
-	/**
-	 * 滑雪保护头盔：**普通物品** —— 只有图标、显示名、配方与创造页条目，
-	 * 不带 {@code EQUIPPABLE} / 属性修正，不参与滑行物理（能不能真戴在头上不在本轮范围）。
-	 */
-	public static final Item SKI_HELMET = registerItem(SKI_HELMET_KEY,
-			new Item(new Item.Properties().stacksTo(1).setId(SKI_HELMET_KEY)));
-
 	/** 滑雪单板：同样装在脚部，物理与双板一致，只是外观与站姿不同（一只板、鸭子站姿）。 */
 	public static final Item SNOWBOARD = registerItem(SNOWBOARD_KEY, new Item(new Item.Properties()
 			.stacksTo(1)
@@ -124,13 +115,12 @@ public class SkisMod implements ModInitializer {
 						output.accept(variantStack(SNOWBOARD, "snowboard", variant));
 					}
 					output.accept(new ItemStack(SKI_POLE));
-					output.accept(new ItemStack(SKI_HELMET));
 				})
 				.build();
 		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB,
 				Identifier.fromNamespaceAndPath(MOD_ID, "ski"), tab);
 
-		LOGGER.info("[skis] 现代滑雪板 / 滑雪单板（脚部装备）/ 滑雪杖（手持实体）/ 滑雪头盔（装饰物品）已加载（右键冲刺变体）");
+		LOGGER.info("[skis] 现代滑雪板 / 滑雪单板（脚部装备）/ 滑雪杖（手持实体）已加载（右键冲刺变体）");
 	}
 
 	/** 判断物品栈是不是我们的滑雪板（26.2 的 ItemStack 只剩 is(Predicate)，直接比物品实例）。 */
