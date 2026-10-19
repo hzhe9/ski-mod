@@ -32,12 +32,12 @@ import net.minecraft.world.entity.player.Player;
  *       记录由 {@link #register()} 里挂的 {@code END_SERVER_TICK} 钩子维护：玩家穿着板、{@code onGround()}
  *       且脚下是雪 / 冰（同一个 {@code isSnowLanding}）时才把当前 {@code level().getGameTime()}
  *       写进 {@link #LAST_SNOW_TICK}。于是「从雪坡冲下来、腾空两秒、摔在石头上」免伤；
- *       「在石头地上站够 3 秒再摔」照旧掉血。不用「离地几格内」或射线判贴地 —— 用户要的字面是「踩在雪地上过」。</li>
+ *       「在石头地上站够 3 秒再摔」照旧掉血。不用「离地几格内」或射线判贴地 —— 判据的字面是「踩在雪地上过」。</li>
  * </ul>
  *
  * <p>命中时顺手 {@code resetFallDistance()}，免得下一次落地接着累计。
  *
- * <p>记录表的清理策略（用户 2026-10-17 给的两条里，主用「靠时间自然过期」）：① 比对只接受
+ * <p>记录表的清理策略（主用「靠时间自然过期」，因为它不需要清表就自带正确性）：① 比对只接受
  * {@code 0 ≤ now - last ≤ SNOW_GRACE_TICKS} 的时间戳，<b>所以退出 / 换维度时残留的旧 id 记录会自然失效</b>，
  * 不用靠清表保证正确性；② 顺手补三道：脱板当场 {@code remove}、断线 {@code remove}、
  * 超 {@link #MAX_ENTRIES} 整表 {@code clear()}（与 {@code SkiGlide} / {@code SkiBoost} 同一套写法）。

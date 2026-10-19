@@ -30,7 +30,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class HumanoidModelMixin {
 	/**
 	 * 单板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
-	 * 与双板的 {@link #SKI_LEG_TILT} 同值：用户要求「单板的站姿改成跟双板一样，身体稍微向后斜」。
+	 * 与双板的 {@link #SKI_LEG_TILT} 同值：两块板共用同一个「身体略向后斜」的站姿，差别只在外观与脚位；
+	 * 单板单独一套腿角会让两块板的人影高度对不上。
 	 * （原来是 {@code GLIDE_KNEE_BEND} 的屈膝 0.08，已去掉。）
 	 */
 	private static final float BOARD_LEG_TILT = -0.15F;
@@ -50,7 +51,7 @@ public abstract class HumanoidModelMixin {
 	/** 静止时手杖停的位置：不要举到最高，往下放一点。 */
 	private static final float ARM_REST = -0.55F;
 	/** 右键动画里“先举到最高”这一段占的比例，剩下的时间才往下摆、再收回。 */
-	private static final float RAISE_FRACTION = 0.25F;   // 举起段占比（用户定 25%）
+	private static final float RAISE_FRACTION = 0.25F;   // 举起段占比（25%）：抬手只占前四分之一，余下留给下摆
 	/** 最低处：一次撑杖摆到的地方。 */
 	private static final float ARM_BOTTOM = ROW_CENTER + ROW_AMPLITUDE;
 	/** 下摆占整段动画的比例，剩下的时间收回最高处。 */

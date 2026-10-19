@@ -21,7 +21,7 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class SkiBoost {
 	/** 每次右键在“当前速度”之上抬高的量（格/tick）。 */
-	private static final double ADD = 0.06D;   // 用户：滑雪杖的加速改慢一点（原 0.1）
+	private static final double ADD = 0.06D;   // 单次抬升量：原 0.1 一撑就窜出去，0.06 更像一次撑地的推力
 	/** 起步速度下限：站着原地撑也能冲出去。 */
 	private static final double MIN_PEAK = 0.32D;   // 与 ADD 一起下调，杖的冲刺不再那么猛
 	/** 冲刺持续 tick 数（60 tick = 3 秒，后段缓慢减速）。 */

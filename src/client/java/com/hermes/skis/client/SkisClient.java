@@ -83,7 +83,7 @@ public class SkisClient implements ClientModInitializer {
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
 				player.yBodyRot = yaw;
 				if (!board) {
-					// 双板：连 yBodyRotO 一起对齐。每 tick 8° 的步长不小，让它插值反而拖泥带水（用户要干脆的转身）。
+					// 双板：连 yBodyRotO 一起对齐。每 tick 8° 的步长不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
 					player.yBodyRotO = yaw;
 				}
 				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，

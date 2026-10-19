@@ -29,7 +29,7 @@ import net.minecraft.world.phys.Vec3;
  * 所以走 {@code ClientLevel#addParticle} 传初速**永远无效**；必须拿回 {@link Particle} 再硬写一次速度。
  *
  * <p><b>只用 {@link #SNOW} 一种粒子</b>：{@code ITEM_SNOWBALL}＝雪球崩碎的小白屑（雪地就该是这种实心碎屑）。
- * 模组里**不用**任何雾 / 烟 / 云类粒子（`SNOWFLAKE`、`POOF`、`CLOUD` 这些看着像一团白雾，用户不要）。
+ * 模组里**不用**任何雾 / 烟 / 云类粒子（`SNOWFLAKE`、`POOF`、`CLOUD` 这些是一团白雾，和「板刃切起来的碎屑」不是一回事）。
  *
  * <p><b>离地门槛是距离，不是格数</b>（{@link #AIR_RANGE}）：脚底到雪面<b>上表面</b>的距离 ≤ 1.5 格就扬雪。
  * 距离由 {@link #snowSurface} 用「方块坐标 + 该方块形状的最高点」算（1 层雪 = 0.125、满方块 = 1.0），
@@ -159,7 +159,7 @@ public final class SnowSpray {
 	 * <b>横向落点区间（格）</b>：每颗粒子自己抽一个 {@link #LATERAL_MIN}–{@link #LATERAL_MAX} 的横向偏移，
 	 * 再乘左右符号 —— <b>不再是固定的那一个侧向偏移量</b>。
 	 *
-	 * <p>固定偏移会让每 tick 的粒子精确排在同一对平行线上（用户看到的「两条明显轨迹」）。
+	 * <p>固定偏移会让每 tick 的粒子精确排在同一对平行线上 —— 连着几 tick 叠起来就是板两侧各一条明显的轨迹。
 	 * 改成连续抽 0.10–0.80 之后，单侧横向落点是这个 0.70 格宽区间上的<b>均匀分布</b>
 	 * （均值 0.45 格、标准差 0.20 格），两侧合起来是一整片而不是两条线。
 	 */
@@ -225,7 +225,7 @@ public final class SnowSpray {
 	 * <b>「贴地」容差（格）</b>：脚底到雪面上表面的距离 ≤ 这个值才算站在雪面上。
 	 *
 	 * <p>急刹爆发要求<b>上一 tick 与本 tick 都贴地</b>。落地那一 tick 水平速度会突降（动量被重置 / 摩擦吃满），
-	 * 看着像急刹，其实是「从一两格高跳下来」—— 用户明确不要这种爆发。取 0.15 格：站/滑时 gap ≈ 0，
+	 * 看着像急刹，其实是「从一两格高跳下来」，那一下不该炸雪。取 0.15 格：站/滑时 gap ≈ 0，
 	 * 而落地前一两 tick 的 gap 是 0.3–1.5 格（{@link #AIR_RANGE} 内），所以「上一 tick 是否贴地」这一条就能挡住整段落地。
 	 */
 	private static final double GROUND_TOUCH_TOLERANCE = 0.15D;

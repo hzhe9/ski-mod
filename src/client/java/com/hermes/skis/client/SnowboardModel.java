@@ -45,7 +45,7 @@ public class SnowboardModel extends Model<HumanoidRenderState> {
 		PartDefinition board = root.addOrReplaceChild("snowboard",
 				CubeListBuilder.create(), PartPose.rotation(0.0F, SkiStance.BOARD_YAW_RAD, 0.0F));
 
-		// 板身（板上坐标：宽沿 x、长沿 z）—— 宽 5.76 单位 = 36 cm（用户 2026-10-12 定），前后各 11
+		// 板身（板上坐标：宽沿 x、长沿 z）—— 宽 5.76 单位 = 36 cm（一条单板的真实板宽量级），前后各 11
 		board.addOrReplaceChild("deck",
 				CubeListBuilder.create().texOffs(20, 0).addBox(-2.88F, BOARD_TOP, -11.0F, 5.76F, 1.0F, 22.0F),
 				PartPose.ZERO);

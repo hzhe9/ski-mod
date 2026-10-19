@@ -30,8 +30,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>这里的 δ 用 {@code 身体朝向 − 视角}：双板的视角可以转（限在身体 ±90° 内，见
  * {@code client/SkiViewSmoothing}），所以 δ 不恒为 0 —— 视角怎么转，W / S 都还是沿身体前后。
  *
- * <p><b>空格照旧（单板也能跳）</b>：原来这里把单板的 {@code makeJump} 取消了，2026-10-15 按用户要求
- * 去掉 —— 现在「按空格跳出去」是穿板时唯一的主动离地方式（其余情况由 {@code SkiGlide} 贴着坡面走）。
+ * <p><b>空格照旧（单板也能跳）</b>：单板没有前后滑行、全靠原版移动横着走，拦掉跳跃它就再也离不了地；
+ * 所以「按空格跳出去」是穿板时唯一的主动离地方式（其余情况由 {@code SkiGlide} 贴着坡面走）。
  */
 @Mixin(ClientInput.class)
 public abstract class ClientInputMixin {

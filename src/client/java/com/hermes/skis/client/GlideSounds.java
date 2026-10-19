@@ -19,7 +19,7 @@ import net.minecraft.world.entity.player.Player;
  * 太慢不响（{@link #MIN_SPEED}）；不带板不响。判据本身在 {@link GlideAudioGate#isGliding}，
  * 与另外两条静音 mixin 共用（见 {@link GlideAudioGate}）。
  *
- * <p><b>没有风声</b>：原先那条循环的 {@code ELYTRA_FLYING} 风按用户 2026-10-13 的要求去掉，本类只剩切雪声。
+ * <p><b>没有风声</b>：风那层是一段循环音，滑行时一直占着一个声道、还会盖住切雪声的细节 —— 只保留切雪声这一条。
  */
 public final class GlideSounds {
 	/** 切雪声用的音效：原版雪地脚步。 */
@@ -28,7 +28,7 @@ public final class GlideSounds {
 	private static final int SNOW_INTERVAL_BASE = 8;
 	/** 速度每快 1 格/tick，间隔少多少 tick（夹到下限）。 */
 	private static final double SNOW_INTERVAL_PER_SPEED = 5.0D;
-	/** 最快时的间隔（tick）：别再密了，太密听上去像电流声（用户 2026-10-13 反馈「太密集」）。 */
+	/** 最快时的间隔（tick）：再密就听成一串电流声 —— 4 tick 一声还留得住单次可辨的切雪颗粒感。 */
 	private static final int SNOW_INTERVAL_MIN = 4;
 	/** 雪声音量 = 基础 + 速度 × 系数（夹到上限）。 */
 	private static final float SNOW_VOLUME_BASE = 0.12F;

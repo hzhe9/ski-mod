@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
  * 允许共用的只有“平台级”的东西（{@link SkisMod} 的物品判定、{@link SkiGlide} 的 tick 循环骨架）。
  * 以后调双板的手感只改这里，不会碰到单板。
  *
- * <p><b>朝向（2026-10-17 用户定）</b>：A / D 只转<b>身体朝向</b>
+ * <p><b>朝向</b>：A / D 只转<b>身体朝向</b>
  * （{@link #BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
  * 和单板一样是「锁住 + 按键转」，区别是双板的 W / S 仍然沿身体前后滑（单板的 W / S 只改姿态）。
  *
@@ -48,7 +48,7 @@ public final class SkisControl {
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
 	 *
-	 * <p>0.1 → 0.12（2026-10-13）→ 0.08（2026-10-17 上午）→ <b>0.1</b>（2026-10-17 用户回调）。
+	 * <p>0.1 → 0.12 → 0.08 → <b>0.1</b>：取 <b>0.1</b> 是因为它下坡给得出推背感，又不至于一两格就顶到速度上限。
 	 * 每格 ≈ 7.2 km/h；每 0.5 格结算一次 ＝ 单次 0.05。
 	 * 实际增量 = {@code 基数 × 累计下落格数^指数}（见 {@link SkiGlide} 的 {@code FALL_GAIN_EXPONENT}，
 	 * 现在指数是 1.0 ＝ 线性；指数 < 1 时才是「越掉越快不起来」）。
@@ -61,16 +61,16 @@ public final class SkisControl {
 	/**
 	 * <b>穿双板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
 	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
-	 * 1.0 = 原版；1.3 = 0.104 格/tick²；<b>1.5 = 0.12 格/tick²（用户 2026-10-17 定）</b>。
+	 * 1.0 = 原版；1.3 = 0.104 格/tick²；<b>1.5 = 0.12 格/tick²</b>。
 	 * 值越大下落越干脆，但跳高与滞空跟着被压（1.5 时跳高 ≈0.93 格）。
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.5D;
 
-	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（用户 2026-10-17 定；撑杖冲刺的峰值也封顶在这里）。 */
+	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（撑杖冲刺的峰值也封顶在这里）。 */
 	private static final double MAX_SPEED = 0.85D;
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
-	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（两板同值）
+	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%）：两板同值，滑行手感的基线
 
 	/**
 	 * <b>双板刹车</b>：按住 S（且还在往前滑）时，动量与速度每 tick 保留的比例。

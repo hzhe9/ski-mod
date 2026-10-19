@@ -72,7 +72,7 @@ public final class SnowboardControl {
 	 * 2.0 度/tick ＝ 180 度/秒 —— 一直按着就会在雪地上画圈。
 	 */
 	private static final float TURN_RATE_DEGREES = 2.0F;
-	// 注意：W / S <b>只转向、不加力</b>（用户明确：“w 和 s 只是对当前的速度进行一个转向，不是添加速度向量”）。
+	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
 	 * 单板速度上限（格/tick）。
@@ -85,20 +85,20 @@ public final class SnowboardControl {
 
 	/**
 	 * 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大）。
-	 * 0.11 → 0.13 → 0.15（用户 2026-10-13：先「加大 0.02」，再「单板与双板都增加 0.02」）。
+	 * 0.11 → 0.13 → 0.15（两次各加 0.02）：只取左右分量、体感本来就弱，所以基数一直比双板大。
 	 */
 	private static final double FALL_GAIN_PER_BLOCK = 0.15D;
 	/** 单板：单 tick 下落加速上限。 */
-	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一（用户定 0.3）
+	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;   // 与双板统一：单次最多加 0.3，防悬崖一瞬间给爆
 	/**
 	 * <b>穿单板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
 	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
-	 * 1.0 = 原版；1.3 = 0.104 格/tick²（用户 2026-10-15 定：比平时重力更快，又不至于跳得太矮/落地太砸）。
+	 * 1.0 = 原版；1.3 = 0.104 格/tick²（比平时重力更快，又不至于跳得太矮 / 落地太砸）。
 	 * 1.5 / 2.0 都试过——值越大下落越干脆，但跳高与滞空跟着被压（1.3 时跳高 ≈1.05 格）。
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.3D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
-	private static final double MOMENTUM_DECAY = 0.998D;   // 用户 2026-10-13 定 0.998（与双板同值）
+	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%），与双板同值
 	/**
 	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— 比平时更滑（0.999 vs 0.998）。
 	 *
@@ -345,7 +345,7 @@ public final class SnowboardControl {
 		} else {
 			// 只用前 / 后倾：把滑行方向朝 **身体前方**（W）/ **身体后方**（S）摆。
 			// 这样“往左滑”和“往右滑”按同一个键效果才一致 —— 之前用固定左 / 右转的符号，
-			// 结果是往左滑按 W 朝前、往右滑按 W 朝后（用户报的正是这个）。
+			// 结果是往左滑按 W 朝前、往右滑按 W 朝后 —— 同一个键在两侧滑行时给出相反效果。
 			if (speed < CARVE_MIN_SPEED) {
 				return 0.0F;
 			}
@@ -361,7 +361,7 @@ public final class SnowboardControl {
 			double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
 			double diff = Mth.wrapDegrees((float) (goal - current));
 			// 平滑趋近：步长与剩余角度成正比（快到位时自动变慢），而不是“固定 2°/tick、到了就死停”——
-			// 后者在目标附近会变成一顿一顿的（用户报“单板前后转向一卡一卡”）。
+			// 后者在目标附近会变成一顿一顿的：固定步长 + 到目标死停，残差小时每 tick 都在越过与停下之间跳。
 			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES) / TURN_RATE_DEGREES;
 		}
 		float delta = (float) (turn * TURN_RATE_DEGREES);
@@ -373,7 +373,7 @@ public final class SnowboardControl {
 	/**
 	 * 把速度的<b>方向</b>绕 Y 轴转 {@code degrees}（与身体朝向同一个角度、同一方向），大小不变。
 	 *
-	 * <p>注意别写成“把速度方向直接拨到侧向”：那样往左滑时一按 S 速度会瞬间跳到右侧（用户实测反馈）。
+	 * <p>注意别写成“把速度方向直接拨到侧向”：那样往左滑时一按 S 速度会瞬间跳到右侧 —— 方向与惯性脱节。
 	 * 要的是**跟着朝向一起转**该转的角度 —— 朝向转多少它转多少，于是带着惯性的滑行路线慢慢弯过去。
 	 */
 	private static void rotateVelocity(Entity entity, float degrees) {

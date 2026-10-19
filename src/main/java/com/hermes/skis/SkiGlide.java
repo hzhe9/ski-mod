@@ -43,15 +43,15 @@ public final class SkiGlide {
 	private static final double GLIDE_PUSH = 0.055D;
 
 	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
-	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性（用户要求先去掉衰减，试手感）
-	/** 滑上一格台阶时扣掉多少水平速度（格/tick，用户定 0.04）。 */
+	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性：加速只跟累计格数成正比，掉多少格换多少速度，可预期
+	/** 滑上一格台阶时扣掉多少水平速度（格/tick，0.04 ≈ 满速的 5% —— 顿一下但不至于卡住）。 */
 	private static final double STEP_UP_PENALTY = 0.04D;
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
 	private static final double STEP_UP_MIN_HEIGHT = 0.5D;
 	/**
 	 * 每累计下落这么多格算一次，按次均匀给速度（**双板**；单板用 {@link SnowboardControl#descentStepBlocks()} 的 0.5）。
 	 *
-	 * <p>2026-10-17 起双板也改成每 0.5 格结算一次（原 1.0）：单次 = 0.12 × 0.5 = 0.06，
+	 * <p>双板也按每 0.5 格结算：单次 = 0.12 × 0.5 = 0.06，
 	 * 每格总量仍是 0.12（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
 	 */
 	private static final double STEP_BLOCKS = 0.5D;
@@ -148,7 +148,7 @@ public final class SkiGlide {
 
 		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
 		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT
-		// 指数 < 1 时才边际递减；现在用户要求先去掉衰减试手感，所以 FALL_GAIN_EXPONENT = 1（线性）。
+		// 指数 < 1 时才边际递减；当前取 1（线性）—— 下坡加速不随下落距离打折，手感可预期。
 		// ⚠ 乘 step 是为了让“步长细”不等于“给得多”：总量仍是「每下降 1 格 = 基数」。
 		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
 		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
@@ -181,8 +181,8 @@ public final class SkiGlide {
 	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
 	 *
 	 * <p>改的是真重力，不是每 tick 补一份向下的速度 —— 所以上升段一起变沉（跳得更矮、滞空更短），
-	 * 全程生效。用户 2026-10-15 报：「骑着板下落太慢、像飘在空里」，要求比平时重力更快。
-	 * （同一天试过「贴地/腾空两态 + 前馈地形跟随」的控制器，用户实测判定「贴太紧、会瞬间吸到下一格」，
+	 * 全程生效。原版重力在穿板时太轻（下落像飘在空里），所以取「比平时更快」这一档。
+	 * （试过「贴地 / 腾空两态 + 前馈地形跟随」的控制器，实测贴太紧、会瞬间吸到下一格，
 	 * 已回退到这条重力方案 —— 别再自作主张加贴地控制。）
 	 * 与 {@link #setStepHeight} 同一套做法：只在穿板时生效，脱板由 {@link #resetGravity} 还原。
 	 */
@@ -263,7 +263,7 @@ public final class SkiGlide {
 				//   所以这里**不覆盖玩家速度、也不托动量**，只把动量对齐到当前实际速度（否则动量会托着旧速度，反着按等于白按）；
 				//   同向（顺着滑行方向按）＝不与玩家作对，让动量**托住**已有速度 ——
 				//   否则下落加速攒出来的速度每 tick 被地面摩擦（约 ×0.55）吃掉，滑多长都只剩原版横向移动的基础速度
-				//   （用户报：“一直按住 A / D 下坡，速度叠加触发不了，一直是基础速度滑动”）。
+				//   （症状就是：一直按住 A / D 下坡，速度叠加触发不了，一直是基础速度滑动）。
 				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 				double along = horizontal.lengthSqr() < 1.0E-6D
 						? 0.0D
@@ -397,7 +397,7 @@ public final class SkiGlide {
 		if (SnowboardControl.isSnowboard(player)) {
 			// 单板：**不在这里改方向** —— 没有速度就返回 null（不加力），有速度就走上面的“沿当前方向”。
 			// 这样 A / D 和 W / S 的“方向变化”是同一套机制：都靠 carve 的每 tick 旋转，
-			// 而不是按 A / D 时把速度一下子拨到侧向、按 W / S 时却慢慢转（用户反馈“两边不一样”）。
+			// 而不是按 A / D 时把速度一下子拨到侧向、按 W / S 时却慢慢转 —— 两种键位的转向手感必须一致。
 			return null;
 		}
 		Vec3 look = player.getLookAngle();
