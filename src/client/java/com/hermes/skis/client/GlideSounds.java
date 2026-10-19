@@ -1,7 +1,5 @@
 package com.hermes.skis.client;
 
-import com.hermes.skis.SkiGlide;
-import com.hermes.skis.SkisMod;
 import com.hermes.skis.util.IdMap;
 
 import net.minecraft.client.Minecraft;
@@ -10,9 +8,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.Level;
 
 /**
  * <b>滑行音效</b>（纯客户端）：雪面上滑行时的<b>切雪声</b> —— 每到时间就播一声 {@code SNOW_STEP}
@@ -20,7 +16,8 @@ import net.minecraft.world.level.Level;
  * （{@link #SNOW_INTERVAL_BASE} → {@link #SNOW_INTERVAL_MIN} tick）。
  *
  * <p>触发条件与雪粒子同一条：穿着板、在雪 / 冰面上、脚底离地 {@link #GROUND_RANGE} 格以内、有速度。
- * 太慢不响（{@link #MIN_SPEED}）；不带板不响。
+ * 太慢不响（{@link #MIN_SPEED}）；不带板不响。判据本身在 {@link GlideAudioGate#isGliding}，
+ * 与另外两条静音 mixin 共用（见 {@link GlideAudioGate}）。
  *
  * <p><b>没有风声</b>：原先那条循环的 {@code ELYTRA_FLYING} 风按用户 2026-10-13 的要求去掉，本类只剩切雪声。
  */
@@ -63,7 +60,7 @@ public final class GlideSounds {
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();
-			if (!isGliding(player)) {
+			if (!GlideAudioGate.isGliding(player, MIN_SPEED, GROUND_RANGE)) {
 				SNOW_TIMER.remove(id);
 				continue;
 			}
@@ -88,19 +85,6 @@ public final class GlideSounds {
 	private static void silence(Minecraft client) {
 		SNOW_TIMER.clear();
 		client.getSoundManager().stop(SNOW_SOUND.location(), SoundSource.PLAYERS);
-	}
-
-	/** 在滑吗：穿着板、在雪 / 冰面上、脚底离地一格以内、有速度。 */
-	static boolean isGliding(Player player) {
-		if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-			return false;
-		}
-		if (player.getDeltaMovement().horizontalDistance() < MIN_SPEED) {
-			return false;
-		}
-		Level level = player.level();
-		return SkiGlide.isOnSnowOrIce(level, player.blockPosition())
-				&& SkiGlide.groundDistance(player, GROUND_RANGE) <= GROUND_RANGE;
 	}
 
 	/** 速度越快间隔越短。 */

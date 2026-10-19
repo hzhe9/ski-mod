@@ -1,12 +1,10 @@
 package com.hermes.skis.mixin.client;
 
-import com.hermes.skis.SkisMod;
+import com.hermes.skis.client.GlideAudioGate;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -32,8 +30,7 @@ public abstract class EntityStepSoundMixin {
 			)
 	)
 	private void skis$silenceStepSound(Entity self, BlockPos pos, BlockState state, Operation<Void> original) {
-		if (self instanceof Player player
-				&& SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+		if (GlideAudioGate.isBoarded(self)) {
 			return;
 		}
 		original.call(self, pos, state);

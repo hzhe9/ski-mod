@@ -1,11 +1,8 @@
 package com.hermes.skis.mixin.client;
 
-import com.hermes.skis.SkiGlide;
-import com.hermes.skis.SkisMod;
+import com.hermes.skis.client.GlideAudioGate;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -32,10 +29,8 @@ public abstract class LivingEntityFallSoundMixin {
 	private void skis$cancelSnowLanding(double fallDistance, float multiplier, DamageSource source,
 			CallbackInfoReturnable<Boolean> cir) {
 		LivingEntity self = (LivingEntity) (Object) this;
-		if (self instanceof Player player
-				&& SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))
-				&& SkiGlide.isOnSnowOrIce(player.level(), player.blockPosition())) {
-			player.resetFallDistance();
+		if (GlideAudioGate.isBoardedOnSnow(self)) {
+			self.resetFallDistance();
 			cir.setReturnValue(false);
 		}
 	}
@@ -44,8 +39,7 @@ public abstract class LivingEntityFallSoundMixin {
 	@Inject(method = "playBlockFallSound", at = @At("HEAD"), cancellable = true)
 	private void skis$silenceLanding(CallbackInfo ci) {
 		LivingEntity self = (LivingEntity) (Object) this;
-		if (self instanceof Player player
-				&& SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+		if (GlideAudioGate.isBoarded(self)) {
 			ci.cancel();
 		}
 	}

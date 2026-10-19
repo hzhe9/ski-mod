@@ -1,8 +1,7 @@
 package com.hermes.skis.mixin.client;
 
-import com.hermes.skis.SkisMod;
+import com.hermes.skis.client.GlideAudioGate;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,7 +21,7 @@ public abstract class PlayerStepSoundMixin {
 	@Inject(method = "playStepSound", at = @At("HEAD"), cancellable = true)
 	private void skis$silenceStep(BlockPos pos, BlockState state, CallbackInfo ci) {
 		Player self = (Player) (Object) this;
-		if (SkisMod.isSkiFeet(self.getItemBySlot(EquipmentSlot.FEET))) {
+		if (GlideAudioGate.isBoarded(self)) {
 			ci.cancel();
 		}
 	}
