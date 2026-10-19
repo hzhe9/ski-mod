@@ -1,5 +1,5 @@
-# 默认按磁盘原样存取，不做换行转换（Windows 上避免反复出现“假改动”）
-*          -text
+# 换行交给 Git 标准策略：文本文件统一以 LF 入库，检出按平台自动处理
+*          text=auto
 
 # Linux 启动脚本必须 LF
 /gradlew   text eol=lf
