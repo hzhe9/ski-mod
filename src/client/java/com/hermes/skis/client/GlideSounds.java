@@ -1,10 +1,8 @@
 package com.hermes.skis.client;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 import com.hermes.skis.SkiGlide;
 import com.hermes.skis.SkisMod;
+import com.hermes.skis.util.IdMap;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -47,10 +45,8 @@ public final class GlideSounds {
 	/** 脚底离地不超过这个高度（格）才算“在滑”——与雪粒子同一条判定。 */
 	private static final double GROUND_RANGE = 1.0D;
 
-	private static final int MAX_ENTRIES = 64;
-
 	/** 实体 id → 距离下一声切雪还有几 tick。 */
-	private static final Map<Integer, Integer> SNOW_TIMER = new ConcurrentHashMap<>();
+	private static final IdMap<Integer> SNOW_TIMER = new IdMap<>();
 
 	private GlideSounds() {
 	}
@@ -64,9 +60,6 @@ public final class GlideSounds {
 		if (client.isPaused()) {
 			silence(client);   // 暂停时立刻收声（原因见 silence 的注释）
 			return;
-		}
-		if (SNOW_TIMER.size() > MAX_ENTRIES) {
-			SNOW_TIMER.clear();
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();

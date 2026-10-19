@@ -1,7 +1,6 @@
 package com.hermes.skis;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.hermes.skis.util.IdMap;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;
@@ -63,14 +62,12 @@ public final class SkiGlide {
 	/** 动量低于这个值就丢掉。 */
 	private static final double MOMENTUM_MIN = 0.02D;
 
-	private static final int MAX_ENTRIES = 64;
-
 	/** 玩家实体 id → 上一 tick 的 Y。 */
-	private static final Map<Integer, Double> LAST_Y = new ConcurrentHashMap<>();
+	private static final IdMap<Double> LAST_Y = new IdMap<>();
 	/** 玩家实体 id → 已累计但还没结算的下落高度。 */
-	private static final Map<Integer, Double> DESCEND_ACCUM = new ConcurrentHashMap<>();
+	private static final IdMap<Double> DESCEND_ACCUM = new IdMap<>();
 	/** 玩家实体 id → 当前滑行动量（水平速度）。 */
-	private static final Map<Integer, Double> MOMENTUM = new ConcurrentHashMap<>();
+	private static final IdMap<Double> MOMENTUM = new IdMap<>();
 
 	private SkiGlide() {
 	}
@@ -111,9 +108,6 @@ public final class SkiGlide {
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
 				}
-			}
-			if (LAST_Y.size() > MAX_ENTRIES) {
-				forgetAll();
 			}
 		});
 	}
@@ -463,13 +457,5 @@ public final class SkiGlide {
 		LAST_Y.remove(id);
 		DESCEND_ACCUM.remove(id);
 		MOMENTUM.remove(id);
-	}
-
-	private static void forgetAll() {
-		LAST_Y.clear();
-		DESCEND_ACCUM.clear();
-		MOMENTUM.clear();
-		SnowboardControl.forgetAll();
-		SkisControl.forgetBodyAll();
 	}
 }

@@ -1,7 +1,6 @@
 package com.hermes.skis;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.hermes.skis.util.IdMap;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
@@ -27,10 +26,8 @@ import net.minecraft.world.phys.Vec3;
  * 不动（身体在下面转）；顶到之后头被身体拖着走。
  */
 public final class SkisControl {
-	private static final int MAX_ENTRIES = 64;
-
 	/** 实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
-	private static final Map<Integer, Float> BODY_YAW = new ConcurrentHashMap<>();
+	private static final IdMap<Float> BODY_YAW = new IdMap<>();
 	/** 双板：按住 A / D 时每 tick 转身体多少度（8°/tick ≈ 160°/s，180° 约 1.1 s）。 */
 	private static final float TURN_RATE_DEGREES = 8.0F;
 	/**
@@ -104,9 +101,6 @@ public final class SkisControl {
 	/** 穿双板时锁住身体朝向：<b>第一次调用</b>记下当时的朝向，之后只由 {@link #turnBody} 改。 */
 	public static void ensureLocked(int entityId, float yaw) {
 		BODY_YAW.putIfAbsent(entityId, yaw);
-		if (BODY_YAW.size() > MAX_ENTRIES) {
-			BODY_YAW.clear();
-		}
 	}
 
 	/** 拿不到锁时用传入的视角兜底。 */

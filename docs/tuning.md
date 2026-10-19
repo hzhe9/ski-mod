@@ -68,7 +68,7 @@
 
 > 单板的动量只在「下落加速」「按着 A / D 横移」和「转向（carve）」这三种情形下跟随，松开就靠原版摩擦停住；转向期间用的是更小的摩擦 `CARVE_MOMENTUM_DECAY` 0.999（直行仍是 `MOMENTUM_DECAY` 0.998）；双板同为 `SkisControl.MOMENTUM_DECAY` 0.998。
 
-双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `MAX_ENTRIES` 整表清空；双板的 A / D 每 tick 转 8°（`SkisControl.TURN_RATE_DEGREES`），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
+双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `util/IdMap` 的默认上限 64 就整表清空（所有这类 id 表都是 `IdMap`，超限自清）；双板的 A / D 每 tick 转 8°（`SkisControl.TURN_RATE_DEGREES`），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
 
 **越肩视角模式（Shoulder Surfing 打开时）**：**相机完全自由** —— `client/SkiViewSmoothing` 不再每帧写视角、`SkiHeadLimitMixin` 不再按 `VIEW_LIMIT_DEGREES` 限位（判定走反射 `IShoulderSurfing#isShoulderSurfing()`，见 `client/ShoulderSurfingCompat`；对方没装就与原来完全一致）；**头模型朝横移方向** —— 双板 = 身体朝向（正前方，偏移 0），单板 = 身体朝向 + **带符号的头偏角**：**朝哪一侧滑就朝哪一侧**（水平速度投到身体左轴定方向，侧向分量 < `HEAD_SIDE_MIN_SPEED` 0.05 时看 A / D，都没有就锁存上一次 —— 停下不会自己回正），幅度 **默认 `SNOWBOARD_HEAD_NEUTRAL_DEGREES` 75° / 按 W 前倾 `SNOWBOARD_HEAD_FORWARD_DEGREES` 90° / 按 S 后倾 `SNOWBOARD_HEAD_BACKWARD_DEGREES` 60°**；**左右翻转与幅度变化都平滑扫过**（`SnowboardControl.tickHead`：比例 0.45 + 单步上限 9°/tick —— 150° 翻转 25 tick ≈ 1.25 s、中途经过 0° 正前方；幅度变化约 10 tick ≈ 0.5 s；松手也是滑回当前方向的 75°）；**按 W 也不再让身体追视角**（客户端 `turnTowardView` 跳过）。退出越肩后限位与 W 追视角立刻按原规则恢复（状态在退出后第一帧按当时的视角重新起算）。
 

@@ -1,7 +1,6 @@
 package com.hermes.skis;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.hermes.skis.util.IdMap;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -27,18 +26,16 @@ import net.minecraft.world.phys.Vec3;
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
  */
 public final class SnowboardControl {
-	private static final int MAX_ENTRIES = 64;
-
 	/** 实体 id → 穿上单板时锁定的身体朝向（度）。 */
-	private static final Map<Integer, Float> BODY_YAW = new ConcurrentHashMap<>();
+	private static final IdMap<Float> BODY_YAW = new IdMap<>();
 	/** 实体 id → 俯仰姿态（当前值，平滑后；正 = 前倾 / 负 = 后倾），供模型与相机读取。 */
-	private static final Map<Integer, Float> TILT_VALUE = new ConcurrentHashMap<>();
+	private static final IdMap<Float> TILT_VALUE = new IdMap<>();
 	/** 实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
-	private static final Map<Integer, Integer> TILT_TARGET = new ConcurrentHashMap<>();
+	private static final IdMap<Integer> TILT_TARGET = new IdMap<>();
 	/** 实体 id → 头上一次被判定朝哪一侧（+1 身体右侧 / -1 左侧）；速度和按键都给不出方向时锁存它。 */
-	private static final Map<Integer, Integer> HEAD_SIDE = new ConcurrentHashMap<>();
+	private static final IdMap<Integer> HEAD_SIDE = new IdMap<>();
 	/** 实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
-	private static final Map<Integer, Float> HEAD_OFFSET = new ConcurrentHashMap<>();
+	private static final IdMap<Float> HEAD_OFFSET = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -141,9 +138,6 @@ public final class SnowboardControl {
 	/** 锁住身体朝向：第一次调用时记下当时的 yaw，之后不再改变。 */
 	public static void ensureLocked(int entityId, float yaw) {
 		BODY_YAW.putIfAbsent(entityId, yaw);
-		if (BODY_YAW.size() > MAX_ENTRIES) {
-			BODY_YAW.clear();
-		}
 	}
 
 	public static void forget(int entityId) {

@@ -1,9 +1,7 @@
 package com.hermes.skis.client;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 import com.hermes.skis.SkisMod;
+import com.hermes.skis.util.IdMap;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -239,16 +237,14 @@ public final class SnowSpray {
 	 */
 	private static final double FALL_TOLERANCE = 0.10D;
 
-	private static final int MAX_ENTRIES = 64;
-
 	/** 实体 id → 上一 tick 的水平速度（用来发现「突然减速」）。 */
-	private static final Map<Integer, Double> LAST_SPEED = new ConcurrentHashMap<>();
+	private static final IdMap<Double> LAST_SPEED = new IdMap<>();
 	/** 实体 id → 上一 tick 的滑行方向角（弧度）。 */
-	private static final Map<Integer, Double> LAST_DIR = new ConcurrentHashMap<>();
+	private static final IdMap<Double> LAST_DIR = new IdMap<>();
 	/** 实体 id → 雪屑冷却剩余 tick。 */
-	private static final Map<Integer, Integer> BURST_COOLDOWN = new ConcurrentHashMap<>();
+	private static final IdMap<Integer> BURST_COOLDOWN = new IdMap<>();
 	/** 实体 id → 上一 tick 是否贴地（急刹爆发的第一道闸门：落地那一 tick 不算刹车）。 */
-	private static final Map<Integer, Boolean> LAST_GROUNDED = new ConcurrentHashMap<>();
+	private static final IdMap<Boolean> LAST_GROUNDED = new IdMap<>();
 	/** {@link #DEBUG_LOG} 用：客户端 tick 计数（每 20 tick 打一行）。 */
 	private static int DEBUG_TICKS = 0;
 
@@ -262,12 +258,6 @@ public final class SnowSpray {
 		ClientLevel level = client.level;
 		if (level == null) {
 			return;
-		}
-		if (LAST_SPEED.size() > MAX_ENTRIES) {
-			LAST_SPEED.clear();
-			LAST_DIR.clear();
-			BURST_COOLDOWN.clear();
-			LAST_GROUNDED.clear();
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();
