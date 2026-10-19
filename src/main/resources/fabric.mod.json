@@ -16,10 +16,10 @@
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"com.hermes.skis.SkisMod"
+			"io.github.wf.skis.SkisMod"
 		],
 		"client": [
-			"com.hermes.skis.client.SkisClient"
+			"io.github.wf.skis.client.SkisClient"
 		]
 	},
 	"mixins": [
