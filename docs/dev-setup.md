@@ -56,7 +56,11 @@ python -m venv .venv
 
 | 文件 | 职责 |
 |---|---|
-| `SkisMod.java` | 物品注册、独立创造标签页（`itemGroup.skis`）、装备资源；`isModernSki` / `isSkiFeet` 判定 |
+| `SkisMod.java` | **入口**：`onInitialize` 只挂载滑行物理 / 冲刺 / 落地免伤 / 创造页；对外保留 `MOD_ID` / `LOGGER` / `MODERN_SKI` / `SNOWBOARD` / `SKI_POLE` / `isModernSki` / `isSkiFeet`（转发到 `registry/ModItems`，mixin 与渲染侧十几处按这些名字取物品） |
+| `Constants.java` | `MOD_ID`（注册 id 命名空间 / 资源路径前缀 / 日志名） |
+| `registry/ModItems.java` | 物品定义与注册：双板 / 单板（脚部装备、护甲 +2、移速 +0.010、耐久 390）、滑雪杖、装备资源 `SKI_EQUIPMENT_ASSET`；款式表 `VARIANTS` 与 `variantStack`；`isModernSki` / `isSkiFeet` 判定。注册时机仍在类加载时（`SkisMod` 的转发字段一被读就触发） |
+| `registry/ModCreativeTabs.java` | 独立创造标签页 `itemGroup.skis`：6 款 × 2 + 1 根杖 |
+| `util/IdMap.java` | `实体 id → 值`的缓存表：容量 64、写入超限整表清空；两块板的朝向 / 姿态、滑行动量、雪粒子与切雪声的上一 tick 状态都用它 |
 | `item/SkiPoleItem.java` | 滑雪杖右键行为（客户端摆臂 + 服务端冲刺） |
 | `SkiBoost.java` | 冲刺：冲量 + 按 tick 衰减的速度曲线 |
 | `SkiGlide.java` | 每 tick 滑行物理：下落加速、**穿板时的重力加重（`Attributes.GRAVITY` ×倍数，全程生效）**、低摩擦动量、雪面推进、脚上装备的台阶高度；`isOnSnowOrIce` 是「雪面」的唯一定义（滑行 / 雪粒子 / 落地免伤共用） |
@@ -77,6 +81,7 @@ python -m venv .venv
 | `mixin/client/CameraViewSmoothingMixin.java` | 每帧在 `Camera#alignWithEntity(F)V` 的 HEAD 调 `SkiViewSmoothing.frame`（相机读视角朝向前的最后一刻，`partialTick` 与相机随后用的是同一个）—— 只对「相机跟的就是本地玩家」生效 |
 | `mixin/client/SkiHeadLimitMixin.java` | 单板 / 双板都在 `Entity#turn` 上记账：HEAD 记下转之前的 yaw，TAIL 把这一帧真正转过的角度加进 `SkiViewSmoothing.headOffset` 并夹到 ±`VIEW_LIMIT_DEGREES`，只撤掉越界那点（**不再**用身体朝向当基准把 yRot 另夹一遍 —— 那会和每帧那次差一帧互相拉回） |
 | `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |
+| `client/GlideAudioGate.java` | **三条音效共用的判据**：`isBoarded`（脚上是我们的板）、`isBoardedOnSnow`（再加雪 / 冰面，落地闷响与免摔伤同口径）、`isGliding(minSpeed, groundRange)`（再加有速度 + 脚底离地门槛，滑行切雪声用）；脚步 / 落地 mixin 与 `GlideSounds` 只留自己的注入点与播放逻辑 |
 | `mixin/client/LivingEntityFallSoundMixin.java` | 穿板摔在雪 / 冰面上：`LivingEntity#causeFallDamage` **HEAD 直接取消**（那声落地闷响 + 伤害都在这里；只在 `hurtServer` 免伤拦不住声音）+ `LivingEntity#playBlockFallSound` 兜一层 |
 | `mixin/client/GameRendererBobMixin.java` | 穿板时**取消走路镜头晃动**（`GameRenderer#bobView`） |
 | `client/SnowSpray.java` | 滑行雪粒子（贴地 + 扬起 + 急减速炸一团），只用 `ITEM_SNOWBALL`；触发看「脚底离地 1.5 格内」而不是 `onGround` |
@@ -101,7 +106,7 @@ python -m venv .venv
 |---|---|---|
 | **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制常量（±135°，实现与双板共用 `client/SkiViewSmoothing`）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.15 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 0.999 / `DESCENT_STEP_BLOCKS` 0.5） |
 | **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `BRAKE_DECAY` 0.92 / `BRAKE_MIN_ALIGN` 0.3 ＋ **身体朝向锁表 `BODY_YAW` 与转向 `TURN_RATE_DEGREES` 8°/tick**（`ensureLocked` / `turnBody` / `forgetBody`）＋ **视角限位 `VIEW_LIMIT_DEGREES` 90°**（左右各 90、合计 180；与单板各自一份常量）＋ **W 朝视角转向 `turnTowardView`（`VIEW_TURN_RATE_DEGREES` 4°/tick）**；按住 S 且还在往前滑＝刹车（`BRAKE_DECAY`，不拨方向） |
-| 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`SkisMod`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
+| 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`registry/ModItems`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
 - **唯一的交叉点**是分类谓词 `SnowboardControl.isSnowboard(entity)`（读脚上穿的是哪块板）—— 纯判断、无状态，不会把一边的手感带进另一边。改双板只动 `SkisControl`，改单板只动 `SnowboardControl`。
 
