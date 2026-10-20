@@ -46,7 +46,7 @@
 | 常量 | 当前值 | 作用 |
 |---|---|---|
 | `STEER_MAX_HEIGHT` | 1.0 格 | **只服务单板**（双板只在地面上转向）；脚底离地不超过这个高度才允许转向
-| `STEER_RATE` | 0.2 | 每 tick 朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）；单板不参与方向；双板只在落地时摆（空中速度方向一点都不转） |
+| `STEER_RATE` | 0.2 | 每 tick 朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）；单板不参与方向；双板只在落地时摆（空中速度方向一点都不转）。**落地后另有快的一条**：`SkisControl.ALIGN_DEGREES_PER_TICK` 9°/tick 直接把速度方向朝身体前方掰（见「零散常量」），这条 lerp 只是托底时的慢摆 |
 
 ### 单板：人板一体 `SnowboardControl.java`
 
@@ -219,6 +219,7 @@
 | `BODY_YAW` | `SkisControl` | 实体 id → 身体朝向（度） | **双板的身体朝向锁表**：穿上时 `ensureLocked` 记下当时的 yaw，之后只由 `turnBody`（A / D）改；脱板 `forgetBody` 清掉。视角（`yRot`）与它彻底分开 |
 | `BRAKE_DECAY` | `SkisControl` | 0.92 | 双板按住 S 刹车时每 tick 保留的比例（1 秒剩 ≈19%；0.90 更利、0.96 更轻） |
 | `BRAKE_MIN_ALIGN` | `SkisControl` | 0.3 | 速度方向与**身体前方**点积超过它才算「还在往前滑」（此时按 S 是刹车）；低于它按 S 就是往后走 |
+| `ALIGN_DEGREES_PER_TICK` | `SkisControl` | 9.0 度/tick | **双板落地后速度方向快速朝身体前方对齐**（修「A/D 转完身落地方向不跟」）：`shouldAlignOnGround`（① `onGround()` ② 没按 S —— input 为 null 放行 ③ 水平速度平方 > 1.0E-4）通过才 `alignVelocity`，把速度**方向**朝身体前方转 min(残差, 9.0) 度（`Mth.wrapDegrees` 算残差，**只改方向、大小不变**，写回 `setDeltaMovement` + `hurtMarked`）。9.0°/tick ≈ 180°/s，落地后一两 tick 就掰到朝向上；对齐后重读 `motion / speed` 再往下走。只在双板分支、按 S 那一 tick 不对齐 |
 | `TILT_EPSILON` | `SnowboardControl` | 0.01 | 俯仰角与目标差小于它就视为到位，停止补间 |
 | `MAX_ENTRIES` | `SkiGlide` / `SnowboardControl` / `SkiBoost` / `SnowSpray` / `GlideSounds` | 64 | 静态表（动量 / 锁定朝向 / 冲刺 / 雪粒子的「上一 tick 速度」与雪雾冷却 / 切雪声计时）条数上限，超了**整表清空**，防地图残留状态泄漏 |
 | `COOLDOWN_TICKS` | `item/SkiPoleItem` | 10（0.5 s） | 两次撑杖之间的冷却；冷却中右键直接 `FAIL`（所以连撑最快 0.5 s 一次） |
@@ -229,7 +230,7 @@
 | | 双板 | 单板 |
 |---|---|---|
 | 朝向 | **锁身体、不锁视角**：身体朝向锁在穿上板那一刻（`SkisControl.BODY_YAW`），由 A / D 改、**按 W 时还会朝视角追 4°/tick**；**视角由鼠标转、并限在身体左右各 ±90°**（与单板同一套实现、各自一个值，用户 2026-10-17 定 — 之前拿视角当朝向是错的） | 锁定（穿上板那一刻），视角同样限在 ±135° |
-| 转向 | **A / D 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 8°/tick ≈ 160°/s，180° 约 1.1 s；yaw 减小＝左、增大＝右）；**按 W 时身体再朝视角方向补 `VIEW_TURN_RATE_DEGREES` 4°/tick**（`turnTowardView`，限幅不越过，残余 90° 约 1.15 s 追上；S 不触发）。两种转法都**不碰视角**（只有顶到 ±90° 限位时视角才被身体拖着走）；客户端与服务端每 tick 各跑一步（先 A/D 再 W），客户端写 `yBodyRot / yBodyRotO`。速度方向由服务端 `SkiControl` 按**身体前方**摆过去：**地上跟着转、空中不跟**（空中身体随便转，速度方向一点都不动） | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
+| 转向 | **A / D 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 8°/tick ≈ 160°/s，180° 约 1.1 s；yaw 减小＝左、增大＝右）；**按 W 时身体再朝视角方向补 `VIEW_TURN_RATE_DEGREES` 4°/tick**（`turnTowardView`，限幅不越过，残余 90° 约 1.15 s 追上；S 不触发）。两种转法都**不碰视角**（只有顶到 ±90° 限位时视角才被身体拖着走）；客户端与服务端每 tick 各跑一步（先 A/D 再 W），客户端写 `yBodyRot / yBodyRotO`。速度方向由服务端 `SkiControl` 按**身体前方**摆过去：**地上跟着转、空中不跟**（空中身体随便转，速度方向一点都不动）；**落地后速度方向按 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速朝身体前方对齐**（`SkisControl.shouldAlignOnGround` + `alignVelocity`，**按 S 时不对齐**）—— 转完身落地方向立刻跟上，不靠 `SkiControl.steer` 慢慢摆 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
 | 前进 | **W 前进**；**按住 S 且还在往前滑 = 刹车**（`BRAKE_DECAY` 0.92，只减速、不拨方向）；**静止 / 后退时才往后走**（速度与**身体前方**点积 ≤ `BRAKE_MIN_ALIGN` 0.3）。**W / S 一律沿身体前后**（`ClientInputMixin` 把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系），所以视角转到哪都不影响溜的方向 | W/S 只做前倾 / 后倾（**不加推力**） |
 | 左右 | **A 左 / D 右 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 8°/tick ≈ 160°/s），**视角不跟着动**（顶到 ±90° 限位才被拖）；横向输入被清掉（不横移），滑行方向在地上跟着身体转、空中不跟 | A / D 沿身体左右**平移** |
 | 站姿 | 腿往后倾 `SKI_LEG_TILT` -0.15 | 腿往后倾 `BOARD_LEG_TILT` -0.15（**与双板同值**，用户 2026-10-13 定） |

@@ -294,6 +294,16 @@ public final class SkiGlide {
 				MOMENTUM.put(id, momentum);
 				return;   // 刹车这一 tick 不走下面「朝视角方向重写速度」那套（否则就又拨方向了）
 			}
+			// ——— 落地对齐（只在双板分支）：A / D 转完身落地，速度方向要快速朝身体前方掰 ———
+			// 以前方向只在 speed < momentum 时经 SkiControl.steer（STEER_RATE 0.2 的 lerp）慢慢摆，
+			// 玩家自己的速度不掉就直接 return，方向永远不跟 →「转完身落地不跟手」。
+			// 现在贴地（且没按 S、还有速度）就先掰一步方向，判定与执行都在 SkisControl。
+			if (SkisControl.shouldAlignOnGround(player, keys)) {
+				SkisControl.alignVelocity(player);
+				// 对齐只改方向、不改水平速度大小，但下面用的是 motion / speed —— 重读，别拿陈旧值往下走
+				motion = player.getDeltaMovement();
+				speed = motion.horizontalDistance();
+			}
 			decay = SkisControl.momentumDecay();
 			// 没按 S（或已停下 / 在倒滑）时才走常规托底：动量原样托住速度。
 		}

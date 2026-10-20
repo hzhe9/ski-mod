@@ -4,6 +4,7 @@ import io.github.wf.skis.util.IdMap;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -20,6 +21,10 @@ import net.minecraft.world.phys.Vec3;
  * <p><b>按 W 时身体朝视角转</b>：{@link #turnTowardView} 每 tick 把身体朝视角方向拨
  * {@link #VIEW_TURN_RATE_DEGREES} 度（限幅、不越过目标）——<b>转的是身体，视角在世界坐标里仍然不动</b>，
  * 与 A / D 转身体是同一种事，位移只跟身体前方走。
+ *
+ * <p><b>落地对齐</b>：贴地且没按 S 时，把<b>速度方向</b>朝身体前方每 tick 掰
+ * {@link #ALIGN_DEGREES_PER_TICK} 度（{@link #shouldAlignOnGround} / {@link #alignVelocity}，
+ * 由 {@link SkiGlide} 的双板分支调用）—— 转完身落地，方向立刻跟上，不靠 {@code SkiControl.steer} 慢慢摆。
  *
  * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
  * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
@@ -87,6 +92,16 @@ public final class SkisControl {
 	 * 低于它（已经横着滑 / 在倒滑）按 S 才是真的「往后走」。
 	 */
 	private static final double BRAKE_MIN_ALIGN = 0.3D;
+
+	/**
+	 * <b>双板落地对齐的速度方向步长</b>（度/tick）：贴地后把水平速度的<b>方向</b>朝身体前方
+	 * 每 tick 最多掰这么多度 —— <b>9.0°/tick ≈ 180°/s，落地后一两 tick 就把速度方向掰到朝向上</b>
+	 * （转完身落地不再「方向不跟、不跟手」）。
+	 *
+	 * <p>只转方向、不动大小；按 S（刹车 / 倒滑）那一 tick 不对齐（见 {@link #shouldAlignOnGround}）。
+	 * 调手感：调「落地后方向跟上得多快」—— 180°/s 是「立刻跟上但不闪」的档；嫌跳改 5、嫌拖改 14。
+	 */
+	private static final double ALIGN_DEGREES_PER_TICK = 9.0D;
 
 	private SkisControl() {
 	}
@@ -193,5 +208,58 @@ public final class SkisControl {
 		float yaw = bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
 		Vec3 front = new Vec3(-Mth.sin(yaw), 0.0D, Mth.cos(yaw));
 		return horizontal.normalize().dot(front) > BRAKE_MIN_ALIGN;
+	}
+
+	// ---------------------------------------------------------------- 落地对齐（双板专用）
+
+	/**
+	 * <b>这一 tick 要不要做「贴地对齐」</b>（双板专用，由 {@link SkiGlide} 的双板分支调用）：
+	 *
+	 * <ol>
+	 *   <li>{@code player.onGround()} —— 只有贴地才掰方向（空中改速度方向会把人「拽」着走）；</li>
+	 *   <li><b>没按 S</b>：{@code input} 为 <b>null 时放行</b>（拿不到输入不该关掉对齐），
+	 *       {@code input.backward()} 为 true 直接返回 false —— 刹车 / 倒滑这一 tick 不拨方向；</li>
+	 *   <li>水平速度<b>平方 &gt; 1.0E-4</b> —— 几乎停下就不值得掰方向。</li>
+	 * </ol>
+	 */
+	public static boolean shouldAlignOnGround(ServerPlayer player, Input input) {
+		if (!player.onGround()) {
+			return false;
+		}
+		if (input != null && input.backward()) {
+			return false;
+		}
+		Vec3 motion = player.getDeltaMovement();
+		return motion.x * motion.x + motion.z * motion.z > 1.0E-4D;
+	}
+
+	/**
+	 * <b>贴地对齐</b>：把水平速度的<b>方向</b>朝身体前方（{@link #BODY_YAW}，拿不到锁时用玩家 yaw 兜底）
+	 * 转 {@code min(|残差|, ALIGN_DEGREES_PER_TICK)} 度 —— <b>只改方向、大小一点不动</b>
+	 * （绕 Y 旋转水平分量，{@code y} 原样保留），写回 {@code setDeltaMovement} 并置
+	 * {@code hurtMarked = true}（不置会被客户端的移动预测抹掉）。
+	 *
+	 * <p>残差用 {@link Mth#wrapDegrees(float)} 算（−180…180），所以「已经转过身」时也是走<b>短的那条</b>弧、
+	 * 不会绕远路；每 tick 只转 {@link #ALIGN_DEGREES_PER_TICK} 9° ≈ 180°/s，落地后一两 tick 就朝上。
+	 * 方向角与 {@link #BODY_YAW} 同一套参数化：{@code 方向角 = atan2(−x, z)}，yaw 增大 ＝ 向右转
+	 * （与 {@code SnowboardControl#rotateVelocity} 的旋转公式一致）。
+	 *
+	 * <p>判定在 {@link #shouldAlignOnGround}；本方法只做旋转，不判条件、也不动动量。
+	 */
+	public static void alignVelocity(ServerPlayer player) {
+		Vec3 motion = player.getDeltaMovement();
+		double speedSqr = motion.x * motion.x + motion.z * motion.z;
+		if (speedSqr <= 1.0E-4D) {
+			return;   // 没速度可掰
+		}
+		double current = Math.toDegrees(Math.atan2(-motion.x, motion.z));
+		float yaw = bodyYaw(player.getId(), player.getYRot());
+		float residual = Mth.wrapDegrees((float) (yaw - current));
+		double step = Mth.clamp(residual, -ALIGN_DEGREES_PER_TICK, ALIGN_DEGREES_PER_TICK);
+		double rad = Math.toRadians(step);
+		double cos = Math.cos(rad);
+		double sin = Math.sin(rad);
+		player.setDeltaMovement(motion.x * cos - motion.z * sin, motion.y, motion.z * cos + motion.x * sin);
+		player.hurtMarked = true;
 	}
 }
