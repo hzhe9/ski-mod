@@ -69,7 +69,7 @@ public class SkisClient implements ClientModInitializer {
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				} else {
-					// ——— 双板：A / D 转身体 8°/tick，W 再朝视角方向补 4°/tick ——
+					// ——— 双板：A / D 转身体 4.5°/tick，W 再朝视角方向补 4°/tick ——
 					// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
 					SkisControl.ensureLocked(player.getId(), player.getYRot());
 					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys));
@@ -83,7 +83,7 @@ public class SkisClient implements ClientModInitializer {
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
 				player.yBodyRot = yaw;
 				if (!board) {
-					// 双板：连 yBodyRotO 一起对齐。每 tick 8° 的步长不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
+					// 双板：连 yBodyRotO 一起对齐。每 tick 4.5° 的步长也不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
 					player.yBodyRotO = yaw;
 				}
 				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，

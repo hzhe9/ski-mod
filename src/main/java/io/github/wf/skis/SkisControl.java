@@ -33,8 +33,8 @@ import net.minecraft.world.phys.Vec3;
 public final class SkisControl {
 	/** 实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
 	private static final IdMap<Float> BODY_YAW = new IdMap<>();
-	/** 双板：按住 A / D 时每 tick 转身体多少度（8°/tick ≈ 160°/s，180° 约 1.1 s）。 */
-	private static final float TURN_RATE_DEGREES = 8.0F;
+	/** 双板：按住 A / D 时每 tick 转身体多少度（4.5°/tick ≈ 90°/s，180° 约 2 s）。 */
+	private static final float TURN_RATE_DEGREES = 4.5F;
 	/**
 	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
 	 * 刚好看到正侧方，背后整片都是禁区。
