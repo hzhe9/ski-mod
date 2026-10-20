@@ -1,6 +1,7 @@
 package io.github.wf.skis.client;
 
 import io.github.wf.skis.SkisMod;
+import io.github.wf.skis.SnowboardControl;
 import io.github.wf.skis.util.IdMap;
 
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -62,6 +64,16 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>「板的两侧」＝与当前滑行方向<b>垂直</b>的左右两边（沿速度方向求左向量），落点在这片雪面上，
  * 所以双板与单板共用同一套（单板板身横着，看着就是从切雪的那条边溅起来）。
+ *
+ * <p><b>受力侧不对称（只有本地玩家的按键是真读的）</b>：
+ * <ul>
+ *   <li><b>双板 = 弯外侧</b>：按 A（左转）时身体<b>右侧</b>、按 D 时<b>左侧</b>那一侧的数量
+ *       ×{@link #BIAS_COUNT_MUL}、扬起层顶点 +{@link #BIAS_APEX_BONUS} 格；</li>
+ *   <li><b>单板 = 板端</b>：按 W（前倾）在板<b>后</b>、按 S（后倾）在板<b>前</b>（沿行进方向偏移
+ *       {@link #END_OFFSET} 格）<b>额外</b>加一簇 {@link #END_EXTRA_PER_TICK} 颗扬起级粒子；</li>
+ *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
+ * </ul>
+ * 转向的 {@link #TURN_EXTRA_PER_SIDE} / {@link #FLURRY_APEX_TURN_BONUS} 加成照旧，与上面两组叠加。
  */
 public final class SnowSpray {
 	/** 唯一的雪粒子：{@code ITEM_SNOWBALL} = 雪球崩碎的白色碎屑（重力 1.0，会落回雪面）。 */
@@ -155,6 +167,58 @@ public final class SnowSpray {
 	private static final int TURN_EXTRA_PER_SIDE = 4;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
+
+	// ---------------------------------------------------- 按键不对称（弯外侧 / 板端）
+	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
+	// 其它玩家拿不到输入 → 下面两个「偏向」都是 0，左右 / 前后保持对称（与旧行为一致）。
+	/**
+	 * <b>双板「弯外侧」的数量倍率</b>：按 A（左转）时<b>身体右侧</b>（{@code side = -1}）、按 D 时
+	 * <b>身体左侧</b>（{@code side = +1}）那一侧的贴地层与扬起层数量 × 这个值，弯里侧仍按原公式 ——
+	 * 切雪的雪本来就该堆在弯外那一侧（{@code biasSide = -sideSign(keys)}）。
+	 *
+	 * <p><b>调手感</b>：调「弯外侧比内侧厚多少」—— 2.0 ＝ 两倍；1.0 退回完全对称（即旧手感），
+	 * 3.0 会一眼看出偏向。只改<b>数量</b>，高度看 {@link #BIAS_APEX_BONUS}。
+	 */
+	private static final double BIAS_COUNT_MUL = 2.0D;
+	/**
+	 * <b>受力侧（双板弯外侧 / 单板板端那一簇）的顶点加高</b>（格）：该侧扬起层顶点再 + 这个值，
+	 * 最后仍夹 {@link #FLURRY_APEX_CAP} —— 加在 {@link #randomApex} 抽完之后，转向的
+	 * {@link #FLURRY_APEX_TURN_BONUS} 与它互不干扰、可以叠。
+	 *
+	 * <p><b>调手感</b>：调「受力侧的雪抛多高」—— 0.80 已经接近胸口；嫌抢眼改 0.5，想要甩得更夸张改 1.2。
+	 */
+	private static final double BIAS_APEX_BONUS = 0.80D;
+	/**
+	 * <b>单板「板端」那一簇的出生偏移</b>（格，沿行进方向）：W（前倾）→ 板<b>后</b>（{@code biasEnd = -1}）、
+	 * S（后倾）→ 板<b>前</b>（{@code +1}）；出生点 = 身体位置 + 行进方向 × {@code biasEnd} × 这个值 ——
+	 * 人压着板的那一端，雪就从那一端底下被挤出来。
+	 *
+	 * <p><b>调手感</b>：调「那一簇离人多远」—— 太小（&lt;0.5）会藏在脚下看不出，太大（&gt;1.2）会飘到板外；
+	 * 0.85 大致在板头 / 板尾的位置。
+	 */
+	private static final double END_OFFSET = 0.85D;
+	/**
+	 * <b>板端那一簇沿滑行方向的位置抖动</b>（格，±）：几颗挤在同一个点上看就是一根雪柱，
+	 * 沿向摊开才是一小片。
+	 *
+	 * <p><b>调手感</b>：调「那簇雪沿板拉多长」—— 0.40 ≈ 板端前后各 0.4 格；改小更聚拢、改大更散。
+	 */
+	private static final double END_SPREAD = 0.40D;
+	/**
+	 * <b>板端那一簇的横向落点</b>（格，±，相对身体左右）：与扬起层的 {@link #LATERAL_MIN}–{@link #LATERAL_MAX}
+	 * 不同，这一簇是<b>围绕身体中线</b>均匀抽 ± 这个值（受力的是板的一端，不是某一侧）。
+	 *
+	 * <p><b>调手感</b>：调「那簇雪摊多宽」—— 0.55 ≈ 左右各半格；改小更聚、改大更散。
+	 */
+	private static final double END_LATERAL = 0.55D;
+	/**
+	 * <b>单板按住 W / S 时每 tick 在板的那一端额外加的粒子数</b>（扬起级）：
+	 * 这是<b>额外的一簇</b>，不占 {@link #SPRAY_MAX_PER_SIDE} / {@link #FLURRY_MAX_PER_SIDE} 的配额，
+	 * 也不参与 {@code biasSide} 那侧的 {@link #BIAS_COUNT_MUL} 倍率。
+	 *
+	 * <p><b>调手感</b>：调「板端扬雪有多猛」—— 8 颗/tick 已经是明显的一股；12 更冲、4 只是意思一下。
+	 */
+	private static final int END_EXTRA_PER_TICK = 8;
 	/**
 	 * <b>横向落点区间（格）</b>：每颗粒子自己抽一个 {@link #LATERAL_MIN}–{@link #LATERAL_MAX} 的横向偏移，
 	 * 再乘左右符号 —— <b>不再是固定的那一个侧向偏移量</b>。
@@ -318,18 +382,31 @@ public final class SnowSpray {
 			if (speed < MIN_SPEED) {
 				continue;   // 太慢（站着不动）：不持续扬雪
 			}
-			spray(level, player, speed, turning, surface);
+			// 按键不对称（弯外侧 / 板端）只对**本地玩家**读真实输入 —— 与 SkisClient 同一条写法；
+			// 别人（以及本地输入拿不到时）一律 null → 两侧 / 两端保持对称，与旧行为一致。
+			Input keys = player == client.player && client.player != null && client.player.input != null
+					? client.player.input.keyPresses : null;
+			spray(level, player, speed, turning, surface, keys);
 		}
 	}
 
 	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，数量都随速度变多；扬起层顶点高度随速度长（见 {@link #randomApex}）。 */
-	private static void spray(ClientLevel level, Player player, double speed, boolean turning, double surface) {
+	private static void spray(ClientLevel level, Player player, double speed, boolean turning, double surface,
+			Input keys) {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
 		double dirZ = motion.z / speed;
 		double leftX = -dirZ;   // 左向量
 		double leftZ = dirX;
 		RandomSource random = player.getRandom();
+		// 两个「偏向」都从按键来，拿不到按键就都是 0 ＝ 对称（旧行为）：
+		//   双板 → 弯外侧：sideSign A=+1（左转）→ biasSide=-1（身体右侧更猛）、D=-1 → +1（左侧更猛）；
+		//   单板 → 板端：W 前倾 → 板后（biasEnd=-1）、S 后倾 → 板前（+1），W/S 同按或都没按 → 0。
+		// 两组互斥：单板不算弯外侧，双板不算板端那一簇。
+		boolean snowboard = SnowboardControl.isSnowboard(player);
+		int biasSide = snowboard ? 0 : (int) -SnowboardControl.sideSign(keys);
+		int biasEnd = (snowboard && keys != null && keys.forward() != keys.backward())
+				? (keys.forward() ? -1 : 1) : 0;
 		// 数量：保底 1 颗 + 随速度线性涨，全程单调（0.1 → 1 / 1、0.3 → 3 / 5、0.85 → 8 / 14）。
 		// 那个 1e-9 是二进制浮点的取整噪声补偿：0.3 − 0.06 会被算成 0.23999…，×20 直接截断会少一颗。
 		int flecks = Mth.clamp((int) (SPRAY_MIN_PER_SIDE + (speed - MIN_SPEED) * SPRAY_PER_SPEED + 1.0E-9D),
@@ -341,7 +418,12 @@ public final class SnowSpray {
 		// 高速散得更开：1 + 1.6 × 归一化速度（低速 ≈1 倍、顶速 ≈2.6 倍），只放大扬起层的横向速度。
 		double fan = 1.0D + 1.6D * Mth.clamp((speed - MIN_SPEED) / (APEX_SPEED_HI - MIN_SPEED), 0.0D, 1.0D);
 		for (int side = -1; side <= 1; side += 2) {
-			for (int i = 0; i < flecks; i++) {
+			// 弯外侧（双板按 A / D 的受力侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
+			// biasSide = 0（单板 / 没按键 / 别人）时 side 永远不等于它 ＝ 完全对称。
+			int biased = side == biasSide ? 1 : 0;
+			int fleckCount = biased != 0 ? (int) (flecks * BIAS_COUNT_MUL) : flecks;
+			int flurryCount = biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries;
+			for (int i = 0; i < fleckCount; i++) {
 				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
 				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
 				double lateral = side * fleckLateral(random);
@@ -356,10 +438,14 @@ public final class SnowSpray {
 						up,
 						leftZ * out + dirZ * along, 0);
 			}
-			for (int i = 0; i < flurries; i++) {
+			for (int i = 0; i < flurryCount; i++) {
 				// 每颗自己抽顶点高度（随速度长、两档分层）+ 自己抽横向落点与横向速度。
 				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
-				double vy = riseFor(randomApex(random, high, turning, speed));
+				double apex = randomApex(random, high, turning, speed);
+				if (biased != 0) {
+					apex = Math.min(apex + BIAS_APEX_BONUS, FLURRY_APEX_CAP);   // 受力侧再抬高，仍封顶
+				}
+				double vy = riseFor(apex);
 				double lateral = side * lateralOffset(random);
 				double out = (side * outwardSpeed(random) + randomSign(random) * OUTWARD_JITTER) * fan;
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
@@ -368,6 +454,28 @@ public final class SnowSpray {
 						spawnY + yJitter(random),
 						player.getZ() + leftZ * lateral + jitter(random),
 						leftX * out + dirX * along, vy, leftZ * out + dirZ * along,
+						high ? FLURRY_HIGH_LIFETIME : 0);
+			}
+		}
+		// 单板「板端」额外那一簇（W 前倾 → 板后 / S 后倾 → 板前；biasEnd = 0 就整段跳过）：
+		// 出生点在身体沿行进方向偏移 biasEnd × END_OFFSET 处，横向 ±END_LATERAL、沿向 ±END_SPREAD 摊开，
+		// 顶点走与扬起层同一套 randomApex 再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
+		if (biasEnd != 0) {
+			double endX = player.getX() + dirX * (biasEnd * END_OFFSET);
+			double endZ = player.getZ() + dirZ * (biasEnd * END_OFFSET);
+			for (int i = 0; i < END_EXTRA_PER_TICK; i++) {
+				double lateral = (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;    // 横向 ±END_LATERAL
+				double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿向 ±END_SPREAD
+				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
+				double apex = Math.min(randomApex(random, high, turning, speed) + BIAS_APEX_BONUS, FLURRY_APEX_CAP);
+				// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数
+				double out = ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
+						+ randomSign(random) * OUTWARD_JITTER) * fan;
+				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
+				spawn(endX + leftX * lateral + dirX * alongOffset + jitter(random),
+						spawnY + yJitter(random),
+						endZ + leftZ * lateral + dirZ * alongOffset + jitter(random),
+						leftX * out + dirX * along, riseFor(apex), leftZ * out + dirZ * along,
 						high ? FLURRY_HIGH_LIFETIME : 0);
 			}
 		}

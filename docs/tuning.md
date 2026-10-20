@@ -86,6 +86,11 @@
 2. **扬起雪屑**：同样从板两侧起，但**按「顶点高度」调（单位：格）**，而且**顶点随速度长** —— 每颗自己抽一个区间内的顶点，区间两端各是一条直线：下沿 `APEX_LOW_FROM`→`APEX_LOW_TO`、上沿 `APEX_HIGH_FROM`→`APEX_HIGH_TO`，速度从 `APEX_SPEED_LO`(0.10) 到 `APEX_SPEED_HI`(0.85) 之间线性插值。于是 **0.10 = 0.20–0.40 格（贴着地面）**、0.30 = 0.41–0.91（腰）、0.50 = 0.63–1.41（胸）、0.85 = 1.00–2.30（胸到头）。出生初速由 `riseFor` 用离散粒子物理**反解**（不是手调 vy）。按 `FLURRY_HIGH_FRACTION` 0.65 拆成**下半 / 上半两档**，混起来才有层次。高飞档寿命抬到 `FLURRY_HIGH_LIFETIME` 34 tick（默认均值 10 tick 会半空消失）。**转向时这一层更多、顶点再 +0.35 格**（封顶 2.80 格）。
 3. **急减速雪屑**：一 tick 内水平速度掉了 `BURST_DROP` 以上（急刹车 / 撞墙 / 压刃刹车都是这个形状）就从脚下一圈炸开一大团雪屑，粒子数随掉落量增加，带 `BURST_COOLDOWN_TICKS` 冷却。**但必须先过三道闸门**：上一 tick 贴地（`LAST_GROUNDED`）+ 本 tick 贴地（脚底到雪面 ≤ `GROUND_TOUCH_TOLERANCE` 0.15 格）+ 垂直速度 `|vy| < FALL_TOLERANCE` 0.10。落地那一 tick 水平速度同样会突降（动量重置 + 落地摩擦），只看差值的话**从一两格高跳下来也会炸一大团** —— 用户 2026-10-17 明确不要。落地瞬时 vy 是 −0.38 / −0.52 / −0.65（1 / 2 / 3 格），是阈值的 4–7 倍；贴地急刹时碰撞把 y 压在 0 附近（vy ≈ 0），照旧每 `BURST_COOLDOWN_TICKS` 炸一团。阈值取 0.08 是为了**兜住双板按 S 的持续刹车**（动量每 tick ×`BRAKE_DECAY` 0.92，高速时每 tick 掉约 8%）—— 持续刹车会每隔几 tick 炸一团，不是只响一次。
 
+**受力侧不对称（按按键，只有本地玩家拿得到输入）**：两组互斥 —— 
+- **双板按 A / D ＝「弯外侧」**：`biasSide = −sideSign(keys)`，按 A（左转）＝身体**右侧**、按 D ＝**左侧**那一侧的贴地层与扬起层数量 ×`BIAS_COUNT_MUL`，该侧扬起层顶点再 +`BIAS_APEX_BONUS`（仍夹 `FLURRY_APEX_CAP`）；弯里侧保持原公式。
+- **单板按 W / S ＝「板的一端」**：W 前倾 → 板**后**（`biasEnd = −1`）、S 后倾 → 板**前**（`+1`），W 与 S 同按或都没按 → 0。命中时在身体沿行进方向偏移 `biasEnd × END_OFFSET` 格处**额外**加一簇 `END_EXTRA_PER_TICK` 颗扬起级粒子（横向落点 ±`END_LATERAL`、沿向抖动 ±`END_SPREAD`），顶点走 `randomApex(...)` 再 +`BIAS_APEX_BONUS`。
+- 其它玩家（`SnowSpray.tick` 里 `player == client.player` 才取 `client.player.input.keyPresses`，否则 null）两个偏向都是 0 ＝ 左右 / 前后**完全对称**，与改前一致；转向的 `TURN_EXTRA_PER_SIDE` / `FLURRY_APEX_TURN_BONUS` 加成照旧，与这两组叠加。
+
 **横向是抽出来的，不是两条线**，而且**两层各一套参数**（互不共享，改一层不会带走另一层的手感）：
 
 - **贴地层**（`FLECK_*`）：横向落点 `FLECK_LATERAL_MIN`–`FLECK_LATERAL_MAX` 0.20–1.10 格（0.90 格宽、均值 0.65、标准差 0.26），向外速度 0.12–0.45 格/tick 叠 `FLECK_OUTWARD_JITTER` ±0.10，出生点散布 `FLECK_SPREAD` 0.22（正负各半），纵向初速倍率 `FLECK_UPWARD_MIN`–`FLECK_UPWARD_MAX` 0.30–1.00（乘 `UPWARD`，顶点约 0.06–0.90 格）。**低速时视野里几乎全是这一层**（扬起层低速只有 1 颗、压在 0.2–0.4 格），原来那套 0.10–0.80 窄区间抽出来是一撮挤在板边 —— 这是 2026-10-17「低速时贴地层散开明显一点」改的那四个常量。
@@ -119,6 +124,10 @@
 | `PARTICLE_GRAVITY` / `PARTICLE_DRAG` | 0.04 / 0.98 | 反解用的原版粒子物理：每 tick `yd -= 0.04 × gravity`（雪球 `gravity` = 1.0）、位移后再 ×0.98 阻尼 —— 顶点 0.20 / 0.40 / 0.70 / 1.00 / 1.75 / 2.30 格对应初速 ≈ 0.15 / 0.20 / 0.26 / 0.31 / 0.42 / 0.47 格/tick |
 | `TURN_EXTRA_PER_SIDE` | 4 | 转向时扬起层每侧再多 4 颗（**加在夹上限之后**，所以转向时每侧可到 18 颗） |
 | `TURN_DEGREES_PER_TICK` | 2.0 度 | 滑行方向一 tick 转 2° 以上就算「在转向」（两板通用，只看速度方向的变化，不读按键） |
+| `BIAS_COUNT_MUL` | 2.0 | **双板弯外侧**（按 A ＝身体右侧 / 按 D ＝左侧）那一侧的贴地层与扬起层数量 × 这个值（弯里侧原公式）。调「弯外侧比内侧厚多少」：1.0 ＝ 退回对称 |
+| `BIAS_APEX_BONUS` | 0.80 格 | **受力侧**（双板弯外侧 / 单板板端那一簇）扬起层顶点再 + 这个值，最后仍夹 `FLURRY_APEX_CAP`。调「受力侧的雪抛多高」 |
+| `END_OFFSET` / `END_SPREAD` / `END_LATERAL` | 0.85 / 0.40 / 0.55 格 | **单板板端那一簇**的出生点：沿行进方向偏移 `biasEnd × END_OFFSET`（W → 板后、S → 板前），落点沿向 ±`END_SPREAD`、横向 ±`END_LATERAL` 摊开成一小片（不排成一条线） |
+| `END_EXTRA_PER_TICK` | 8 | **单板按 W / S 时每 tick 在板的那一端额外加的粒子数**（扬起级，不占 `SPRAY_MAX_PER_SIDE` / `FLURRY_MAX_PER_SIDE` 配额）。调「板端扬雪有多猛」 |
 | `LATERAL_MIN` / `LATERAL_MAX` | 0.10 / 0.80 格 | **扬起层的横向落点区间**：每颗自己抽（均匀分布，0.70 格宽、均值 0.45、标准差 0.20），乘左右符号 —— 不再是固定一点，所以不会排成两条线。**贴地层不用它**（见下面 `FLECK_LATERAL_*`） |
 | `OUTWARD_MIN` / `OUTWARD_MAX` / `OUTWARD_JITTER` | 0.05 / 0.30 / 0.06 | **扬起层**的横向速度区间（格/tick）+ 正负抖动 ±0.06（让一部分雪稍微往里收）。贴地层用 `FLECK_OUTWARD_*` |
 | `FLECK_LATERAL_MIN` / `FLECK_LATERAL_MAX` | 0.20 / 1.10 格 | **贴地层的横向落点区间**（只给 flecks，与扬起层那套无关）：0.90 格宽、均值 0.65、标准差 0.26 —— 比原来的 0.10–0.80 整体外移并加宽，低速（0.1–0.3）就看得出雪屑横向铺开 |
