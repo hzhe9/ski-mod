@@ -68,7 +68,7 @@
 
 > 单板的动量只在「下落加速」「按着 A / D 横移」和「转向（carve）」这三种情形下跟随，松开就靠原版摩擦停住；转向期间用的是更小的摩擦 `CARVE_MOMENTUM_DECAY` 0.999（直行仍是 `MOMENTUM_DECAY` 0.998）；双板同为 `SkisControl.MOMENTUM_DECAY` 0.998。
 
-双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `util/IdMap` 的默认上限 64 就整表清空（所有这类 id 表都是 `IdMap`，超限自清）；双板的 A / D 每 tick 转 4.5°（`SkisControl.TURN_RATE_DEGREES`），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
+双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `util/IdMap` 的默认上限 64 就整表清空（所有这类 id 表都是 `IdMap`，超限自清）；双板的 A / D 每 tick 转 3.5°（`SkisControl.TURN_RATE_DEGREES`，≈70°/s，180° 约 2.6 s），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
 
 **越肩视角模式（Shoulder Surfing 打开时）**：**相机完全自由** —— `client/SkiViewSmoothing` 不再每帧写视角、`SkiHeadLimitMixin` 不再按 `VIEW_LIMIT_DEGREES` 限位（判定走反射 `IShoulderSurfing#isShoulderSurfing()`，见 `client/ShoulderSurfingCompat`；对方没装就与原来完全一致）；**头模型朝横移方向** —— 双板 = 身体朝向（正前方，偏移 0），单板 = 身体朝向 + **带符号的头偏角**：**朝哪一侧滑就朝哪一侧**（水平速度投到身体左轴定方向，侧向分量 < `HEAD_SIDE_MIN_SPEED` 0.05 时看 A / D，都没有就锁存上一次 —— 停下不会自己回正），幅度 **默认 `SNOWBOARD_HEAD_NEUTRAL_DEGREES` 75° / 按 W 前倾 `SNOWBOARD_HEAD_FORWARD_DEGREES` 90° / 按 S 后倾 `SNOWBOARD_HEAD_BACKWARD_DEGREES` 60°**；**左右翻转与幅度变化都平滑扫过**（`SnowboardControl.tickHead`：比例 0.45 + 单步上限 9°/tick —— 150° 翻转 25 tick ≈ 1.25 s、中途经过 0° 正前方；幅度变化约 10 tick ≈ 0.5 s；松手也是滑回当前方向的 75°）；**按 W 也不再让身体追视角**（客户端 `turnTowardView` 跳过）。退出越肩后限位与 W 追视角立刻按原规则恢复（状态在退出后第一帧按当时的视角重新起算）。
 
@@ -83,13 +83,13 @@
 三层，数量都随速度涨（**低速也保底每侧 1 颗**，只是贴着地面）：
 
 1. **贴地雪屑**：从**板的两侧**（与滑行方向垂直的左右两边）向外、略向上溅，数量随速度增加；低速 1 颗起步，0.50 时每侧 6 颗、0.70 起夹满 8 颗。
-2. **扬起雪屑**：同样从板两侧起，但**按「顶点高度」调（单位：格）**，而且**顶点随速度长** —— 每颗自己抽一个区间内的顶点，区间两端各是一条直线：下沿 `APEX_LOW_FROM`→`APEX_LOW_TO`、上沿 `APEX_HIGH_FROM`→`APEX_HIGH_TO`，速度从 `APEX_SPEED_LO`(0.10) 到 `APEX_SPEED_HI`(0.85) 之间线性插值。于是 **0.10 = 0.20–0.40 格（贴着地面）**、0.30 = 0.41–0.91（腰）、0.50 = 0.63–1.41（胸）、0.85 = 1.00–2.30（胸到头）。出生初速由 `riseFor` 用离散粒子物理**反解**（不是手调 vy）。按 `FLURRY_HIGH_FRACTION` 0.65 拆成**下半 / 上半两档**，混起来才有层次。高飞档寿命抬到 `FLURRY_HIGH_LIFETIME` 34 tick（默认均值 10 tick 会半空消失）。**转向时这一层更多、顶点再 +0.35 格**（封顶 2.80 格）—— 但**有按键偏向（双板 A/D、单板 W/S 的板端簇）时这两条只落在受力侧**，没按键时才两侧对称。
+2. **扬起雪屑**：同样从板两侧起，但**按「顶点高度」调（单位：格）**，而且**顶点随速度长** —— 每颗自己抽一个区间内的顶点，区间两端各是一条直线：下沿 `APEX_LOW_FROM`→`APEX_LOW_TO`、上沿 `APEX_HIGH_FROM`→`APEX_HIGH_TO`，速度从 `APEX_SPEED_LO`(0.10) 到 `APEX_SPEED_HI`(0.85) 之间线性插值。于是 **0.10 = 0.20–0.40 格（贴着地面）**、0.30 = 0.41–0.91（腰）、0.50 = 0.63–1.41（胸）、0.85 = 1.00–2.30（胸到头）。出生初速由 `riseFor` 用离散粒子物理**反解**（不是手调 vy）。按 `FLURRY_HIGH_FRACTION` 0.65 拆成**下半 / 上半两档**，混起来才有层次。高飞档寿命抬到 `FLURRY_HIGH_LIFETIME` 34 tick（默认均值 10 tick 会半空消失）。**转向时这一层更多、顶点再 +0.35 格**（封顶 2.80 格）—— 但**只在没有任何按键偏向时才铺到两侧**：双板按着 A / D 时这两条只落在**受力侧**，单板按着 W / S 时**两侧一颗都不加**、由板端那一簇自己吃（见下面的受力侧一段）。
 3. **急减速雪屑**：一 tick 内水平速度掉了 `BURST_DROP` 以上（急刹车 / 撞墙 / 压刃刹车都是这个形状）就从脚下一圈炸开一大团雪屑，粒子数随掉落量增加，带 `BURST_COOLDOWN_TICKS` 冷却。**但必须先过三道闸门**：上一 tick 贴地（`LAST_GROUNDED`）+ 本 tick 贴地（脚底到雪面 ≤ `GROUND_TOUCH_TOLERANCE` 0.15 格）+ 垂直速度 `|vy| < FALL_TOLERANCE` 0.10。落地那一 tick 水平速度同样会突降（动量重置 + 落地摩擦），只看差值的话**从一两格高跳下来也会炸一大团** —— 用户 2026-10-17 明确不要。落地瞬时 vy 是 −0.38 / −0.52 / −0.65（1 / 2 / 3 格），是阈值的 4–7 倍；贴地急刹时碰撞把 y 压在 0 附近（vy ≈ 0），照旧每 `BURST_COOLDOWN_TICKS` 炸一团。阈值取 0.08 是为了**兜住双板按 S 的持续刹车**（动量每 tick ×`BRAKE_DECAY` 0.92，高速时每 tick 掉约 8%）—— 持续刹车会每隔几 tick 炸一团，不是只响一次。
 
 **受力侧不对称（按按键，只有本地玩家拿得到输入）**：两组互斥 —— 
-- **双板按 A / D ＝「弯外侧」**：`biasSide = −sideSign(keys)`，按 A（左转）＝身体**右侧**、按 D ＝**左侧**那一侧的贴地层与扬起层数量 ×`BIAS_COUNT_MUL`，该侧扬起层顶点再 +`BIAS_APEX_BONUS`（仍夹 `FLURRY_APEX_CAP`）；弯里侧保持原公式。
-- **单板按 W / S ＝「板的一端」**：W 前倾 → 板**后**（`biasEnd = −1`）、S 后倾 → 板**前**（`+1`），W 与 S 同按或都没按 → 0。命中时在身体沿行进方向偏移 `biasEnd × END_OFFSET` 格处**额外**加一簇 `END_EXTRA_PER_TICK` 颗扬起级粒子（横向落点 ±`END_LATERAL`、沿向抖动 ±`END_SPREAD`），顶点走 `randomApex(...)` 再 +`BIAS_APEX_BONUS`。
-- 其它玩家（`SnowSpray.tick` 里 `player == client.player` 才取 `client.player.input.keyPresses`，否则 null）两个偏向都是 0 ＝ 左右 / 前后**完全对称**，与改前一致。<br>**转向的对称加成 `TURN_EXTRA_PER_SIDE` / `FLURRY_APEX_TURN_BONUS` 只在「没有任何按键偏向」时铺到两侧**；有按键偏向（双板按着 A / D）时这两条只落在受力侧，弯里侧保持基础值 —— 否则按 A/D 时两侧同时 +4 颗 / +0.35 格（双板按住 A/D 时落地对齐每 tick 转 4.5°，超过 `TURN_DEGREES_PER_TICK` 2°，`turning` 全程为真），看着就是「两边一起变多」、偏向被冲淡。单板 `biasSide` 恒为 0，所以板端簇拿到的仍是原来的对称转向加成。
+- **双板按 A / D ＝「弯外侧」**：`biasSide = sideSign(keys)`（A = +1、D = −1，与侧循环里 `side` 同一套符号；`side = +1` ＝ 沿速度方向的**右向量**那一侧，即身体**右侧**）。所以按 A（左转）雪加在身体**右侧**、按 D 加在**左侧**，那一侧的贴地层与扬起层数量 ×`BIAS_COUNT_MUL`，该侧扬起层顶点再 +`BIAS_APEX_BONUS`（仍夹 `FLURRY_APEX_CAP`）；弯里侧保持原公式。**符号已经核对**：MC 水平朝向 = `(−sin yaw, cos yaw)`，yaw = 0 朝 +Z（南），面朝南时右手边是 −X（西）—— 而 `(−dirZ, dirX)` 在 dir = (0, +1) 时正好是 (−1, 0)，所以它是**右**向量（旧版把它叫「左向量」，两侧全反了）。
+- **单板按 W / S ＝「板的一端」**：W 前倾 → 人物**背后**（`biasEnd = −1`）、S 后倾 → 人物**正前方**（`+1`），W 与 S 同按或都没按 → 0。命中时在「身体位置 + 身体前方 × `biasEnd` × `END_OFFSET` 格」处**额外**加一簇粒子（横向落点 ±`END_LATERAL`、沿身体前后轴抖动 ±`END_SPREAD`），顶点走 `randomApex(...)` 再 +`BIAS_APEX_BONUS`。**前后轴用身体朝向（`SnowboardControl.frontLocked`）、不用行进方向**：单板是横着滑的（A / D 沿身体左右平移），行进方向几乎与身体正面垂直，拿它当轴那簇雪会拍到侧面去。
+- 其它玩家（`SnowSpray.tick` 里 `player == client.player` 才取 `client.player.input.keyPresses`，否则 null）两个偏向都是 0 ＝ 左右 / 前后**完全对称**，与改前一致。<br>**转向的对称加成 `TURN_EXTRA_PER_SIDE` / `FLURRY_APEX_TURN_BONUS` 只在「没有任何按键偏向」时铺到两侧**（`symmetricTurn = turning && biasSide == 0 && biasEnd == 0`）：双板按着 A / D 时这两条只落在受力侧、弯里侧保持基础值；**单板按着 W / S 时两侧一颗都不加**，这 +4 颗 / +0.35 格改由板端那一簇自己吃。否则按着键时两侧同时 +4 颗 / +0.35 格（单板只要在 carve 就一直满足 `turning`，双板按住 A/D 落地对齐每 tick 也转过 `TURN_DEGREES_PER_TICK` 2°），看着就是「两边一起变多」、偏向被冲淡。
 
 **横向是抽出来的，不是两条线**，而且**两层各一套参数**（互不共享，改一层不会带走另一层的手感）：
 
@@ -119,15 +119,15 @@
 | `APEX_LOW_FROM` / `APEX_LOW_TO` | 0.20 / 1.00 | 顶点区间**下沿**：低速 0.20 格 → 顶速 1.00 格（每颗抽在下半区） |
 | `APEX_HIGH_FROM` / `APEX_HIGH_TO` | 0.40 / 2.30 | 顶点区间**上沿**：低速 0.40 格（贴地）→ 顶速 2.30 格（头上一截）。区间均值 0.10 → 0.32、0.30 → 0.70、0.50 → 1.08、0.85 → 1.75 格 |
 | `FLURRY_HIGH_FRACTION` | 0.65 | 扬起层里走「上半」档的比例（顶点抽区间上半）；其余抽下半：两档混着才有层次 |
-| `FLURRY_APEX_TURN_BONUS` / `FLURRY_APEX_CAP` | 0.35 / 2.80 | 转向时顶点再 +0.35 格；**有按键偏向（双板 A/D、单板 W/S 的板端簇）时只落在受力侧**，没按键时才两侧对称。任何情况下封顶 2.80 格（避免又变成雪柱） |
+| `FLURRY_APEX_TURN_BONUS` / `FLURRY_APEX_CAP` | 0.35 / 2.80 | 转向时顶点再 +0.35 格；**只有没有任何按键偏向时才铺到两侧** —— 双板按 A / D 时只落在受力侧，单板按 W / S 时两侧不给、由板端那一簇自己吃。任何情况下封顶 2.80 格（避免又变成雪柱） |
 | `FLURRY_HIGH_LIFETIME` | 34 tick | 高飞档雪屑的最低寿命（只抬不降）。原版寿命 `(int)(4 / (rand*0.9 + 0.1))`＝随机 4–40 tick、均值 ≈10，而顶点 2.3 格要 ≈26 tick —— 不抬这一档，粒子会在半空凭空消失 |
 | `PARTICLE_GRAVITY` / `PARTICLE_DRAG` | 0.04 / 0.98 | 反解用的原版粒子物理：每 tick `yd -= 0.04 × gravity`（雪球 `gravity` = 1.0）、位移后再 ×0.98 阻尼 —— 顶点 0.20 / 0.40 / 0.70 / 1.00 / 1.75 / 2.30 格对应初速 ≈ 0.15 / 0.20 / 0.26 / 0.31 / 0.42 / 0.47 格/tick |
-| `TURN_EXTRA_PER_SIDE` | 4 | 转向时扬起层每侧再多 4 颗（**加在夹上限之后**，所以转向时每侧可到 18 颗）。**有按键偏向（双板 A/D、单板 W/S 的板端簇）时这两条只落在受力侧**；没按键时才两侧对称。例：速度 0.5 基础 9 → 受力侧 9×2+4 = 22、非受力侧 9；速度 0.2 基础 3 → 受力侧 3×2+4 = 10、非受力侧 3 |
+| `TURN_EXTRA_PER_SIDE` | 4 | 转向时扬起层每侧再多 4 颗（**加在夹上限之后**，所以转向时每侧可到 18 颗）。**只在 `turning && biasSide == 0 && biasEnd == 0` 时才铺到两侧**：双板按 A / D 只加受力侧，单板按 W / S 时两侧不加、这 4 颗改由板端簇吃（`END_EXTRA_PER_TICK` 8 → 12）。例（双板按 A，turning）：速度 0.5 基础 9 → 受力侧 9×2+4 = 22、非受力侧 9；速度 0.2 基础 3 → 受力侧 3×2+4 = 10、非受力侧 3。单板按 W 时两侧 9/9、0.2 时 3/3，板端那一簇 12 颗 |
 | `TURN_DEGREES_PER_TICK` | 2.0 度 | 滑行方向一 tick 转 2° 以上就算「在转向」（两板通用，只看速度方向的变化，不读按键） |
-| `BIAS_COUNT_MUL` | 2.0 | **双板弯外侧**（按 A ＝身体右侧 / 按 D ＝左侧）那一侧的贴地层与扬起层数量 × 这个值（弯里侧原公式）。调「弯外侧比内侧厚多少」：1.0 ＝ 退回对称 |
+| `BIAS_COUNT_MUL` | 2.0 | **双板弯外侧**（`biasSide = sideSign(keys)`：按 A ＝身体右侧 / 按 D ＝左侧）那一侧的贴地层与扬起层数量 × 这个值（弯里侧原公式）。调「弯外侧比内侧厚多少」：1.0 ＝ 退回对称 |
 | `BIAS_APEX_BONUS` | 0.80 格 | **受力侧**（双板弯外侧 / 单板板端那一簇）扬起层顶点再 + 这个值，最后仍夹 `FLURRY_APEX_CAP`。调「受力侧的雪抛多高」 |
-| `END_OFFSET` / `END_SPREAD` / `END_LATERAL` | 0.85 / 0.40 / 0.55 格 | **单板板端那一簇**的出生点：沿行进方向偏移 `biasEnd × END_OFFSET`（W → 板后、S → 板前），落点沿向 ±`END_SPREAD`、横向 ±`END_LATERAL` 摊开成一小片（不排成一条线） |
-| `END_EXTRA_PER_TICK` | 8 | **单板按 W / S 时每 tick 在板的那一端额外加的粒子数**（扬起级，不占 `SPRAY_MAX_PER_SIDE` / `FLURRY_MAX_PER_SIDE` 配额）。调「板端扬雪有多猛」 |
+| `END_OFFSET` / `END_SPREAD` / `END_LATERAL` | 0.85 / 0.40 / 0.55 格 | **单板板端那一簇**的出生点：沿**身体朝向**偏移 `biasEnd × END_OFFSET`（W → 人物背后、S → 人物正前方；不用行进方向 —— 单板横着滑，行进方向几乎与身体正面垂直），落点沿身体前后轴 ±`END_SPREAD`、沿身体左右轴 ±`END_LATERAL` 摊开成一小片（不排成一条线） |
+| `END_EXTRA_PER_TICK` | 8 | **单板按 W / S 时每 tick 在板的那一端额外加的粒子数**（扬起级，不占 `SPRAY_MAX_PER_SIDE` / `FLURRY_MAX_PER_SIDE` 配额）。**转向时这一簇自己再吃 `TURN_EXTRA_PER_SIDE`（8 → 12）**，而两侧的对称转向加成被收走。调「板端扬雪有多猛」 |
 | `LATERAL_MIN` / `LATERAL_MAX` | 0.10 / 0.80 格 | **扬起层的横向落点区间**：每颗自己抽（均匀分布，0.70 格宽、均值 0.45、标准差 0.20），乘左右符号 —— 不再是固定一点，所以不会排成两条线。**贴地层不用它**（见下面 `FLECK_LATERAL_*`） |
 | `OUTWARD_MIN` / `OUTWARD_MAX` / `OUTWARD_JITTER` | 0.05 / 0.30 / 0.06 | **扬起层**的横向速度区间（格/tick）+ 正负抖动 ±0.06（让一部分雪稍微往里收）。贴地层用 `FLECK_OUTWARD_*` |
 | `FLECK_LATERAL_MIN` / `FLECK_LATERAL_MAX` | 0.20 / 1.10 格 | **贴地层的横向落点区间**（只给 flecks，与扬起层那套无关）：0.90 格宽、均值 0.65、标准差 0.26 —— 比原来的 0.10–0.80 整体外移并加宽，低速（0.1–0.3）就看得出雪屑横向铺开 |
@@ -195,7 +195,7 @@
 | `SNOWBOARD_HEAD_NEUTRAL_DEGREES` / `SNOWBOARD_HEAD_FORWARD_DEGREES` / `SNOWBOARD_HEAD_BACKWARD_DEGREES` | `SnowboardControl` | 75.0 / 90.0 / 60.0 度 | **越肩视角模式下单板的头**相对身体朝向的**偏角幅度**（恒正，符号看横移方向）：默认 75°（没按 W / S 或两者同按）、按 W 前倾 90°、按 S 后倾 60°。方向：**+ 朝身体右侧（yaw 增大，与 D 同向）、− 朝左侧（yaw 减小）**，由 `headSide` 判定（实际横移方向 → A / D → 锁存）。双板在该模式下是 0°（正前方，不设常量）。只在越肩开启时生效 |
 | `HEAD_OFFSET_LERP` / `HEAD_OFFSET_MAX_STEP_DEGREES` / `HEAD_SIDE_MIN_SPEED` | `SnowboardControl` | 0.45 / 9.0 / 0.05 | 头偏角的**平滑**参数（`tickHead`）：每 tick 吃掉与目标差距的 45%，且单步不超过 9°/tick（**限幅说的是度数/tick**，不是速度）→ 左右翻转 150° 约 25 tick（≈1.25 s，中途经过 0° 正前方）、幅度变化 15° 约 10 tick（≈0.5 s）。`HEAD_SIDE_MIN_SPEED` = 判定「正在横移」的最小侧向速度（格/tick，< 0.05 改看 A / D） |
 | `VIEW_LIMIT_DEGREES` | `SnowboardControl` | 135.0 度 | **单板**：视角相对锁定身体朝向的最大偏转，左右各一份（合计 270°；留 90° 背后视线禁区）。限位状态只有 `client/SkiViewSmoothing.headOffset` 一处 |
-| `VIEW_LIMIT_DEGREES` | `SkisControl` | 90.0 度 | **双板**：同一项，**各自一份常量**（改这里不动单板）。左右各 90°、合计 180° —— 刚好看到正侧方。限的是视角、不是 A/D 的 4.5°/tick 转向；按 W 时身体会朝视角追上 4°/tick（`VIEW_TURN_RATE_DEGREES`） |
+| `VIEW_LIMIT_DEGREES` | `SkisControl` | 90.0 度 | **双板**：同一项，**各自一份常量**（改这里不动单板）。左右各 90°、合计 180° —— 刚好看到正侧方。限的是视角、不是 A/D 的 3.5°/tick 转向；按 W 时身体会朝视角追上 4°/tick（`VIEW_TURN_RATE_DEGREES`） |
 | `TURN_RATE_DEGREES` | `SnowboardControl` | 2.0 度/tick | carve 时身体朝向每 tick 转多少（180°/s ＝ 一直按着画圈） |
 | `CARVE_MIN_SPEED` | `SnowboardControl` | 0.05 格/tick | 没按 A/D 时，光靠前/后倾触发 carve 所需的最低滑速 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
@@ -214,8 +214,8 @@
 | 常量 | 位置 | 当前值 | 作用 |
 |---|---|---|---|
 | `MIN_MOTION_SQR` | `SkiGlide` | 0.008 | 水平速度的平方低于它就算「没在动」：不沿当前方向兜底加下落加速、也不接管动量 |
-| `TURN_RATE_DEGREES` | `SkisControl` | 4.5 度/tick | **双板 A / D 转身体**每 tick 多少（≈90°/s；180° 约 2 s）—— **觉得转太慢/太快先改它**（8.0 → 4.5，原 160°/s 转身太冲、跟不上手）；A 让身体 yaw 减小（左）、D 让 yaw 增大（右）。**只转身体**；视角另有 ±90° 限位（见 `VIEW_LIMIT_DEGREES`，不是跟着 A/D 转）；按 tick 写，服务器与客户端各跑一步，不做按帧均摊 |
-| `VIEW_TURN_RATE_DEGREES` | `SkisControl` | 4.0 度/tick | **双板按 W 时身体朝视角方向转**每 tick 多少（≈80°/s；残余 90° 约 23 tick ≈ 1.15 s 对齐）。步长限幅、不越过目标；残余 < `VIEW_TURN_MIN_DEGREES` 0.5° 就停（防抖）。只在 **W** 时触发，S 不触发；与 A / D 同向时叠加（4.5+4=8.5°/tick）。**转的仍是身体**，视角在世界坐标里不动 |
+| `TURN_RATE_DEGREES` | `SkisControl` | 3.5 度/tick | **双板 A / D 转身体**每 tick 多少（≈70°/s；180° 约 2.6 s）—— **觉得转太慢/太快先改它**（8.0 → 4.5 → **3.5**，用户 2026-10-25 再降一档）；A 让身体 yaw 减小（左）、D 让 yaw 增大（右）。**只转身体**；视角另有 ±90° 限位（见 `VIEW_LIMIT_DEGREES`，不是跟着 A/D 转）；按 tick 写，服务器与客户端各跑一步，不做按帧均摊 |
+| `VIEW_TURN_RATE_DEGREES` | `SkisControl` | 4.0 度/tick | **双板按 W 时身体朝视角方向转**每 tick 多少（≈80°/s；残余 90° 约 23 tick ≈ 1.15 s 对齐）。步长限幅、不越过目标；残余 < `VIEW_TURN_MIN_DEGREES` 0.5° 就停（防抖）。只在 **W** 时触发，S 不触发；与 A / D 同向时叠加（3.5+4=7.5°/tick）。**转的仍是身体**，视角在世界坐标里不动 |
 | `BODY_YAW` | `SkisControl` | 实体 id → 身体朝向（度） | **双板的身体朝向锁表**：穿上时 `ensureLocked` 记下当时的 yaw，之后只由 `turnBody`（A / D）改；脱板 `forgetBody` 清掉。视角（`yRot`）与它彻底分开 |
 | `BRAKE_DECAY` | `SkisControl` | 0.92 | 双板按住 S 刹车时每 tick 保留的比例（1 秒剩 ≈19%；0.90 更利、0.96 更轻） |
 | `BRAKE_MIN_ALIGN` | `SkisControl` | 0.3 | 速度方向与**身体前方**点积超过它才算「还在往前滑」（此时按 S 是刹车）；低于它按 S 就是往后走 |
@@ -230,9 +230,9 @@
 | | 双板 | 单板 |
 |---|---|---|
 | 朝向 | **锁身体、不锁视角**：身体朝向锁在穿上板那一刻（`SkisControl.BODY_YAW`），由 A / D 改、**按 W 时还会朝视角追 4°/tick**；**视角由鼠标转、并限在身体左右各 ±90°**（与单板同一套实现、各自一个值，用户 2026-10-17 定 — 之前拿视角当朝向是错的） | 锁定（穿上板那一刻），视角同样限在 ±135° |
-| 转向 | **A / D 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 4.5°/tick ≈ 90°/s，180° 约 2 s；yaw 减小＝左、增大＝右）；**按 W 时身体再朝视角方向补 `VIEW_TURN_RATE_DEGREES` 4°/tick**（`turnTowardView`，限幅不越过，残余 90° 约 1.15 s 追上；S 不触发）。两种转法都**不碰视角**（只有顶到 ±90° 限位时视角才被身体拖着走）；客户端与服务端每 tick 各跑一步（先 A/D 再 W），客户端写 `yBodyRot / yBodyRotO`。速度方向由服务端 `SkiControl` 按**身体前方**摆过去：**地上跟着转、空中不跟**（空中身体随便转，速度方向一点都不动）；**落地后速度方向按 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速朝身体前方对齐**（`SkisControl.shouldAlignOnGround` + `alignVelocity`，**按 S 时不对齐**）—— 转完身落地方向立刻跟上，不靠 `SkiControl.steer` 慢慢摆 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
+| 转向 | **A / D 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 3.5°/tick ≈ 70°/s，180° 约 2.6 s；yaw 减小＝左、增大＝右）；**按 W 时身体再朝视角方向补 `VIEW_TURN_RATE_DEGREES` 4°/tick**（`turnTowardView`，限幅不越过，残余 90° 约 1.15 s 追上；S 不触发）。两种转法都**不碰视角**（只有顶到 ±90° 限位时视角才被身体拖着走）；客户端与服务端每 tick 各跑一步（先 A/D 再 W），客户端写 `yBodyRot / yBodyRotO`。速度方向由服务端 `SkiControl` 按**身体前方**摆过去：**地上跟着转、空中不跟**（空中身体随便转，速度方向一点都不动）；**落地后速度方向按 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速朝身体前方对齐**（`SkisControl.shouldAlignOnGround` + `alignVelocity`，**按 S 时不对齐**）—— 转完身落地方向立刻跟上，不靠 `SkiControl.steer` 慢慢摆 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 2°/tick |
 | 前进 | **W 前进**；**按住 S 且还在往前滑 = 刹车**（`BRAKE_DECAY` 0.92，只减速、不拨方向）；**静止 / 后退时才往后走**（速度与**身体前方**点积 ≤ `BRAKE_MIN_ALIGN` 0.3）。**W / S 一律沿身体前后**（`ClientInputMixin` 把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系），所以视角转到哪都不影响溜的方向 | W/S 只做前倾 / 后倾（**不加推力**） |
-| 左右 | **A 左 / D 右 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 4.5°/tick ≈ 90°/s），**视角不跟着动**（顶到 ±90° 限位才被拖）；横向输入被清掉（不横移），滑行方向在地上跟着身体转（落地后另有 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速对齐）、空中不跟 | A / D 沿身体左右**平移** |
+| 左右 | **A 左 / D 右 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 3.5°/tick ≈ 70°/s），**视角不跟着动**（顶到 ±90° 限位才被拖）；横向输入被清掉（不横移），滑行方向在地上跟着身体转（落地后另有 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速对齐）、空中不跟 | A / D 沿身体左右**平移** |
 | 站姿 | 腿往后倾 `SKI_LEG_TILT` -0.15 | 腿往后倾 `BOARD_LEG_TILT` -0.15（**与双板同值**，用户 2026-10-13 定） |
 | 视角限位 | **±`VIEW_LIMIT_DEGREES` 90°**（`SkisControl`）：鼠标能转，但相对锁定的身体朝向最多左右各 90°（合计 180°，刚好到正侧方）；没顶到限位时视角**留在世界坐标里不动**（身体在下面转），顶到之后头被身体拖着走。**按 W 时身体朝视角方向追 4°/tick**（`VIEW_TURN_RATE_DEGREES`）—— 追的是身体，视角在世界坐标里仍然不动 | **±`VIEW_LIMIT_DEGREES` 135°**（`SnowboardControl`）：同一套实现（`client/SkiViewSmoothing` 的唯一 `headOffset`，鼠标只记账、相机每帧写一次）、**各自一个常量** |
 | 音效 / 粒子 | 同一套：滑行雪粒子 + 随速度变密的切雪声（暂停即停，无风声） | 同左 |

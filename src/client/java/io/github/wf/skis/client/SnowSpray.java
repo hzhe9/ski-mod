@@ -63,22 +63,27 @@ import net.minecraft.world.phys.Vec3;
  * <p><b>所有粒子的出生点都在脚底那片「雪面」上</b>（{@code surface + Y_OFFSET ± Y_JITTER}），
  * <b>不跟着人身子抬</b> —— 高度层次只靠顶点高度做出来，所以看着是雪从地面被卷起来、抛上去。
  *
- * <p>「板的两侧」＝与当前滑行方向<b>垂直</b>的左右两边（沿速度方向求左向量），落点在这片雪面上，
+ * <p>「板的两侧」＝与当前滑行方向<b>垂直</b>的左右两边（沿速度方向求<b>右</b>向量：末地坐标下朝 +Z 前进时
+ * 它是 −X，即玩家<b>右手边</b>，{@code side = +1} 就走这一侧、{@code -1} 是另一侧），落点在这片雪面上，
  * 所以双板与单板共用同一套（单板板身横着，看着就是从切雪的那条边溅起来）。
  *
  * <p><b>受力侧不对称（只有本地玩家的按键是真读的）</b>：
  * <ul>
- *   <li><b>双板 = 弯外侧</b>：按 A（左转）时身体<b>右侧</b>、按 D 时<b>左侧</b>那一侧的数量
- *       ×{@link #BIAS_COUNT_MUL}、扬起层顶点 +{@link #BIAS_APEX_BONUS} 格；</li>
- *   <li><b>单板 = 板端</b>：按 W（前倾）在板<b>后</b>、按 S（后倾）在板<b>前</b>（沿行进方向偏移
- *       {@link #END_OFFSET} 格）<b>额外</b>加一簇 {@link #END_EXTRA_PER_TICK} 颗扬起级粒子；</li>
+ *   <li><b>双板 = 弯外侧</b>：按 A（左转，{@code sideSign = +1}）时身体<b>右侧</b>、按 D（{@code -1}）时
+ *       <b>左侧</b>那一侧的数量 ×{@link #BIAS_COUNT_MUL}、扬起层顶点 +{@link #BIAS_APEX_BONUS} 格
+ *       （所以 {@code biasSide = sideSign(keys)} —— 与 {@code side} 是同一套符号）；</li>
+ *   <li><b>单板 = 板端</b>：按 W（前倾）在人<b>背后</b>、按 S（后倾）在人<b>正前方</b>，偏移沿<b>身体朝向</b>
+ *       （{@code SnowboardControl.frontLocked}）而不是行进方向 —— 单板横着滑，行进方向几乎与身体正面垂直，
+ *       拿它当轴那簇雪就拍到侧面去了 —— 偏移 {@link #END_OFFSET} 格，<b>额外</b>加一簇
+ *       {@link #END_EXTRA_PER_TICK}（转向时再加 {@link #TURN_EXTRA_PER_SIDE}）颗扬起级粒子；</li>
  *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
  * </ul>
- * <b>转向的对称加成只在没有按键偏向时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
- * {@link #FLURRY_APEX_TURN_BONUS} 那 0.35 格，在 {@code biasSide != 0}（双板按着 A / D）时<b>只加在受力侧</b>，
- * 弯里侧保持基础值 —— 否则按 A / D 时两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
- * （双板按住 A/D 时落地对齐每 tick 转 4.5°，超过 {@link #TURN_DEGREES_PER_TICK}，{@code turning} 全程为真）。
- * {@code biasSide == 0}（单板 / 没按键 / 拿不到按键 / 其它玩家）时与改前完全一致：两侧都给。
+ * <b>转向的对称加成只在「没有任何按键偏向」时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
+ * {@link #FLURRY_APEX_TURN_BONUS} 那 0.35 格，在 {@code biasSide != 0}（双板按着 A / D）时<b>只加在受力侧</b>；
+ * 在 {@code biasEnd != 0}（单板按着 W / S）时<b>两侧一颗都不加</b>，改由板端那一簇自己吃
+ * （否则两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
+ * —— 双板按住 A/D 时落地对齐每 tick 要转好几度，超过 {@link #TURN_DEGREES_PER_TICK}，{@code turning} 全程为真）。
+ * 两个偏向都是 0（没按键 / 拿不到按键 / 其它玩家）时与改前完全一致：两侧都给。
  */
 public final class SnowSpray {
 	/** 唯一的雪粒子：{@code ITEM_SNOWBALL} = 雪球崩碎的白色碎屑（重力 1.0，会落回雪面）。 */
@@ -149,7 +154,10 @@ public final class SnowSpray {
 	/** 顶点区间上沿：低速 0.40 格（贴地）→ 顶速 2.30 格（头上一截）。 */
 	private static final double APEX_HIGH_FROM = 0.40D;
 	private static final double APEX_HIGH_TO = 2.30D;
-	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）；**有按键偏向时只落在受力侧**，没按键时两侧都给。 */
+	/**
+	 * 转向时顶点再抬高这么多格（转急弯把雪甩到身上）；<b>只有没有按键偏向时才铺到两侧</b>：
+	 * 双板按 A / D 时只落在受力侧，单板按 W / S 时两侧不给、由板端那一簇自己吃（见 {@link #TURN_EXTRA_PER_SIDE}）。
+	 */
 	private static final double FLURRY_APEX_TURN_BONUS = 0.35D;
 	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
 	private static final double FLURRY_APEX_CAP = 2.80D;
@@ -171,8 +179,14 @@ public final class SnowSpray {
 	/**
 	 * 转向时：扬起层每侧再多几颗（加在夹上限之后，所以能超过 {@link #FLURRY_MAX_PER_SIDE}）。
 	 *
-	 * <p><b>有按键偏向（双板 A / D）时这 4 颗只给受力侧</b>，弯里侧保持基础值；没有任何按键偏向时两侧都给（与改前一致）——
-	 * 否则按 A / D 时两侧同时 +4 颗，看着就是「两边一起变多」。
+	 * <p><b>只有完全没有按键偏向时才会铺到两侧</b>（{@code symmetricTurn = turning && biasSide == 0 && biasEnd == 0}）：
+	 * <ul>
+	 *   <li>双板按着 A / D（{@code biasSide != 0}）→ 这 4 颗只给受力侧，弯里侧保持基础值；</li>
+	 *   <li>单板按着 W / S（{@code biasEnd != 0}）→ 两侧一颗都不加，这 4 颗改由板端那一簇自己吃
+	 *       （{@link #END_EXTRA_PER_TICK} → 8 + 4 = 12）；</li>
+	 *   <li>没按键 / 拿不到按键 / 其它玩家 → 两侧都给（与改前一致）。</li>
+	 * </ul>
+	 * 否则按着键时两侧同时 +4 颗，看着就是「两边一起变多」、偏向被冲淡。
 	 */
 	private static final int TURN_EXTRA_PER_SIDE = 4;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
@@ -182,9 +196,10 @@ public final class SnowSpray {
 	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
 	// 其它玩家拿不到输入 → 下面两个「偏向」都是 0，左右 / 前后保持对称（与旧行为一致）。
 	/**
-	 * <b>双板「弯外侧」的数量倍率</b>：按 A（左转）时<b>身体右侧</b>（{@code side = -1}）、按 D 时
-	 * <b>身体左侧</b>（{@code side = +1}）那一侧的贴地层与扬起层数量 × 这个值，弯里侧仍按原公式 ——
-	 * 切雪的雪本来就该堆在弯外那一侧（{@code biasSide = -sideSign(keys)}）。
+	 * <b>双板「弯外侧」的数量倍率</b>：按 A（左转，{@code sideSign = +1}）时<b>身体右侧</b>
+	 * （{@code side = +1}）、按 D（{@code -1}）时<b>身体左侧</b>（{@code side = -1}）那一侧的贴地层与扬起层
+	 * 数量 × 这个值，弯里侧仍按原公式 —— 切起来的雪本来就该堆在弯外那一侧
+	 * （{@code biasSide = sideSign(keys)}；{@code side} 的正负见侧循环：+1 = 右向量那一侧）。
 	 *
 	 * <p><b>调手感</b>：调「弯外侧比内侧厚多少」—— 2.0 ＝ 两倍；1.0 退回完全对称（即旧手感），
 	 * 3.0 会一眼看出偏向。只改<b>数量</b>，高度看 {@link #BIAS_APEX_BONUS}。
@@ -200,23 +215,27 @@ public final class SnowSpray {
 	 */
 	private static final double BIAS_APEX_BONUS = 0.80D;
 	/**
-	 * <b>单板「板端」那一簇的出生偏移</b>（格，沿行进方向）：W（前倾）→ 板<b>后</b>（{@code biasEnd = -1}）、
-	 * S（后倾）→ 板<b>前</b>（{@code +1}）；出生点 = 身体位置 + 行进方向 × {@code biasEnd} × 这个值 ——
+	 * <b>单板「板端」那一簇的出生偏移</b>（格，沿<b>身体朝向</b>）：W（前倾）→ 人物<b>背后</b>
+	 * （{@code biasEnd = -1}）、S（后倾）→ 人物<b>正前方</b>（{@code +1}）；
+	 * 出生点 = 身体位置 + 身体前方（{@code SnowboardControl.frontLocked}）× {@code biasEnd} × 这个值 ——
 	 * 人压着板的那一端，雪就从那一端底下被挤出来。
+	 *
+	 * <p><b>为什么用身体朝向、不用行进方向</b>：单板是横着滑的（A / D 沿身体左右平移），行进方向几乎与
+	 * 身体正面<b>垂直</b>——拿行进方向当「板的前后轴」，那一簇雪会拍到人的侧面去，而不是板头 / 板尾。
 	 *
 	 * <p><b>调手感</b>：调「那一簇离人多远」—— 太小（&lt;0.5）会藏在脚下看不出，太大（&gt;1.2）会飘到板外；
 	 * 0.85 大致在板头 / 板尾的位置。
 	 */
 	private static final double END_OFFSET = 0.85D;
 	/**
-	 * <b>板端那一簇沿滑行方向的位置抖动</b>（格，±）：几颗挤在同一个点上看就是一根雪柱，
-	 * 沿向摊开才是一小片。
+	 * <b>板端那一簇沿身体前后轴的位置抖动</b>（格，±）：几颗挤在同一个点上看就是一根雪柱，
+	 * 沿板身前后摊开才是一小片。
 	 *
 	 * <p><b>调手感</b>：调「那簇雪沿板拉多长」—— 0.40 ≈ 板端前后各 0.4 格；改小更聚拢、改大更散。
 	 */
 	private static final double END_SPREAD = 0.40D;
 	/**
-	 * <b>板端那一簇的横向落点</b>（格，±，相对身体左右）：与扬起层的 {@link #LATERAL_MIN}–{@link #LATERAL_MAX}
+	 * <b>板端那一簇的横向落点</b>（格，±，相对身体左右轴）：与扬起层的 {@link #LATERAL_MIN}–{@link #LATERAL_MAX}
 	 * 不同，这一簇是<b>围绕身体中线</b>均匀抽 ± 这个值（受力的是板的一端，不是某一侧）。
 	 *
 	 * <p><b>调手感</b>：调「那簇雪摊多宽」—— 0.55 ≈ 左右各半格；改小更聚、改大更散。
@@ -226,6 +245,9 @@ public final class SnowSpray {
 	 * <b>单板按住 W / S 时每 tick 在板的那一端额外加的粒子数</b>（扬起级）：
 	 * 这是<b>额外的一簇</b>，不占 {@link #SPRAY_MAX_PER_SIDE} / {@link #FLURRY_MAX_PER_SIDE} 的配额，
 	 * 也不参与 {@code biasSide} 那侧的 {@link #BIAS_COUNT_MUL} 倍率。
+	 *
+	 * <p>转向时这一簇自己再多吃 {@link #TURN_EXTRA_PER_SIDE} 颗（8 → 12）；两侧的对称转向加成则被收走
+	 * （{@code symmetricTurn} 要求 {@code biasEnd == 0}）—— 否则按 W / S 时两侧一起 +4 颗，看着是「两边一起变多」。
 	 *
 	 * <p><b>调手感</b>：调「板端扬雪有多猛」—— 8 颗/tick 已经是明显的一股；12 更冲、4 只是意思一下。
 	 */
@@ -407,23 +429,25 @@ public final class SnowSpray {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
 		double dirZ = motion.z / speed;
-		double leftX = -dirZ;   // 左向量
-		double leftZ = dirX;
+		// 右向量（＝玩家右手边）：朝 +Z 前进时它是 (−1, 0) ＝ −X ＝ 西。
+		// 核对：MC 水平朝向 = (−sin yaw, cos yaw)，yaw = 0 朝 +Z（南）；面朝南时右手边正是西（−X），
+		// 与 SnowboardControl.sideLocked 的符号一致（sign = −1 取右手边 = (cos, sin) × −1 = (−1, 0)）。
+		double rightX = -dirZ;
+		double rightZ = dirX;
 		RandomSource random = player.getRandom();
 		// 两个「偏向」都从按键来，拿不到按键就都是 0 ＝ 对称（旧行为）：
-		//   双板 → 弯外侧：sideSign A=+1（左转）→ biasSide=-1（身体右侧更猛）、D=-1 → +1（左侧更猛）；
-		//   单板 → 板端：W 前倾 → 板后（biasEnd=-1）、S 后倾 → 板前（+1），W/S 同按或都没按 → 0。
+		//   双板 → 弯外侧：sideSign A=+1（左转）→ biasSide=+1（身体右侧更猛）、D=-1 → -1（左侧更猛）；
+		//   单板 → 板端：W 前倾 → 背后（biasEnd=-1）、S 后倾 → 正前方（+1），W/S 同按或都没按 → 0。
 		// 两组互斥：单板不算弯外侧，双板不算板端那一簇。
 		boolean snowboard = SnowboardControl.isSnowboard(player);
-		int biasSide = snowboard ? 0 : (int) -SnowboardControl.sideSign(keys);
+		int biasSide = snowboard ? 0 : (int) SnowboardControl.sideSign(keys);
 		int biasEnd = (snowboard && keys != null && keys.forward() != keys.backward())
 				? (keys.forward() ? -1 : 1) : 0;
 		// 转向的**对称**加成（两侧都 +TURN_EXTRA_PER_SIDE 颗、顶点都 +FLURRY_APEX_TURN_BONUS 格）只在
-		// **没有任何按键偏向**时生效（biasSide = 0：没按键 / 拿不到按键 / 单板 / 其它玩家 —— 与旧行为完全一致）。
-		// 有按键偏向时，转向的对称加成只加在受力侧 —— 否则按 A/D 时两侧同时 +4 颗 / +0.35 格，
-		// 而双板按住 A/D 时每 tick 落地对齐要转 4.5°，超过 TURN_DEGREES_PER_TICK 2°，turning 全程为真，
-		// 看着就是「两边一起变多」，弯外侧的偏向被冲淡。
-		boolean symmetricTurn = turning && biasSide == 0;
+		// **完全没有按键偏向**时生效（biasSide = 0 且 biasEnd = 0：没按键 / 拿不到按键 / 其它玩家 —— 与旧行为一致）。
+		// 有偏向时：双板那 4 颗只加在受力侧；单板改由板端那一簇自己吃 —— 否则按 W / S 时两侧同时 +4 颗 / +0.35 格，
+		// 而单板只要在 carve（压着刃）就一直在转向，turning 全程为真，看着就是「两边一起变多」、板端的偏向被冲淡。
+		boolean symmetricTurn = turning && biasSide == 0 && biasEnd == 0;
 		// 数量：保底 1 颗 + 随速度线性涨，全程单调（0.1 → 1 / 1、0.3 → 3 / 5、0.85 → 8 / 14）。
 		// 那个 1e-9 是二进制浮点的取整噪声补偿：0.3 − 0.06 会被算成 0.23999…，×20 直接截断会少一颗。
 		int flecks = Mth.clamp((int) (SPRAY_MIN_PER_SIDE + (speed - MIN_SPEED) * SPRAY_PER_SPEED + 1.0E-9D),
@@ -436,6 +460,7 @@ public final class SnowSpray {
 		// 高速散得更开：1 + 1.6 × 归一化速度（低速 ≈1 倍、顶速 ≈2.6 倍），只放大扬起层的横向速度。
 		double fan = 1.0D + 1.6D * Mth.clamp((speed - MIN_SPEED) / (APEX_SPEED_HI - MIN_SPEED), 0.0D, 1.0D);
 		for (int side = -1; side <= 1; side += 2) {
+			// side 的含义由 rightX/rightZ 决定：+1 = 沿右向量（身体右侧）、-1 = 身体左侧。
 			// 弯外侧（双板按 A / D 的受力侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
 			// biasSide = 0（单板 / 没按键 / 别人）时 side 永远不等于它 ＝ 完全对称。
 			int biased = side == biasSide ? 1 : 0;
@@ -453,12 +478,12 @@ public final class SnowSpray {
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
 				double up = UPWARD * (FLECK_UPWARD_MIN
 						+ random.nextDouble() * (FLECK_UPWARD_MAX - FLECK_UPWARD_MIN));
-				spawn(player.getX() + leftX * lateral + fleckJitter(random),
+				spawn(player.getX() + rightX * lateral + fleckJitter(random),
 						spawnY + yJitter(random),
-						player.getZ() + leftZ * lateral + fleckJitter(random),
-						leftX * out + dirX * along,
+						player.getZ() + rightZ * lateral + fleckJitter(random),
+						rightX * out + dirX * along,
 						up,
-						leftZ * out + dirZ * along, 0);
+						rightZ * out + dirZ * along, 0);
 			}
 			for (int i = 0; i < flurryCount; i++) {
 				// 每颗自己抽顶点高度（随速度长、两档分层）+ 自己抽横向落点与横向速度。
@@ -474,33 +499,42 @@ public final class SnowSpray {
 				double out = (side * outwardSpeed(random) + randomSign(random) * OUTWARD_JITTER) * fan;
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
 				// 高飞档要活到顶点（≈26 tick），默认寿命均值才 10 tick —— 只抬这一档。
-				spawn(player.getX() + leftX * lateral + jitter(random),
+				spawn(player.getX() + rightX * lateral + jitter(random),
 						spawnY + yJitter(random),
-						player.getZ() + leftZ * lateral + jitter(random),
-						leftX * out + dirX * along, vy, leftZ * out + dirZ * along,
+						player.getZ() + rightZ * lateral + jitter(random),
+						rightX * out + dirX * along, vy, rightZ * out + dirZ * along,
 						high ? FLURRY_HIGH_LIFETIME : 0);
 			}
 		}
-		// 单板「板端」额外那一簇（W 前倾 → 板后 / S 后倾 → 板前；biasEnd = 0 就整段跳过）：
-		// 出生点在身体沿行进方向偏移 biasEnd × END_OFFSET 处，横向 ±END_LATERAL、沿向 ±END_SPREAD 摊开，
-		// 顶点走与扬起层同一套 randomApex 再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
-		// 这里仍传 turning：单板 biasSide 恒为 0，turning 就等于 symmetricTurn（板端簇的对称转向加成照旧）。
+		// 单板「板端」额外那一簇（W 前倾 → 人物背后 / S 后倾 → 人物正前方；biasEnd = 0 就整段跳过）：
+		// 出生点在「身体位置 + 身体前方 × biasEnd × END_OFFSET」处 —— 前后轴用的是**身体朝向**（frontLocked），
+		// 不是行进方向：单板横着滑，行进方向几乎与身体正面垂直，拿它当轴那簇雪会拍到侧面去。
+		// 横向轴取身体朝向的右手边（endRight = (−frontZ, frontX)），横向 ±END_LATERAL、沿向 ±END_SPREAD 摊开；
+		// 顶点走与扬起层同一套 randomApex（这里仍传 turning：板端簇自己吃转向的加成）再 +BIAS_APEX_BONUS，仍夹 FLURRY_APEX_CAP。
 		if (biasEnd != 0) {
-			double endX = player.getX() + dirX * (biasEnd * END_OFFSET);
-			double endZ = player.getZ() + dirZ * (biasEnd * END_OFFSET);
-			for (int i = 0; i < END_EXTRA_PER_TICK; i++) {
+			Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot());   // 沿锁定的身体朝向，不是视角
+			double frontX = front.x;
+			double frontZ = front.z;
+			double endRightX = -frontZ;   // 身体右手边（与上面 rightX/rightZ 同一定义）
+			double endRightZ = frontX;
+			double endX = player.getX() + frontX * (biasEnd * END_OFFSET);
+			double endZ = player.getZ() + frontZ * (biasEnd * END_OFFSET);
+			// 转向时这一簇自己多吃 TURN_EXTRA_PER_SIDE 颗（8 → 12）：两侧的对称转向加成已被 symmetricTurn 收走。
+			int endCount = END_EXTRA_PER_TICK + (turning ? TURN_EXTRA_PER_SIDE : 0);
+			for (int i = 0; i < endCount; i++) {
 				double lateral = (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;    // 横向 ±END_LATERAL
-				double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿向 ±END_SPREAD
+				double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿身体前后轴 ±END_SPREAD
 				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
 				double apex = Math.min(randomApex(random, high, turning, speed) + BIAS_APEX_BONUS, FLURRY_APEX_CAP);
-				// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数
+				// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数；
+				// 速度方向仍按行进方向（dir）往后带 —— 只改出生点的轴向，粒子怎么飞保持原样。
 				double out = ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
 						+ randomSign(random) * OUTWARD_JITTER) * fan;
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
-				spawn(endX + leftX * lateral + dirX * alongOffset + jitter(random),
+				spawn(endX + endRightX * lateral + frontX * alongOffset + jitter(random),
 						spawnY + yJitter(random),
-						endZ + leftZ * lateral + dirZ * alongOffset + jitter(random),
-						leftX * out + dirX * along, riseFor(apex), leftZ * out + dirZ * along,
+						endZ + endRightZ * lateral + frontZ * alongOffset + jitter(random),
+						rightX * out + dirX * along, riseFor(apex), rightZ * out + dirZ * along,
 						high ? FLURRY_HIGH_LIFETIME : 0);
 			}
 		}
@@ -541,7 +575,8 @@ public final class SnowSpray {
 	 * 高飞档取区间上半、低飞档取下半，{@code turnBonus} 为真时再 +{@link #FLURRY_APEX_TURN_BONUS}，最后一律夹到 {@link #FLURRY_APEX_CAP}。
 	 *
 	 * <p>{@code turnBonus} 是「<b>要不要拿转向的对称加成</b>」，不是裸的 {@code turning}：侧循环传 {@code symmetricTurn}
-	 * （有按键偏向时为假，转向加成改由受力侧的 {@link #BIAS_APEX_BONUS} 承担）；单板板端那一簇仍传 {@code turning}。
+	 * （有任何按键偏向时都为假：双板的转向加成改由受力侧的 {@link #BIAS_APEX_BONUS} 承担，单板则整个由板端那一簇承担）；
+	 * 单板板端那一簇仍传 {@code turning}（它自己吃这一份额外加成）。
 	 */
 	private static double randomApex(RandomSource random, boolean high, boolean turnBonus, double speed) {
 		double t = Mth.clamp((speed - APEX_SPEED_LO) / (APEX_SPEED_HI - APEX_SPEED_LO), 0.0D, 1.0D);
