@@ -44,7 +44,8 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>扬起雪屑</b>：每颗抽一个<b>随速度增长</b>的顶点高度（{@link #randomApex}：速度 0.10 时
  *       0.20–0.40 格贴着地面，0.85 时 1.00–2.30 格胸到头），初速由 {@link #riseFor} 按离散粒子物理反解；
  *       按 {@link #FLURRY_HIGH_FRACTION} 拆两档在空中形成层次；高飞档寿命抬到 {@link #FLURRY_HIGH_LIFETIME}；
- *       转向（一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高 {@link #FLURRY_APEX_TURN_BONUS} 格；</li>
+ *       转向（一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高 {@link #FLURRY_APEX_TURN_BONUS} 格
+ *       （<b>只在没有按键偏向时才两侧都给</b>，见下面的受力侧一段）；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。
  *       <b>只在真贴地时才算急刹</b>：上一 tick 与本 tick 都贴地（{@link #GROUND_TOUCH_TOLERANCE}）
@@ -73,7 +74,11 @@ import net.minecraft.world.phys.Vec3;
  *       {@link #END_OFFSET} 格）<b>额外</b>加一簇 {@link #END_EXTRA_PER_TICK} 颗扬起级粒子；</li>
  *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
  * </ul>
- * 转向的 {@link #TURN_EXTRA_PER_SIDE} / {@link #FLURRY_APEX_TURN_BONUS} 加成照旧，与上面两组叠加。
+ * <b>转向的对称加成只在没有按键偏向时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
+ * {@link #FLURRY_APEX_TURN_BONUS} 那 0.35 格，在 {@code biasSide != 0}（双板按着 A / D）时<b>只加在受力侧</b>，
+ * 弯里侧保持基础值 —— 否则按 A / D 时两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
+ * （双板按住 A/D 时落地对齐每 tick 转 4.5°，超过 {@link #TURN_DEGREES_PER_TICK}，{@code turning} 全程为真）。
+ * {@code biasSide == 0}（单板 / 没按键 / 拿不到按键 / 其它玩家）时与改前完全一致：两侧都给。
  */
 public final class SnowSpray {
 	/** 唯一的雪粒子：{@code ITEM_SNOWBALL} = 雪球崩碎的白色碎屑（重力 1.0，会落回雪面）。 */
@@ -125,7 +130,7 @@ public final class SnowSpray {
 	private static final int SPRAY_MIN_PER_SIDE = 1;
 	/** 扬起雪屑：每侧数量 = {@link #FLURRY_MIN_PER_SIDE} + (速度 − {@link #MIN_SPEED}) × 这个系数（比贴地那层涨得快）。 */
 	private static final double FLURRY_PER_SPEED = 20.0D;
-	/** 扬起雪屑的每侧数量上限（转向的 {@link #TURN_EXTRA_PER_SIDE} 是加在夹上限之后的）。 */
+	/** 扬起雪屑的每侧数量上限（转向的 {@link #TURN_EXTRA_PER_SIDE} 是加在夹上限之后的；有按键偏向时只加在受力侧）。 */
 	private static final int FLURRY_MAX_PER_SIDE = 14;
 	/** 扬起雪屑每侧保底数量（低速也扬，顶点只有 0.2–0.4 格，贴着地面）。 */
 	private static final int FLURRY_MIN_PER_SIDE = 1;
@@ -144,7 +149,7 @@ public final class SnowSpray {
 	/** 顶点区间上沿：低速 0.40 格（贴地）→ 顶速 2.30 格（头上一截）。 */
 	private static final double APEX_HIGH_FROM = 0.40D;
 	private static final double APEX_HIGH_TO = 2.30D;
-	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）。 */
+	/** 转向时顶点再抬高这么多格（转急弯把雪甩到身上）；**有按键偏向时只落在受力侧**，没按键时两侧都给。 */
 	private static final double FLURRY_APEX_TURN_BONUS = 0.35D;
 	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
 	private static final double FLURRY_APEX_CAP = 2.80D;
@@ -163,7 +168,12 @@ public final class SnowSpray {
 	private static final double PARTICLE_GRAVITY = 0.04D;
 	/** 雪粒子的每 tick 阻尼：原版 {@code Particle} 构造器里 {@code friction} 默认 0.98（每 tick 速度 ×0.98）。 */
 	private static final double PARTICLE_DRAG = 0.98D;
-	/** 转向时：扬起层每侧再多几颗（加在夹上限之后，所以转向时能超过 {@link #FLURRY_MAX_PER_SIDE}）。 */
+	/**
+	 * 转向时：扬起层每侧再多几颗（加在夹上限之后，所以能超过 {@link #FLURRY_MAX_PER_SIDE}）。
+	 *
+	 * <p><b>有按键偏向（双板 A / D）时这 4 颗只给受力侧</b>，弯里侧保持基础值；没有任何按键偏向时两侧都给（与改前一致）——
+	 * 否则按 A / D 时两侧同时 +4 颗，看着就是「两边一起变多」。
+	 */
 	private static final int TURN_EXTRA_PER_SIDE = 4;
 	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
 	private static final double TURN_DEGREES_PER_TICK = 2.0D;
@@ -182,8 +192,9 @@ public final class SnowSpray {
 	private static final double BIAS_COUNT_MUL = 2.0D;
 	/**
 	 * <b>受力侧（双板弯外侧 / 单板板端那一簇）的顶点加高</b>（格）：该侧扬起层顶点再 + 这个值，
-	 * 最后仍夹 {@link #FLURRY_APEX_CAP} —— 加在 {@link #randomApex} 抽完之后，转向的
-	 * {@link #FLURRY_APEX_TURN_BONUS} 与它互不干扰、可以叠。
+	 * 最后仍夹 {@link #FLURRY_APEX_CAP} —— 加在 {@link #randomApex} 抽完之后。
+	 * 转向的 {@link #FLURRY_APEX_TURN_BONUS} 在<b>有按键偏向时只给受力侧</b>，所以两条不会同时叠在一颗上：
+	 * 受力侧拿的是这一条、弯里侧拿基础值（没按键时才是两侧都拿转向那条）。
 	 *
 	 * <p><b>调手感</b>：调「受力侧的雪抛多高」—— 0.80 已经接近胸口；嫌抢眼改 0.5，想要甩得更夸张改 1.2。
 	 */
@@ -407,12 +418,19 @@ public final class SnowSpray {
 		int biasSide = snowboard ? 0 : (int) -SnowboardControl.sideSign(keys);
 		int biasEnd = (snowboard && keys != null && keys.forward() != keys.backward())
 				? (keys.forward() ? -1 : 1) : 0;
+		// 转向的**对称**加成（两侧都 +TURN_EXTRA_PER_SIDE 颗、顶点都 +FLURRY_APEX_TURN_BONUS 格）只在
+		// **没有任何按键偏向**时生效（biasSide = 0：没按键 / 拿不到按键 / 单板 / 其它玩家 —— 与旧行为完全一致）。
+		// 有按键偏向时，转向的对称加成只加在受力侧 —— 否则按 A/D 时两侧同时 +4 颗 / +0.35 格，
+		// 而双板按住 A/D 时每 tick 落地对齐要转 4.5°，超过 TURN_DEGREES_PER_TICK 2°，turning 全程为真，
+		// 看着就是「两边一起变多」，弯外侧的偏向被冲淡。
+		boolean symmetricTurn = turning && biasSide == 0;
 		// 数量：保底 1 颗 + 随速度线性涨，全程单调（0.1 → 1 / 1、0.3 → 3 / 5、0.85 → 8 / 14）。
 		// 那个 1e-9 是二进制浮点的取整噪声补偿：0.3 − 0.06 会被算成 0.23999…，×20 直接截断会少一颗。
 		int flecks = Mth.clamp((int) (SPRAY_MIN_PER_SIDE + (speed - MIN_SPEED) * SPRAY_PER_SPEED + 1.0E-9D),
 				SPRAY_MIN_PER_SIDE, SPRAY_MAX_PER_SIDE);
+		// 扬起层基础值**不含**转向那份额外：那 4 颗在侧循环里单独发（受力侧独占 / 无偏向时两侧都给）。
 		int flurries = Mth.clamp((int) (FLURRY_MIN_PER_SIDE + (speed - MIN_SPEED) * FLURRY_PER_SPEED + 1.0E-9D),
-				FLURRY_MIN_PER_SIDE, FLURRY_MAX_PER_SIDE) + (turning ? TURN_EXTRA_PER_SIDE : 0);
+				FLURRY_MIN_PER_SIDE, FLURRY_MAX_PER_SIDE);
 		// 出生高度：那片雪面的上表面（已经按距离判过），再抬一点点 + 抖动；**不跟着人身子抬**。
 		double spawnY = Math.min(surface, player.getY() - 0.05D) + Y_OFFSET;
 		// 高速散得更开：1 + 1.6 × 归一化速度（低速 ≈1 倍、顶速 ≈2.6 倍），只放大扬起层的横向速度。
@@ -422,7 +440,11 @@ public final class SnowSpray {
 			// biasSide = 0（单板 / 没按键 / 别人）时 side 永远不等于它 ＝ 完全对称。
 			int biased = side == biasSide ? 1 : 0;
 			int fleckCount = biased != 0 ? (int) (flecks * BIAS_COUNT_MUL) : flecks;
-			int flurryCount = biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries;
+			// 转向那份额外 4 颗：有按键偏向时**只给受力侧**（弯里侧不加，否则两侧一起变厚、看不出偏向）；
+			// 没有任何按键偏向时（symmetricTurn）两侧照旧都加 —— 与改前的对称行为一致。
+			int turnExtra = biased != 0 ? (turning ? TURN_EXTRA_PER_SIDE : 0)
+					: (symmetricTurn ? TURN_EXTRA_PER_SIDE : 0);
+			int flurryCount = (biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries) + turnExtra;
 			for (int i = 0; i < fleckCount; i++) {
 				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
 				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
@@ -441,7 +463,9 @@ public final class SnowSpray {
 			for (int i = 0; i < flurryCount; i++) {
 				// 每颗自己抽顶点高度（随速度长、两档分层）+ 自己抽横向落点与横向速度。
 				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
-				double apex = randomApex(random, high, turning, speed);
+				// 顶点：对称转向加成只在无按键偏向时给（symmetricTurn）；有偏向时它归受力侧，
+				// 受力侧另外再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
+				double apex = randomApex(random, high, symmetricTurn, speed);
 				if (biased != 0) {
 					apex = Math.min(apex + BIAS_APEX_BONUS, FLURRY_APEX_CAP);   // 受力侧再抬高，仍封顶
 				}
@@ -460,6 +484,7 @@ public final class SnowSpray {
 		// 单板「板端」额外那一簇（W 前倾 → 板后 / S 后倾 → 板前；biasEnd = 0 就整段跳过）：
 		// 出生点在身体沿行进方向偏移 biasEnd × END_OFFSET 处，横向 ±END_LATERAL、沿向 ±END_SPREAD 摊开，
 		// 顶点走与扬起层同一套 randomApex 再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
+		// 这里仍传 turning：单板 biasSide 恒为 0，turning 就等于 symmetricTurn（板端簇的对称转向加成照旧）。
 		if (biasEnd != 0) {
 			double endX = player.getX() + dirX * (biasEnd * END_OFFSET);
 			double endZ = player.getZ() + dirZ * (biasEnd * END_OFFSET);
@@ -513,9 +538,12 @@ public final class SnowSpray {
 
 	/**
 	 * 抽一颗扬起雪屑的顶点高度（格）：区间随速度从「贴地」长到「胸 / 头」，
-	 * 高飞档取区间上半、低飞档取下半，转向再 +{@link #FLURRY_APEX_TURN_BONUS}，最后一律夹到 {@link #FLURRY_APEX_CAP}。
+	 * 高飞档取区间上半、低飞档取下半，{@code turnBonus} 为真时再 +{@link #FLURRY_APEX_TURN_BONUS}，最后一律夹到 {@link #FLURRY_APEX_CAP}。
+	 *
+	 * <p>{@code turnBonus} 是「<b>要不要拿转向的对称加成</b>」，不是裸的 {@code turning}：侧循环传 {@code symmetricTurn}
+	 * （有按键偏向时为假，转向加成改由受力侧的 {@link #BIAS_APEX_BONUS} 承担）；单板板端那一簇仍传 {@code turning}。
 	 */
-	private static double randomApex(RandomSource random, boolean high, boolean turning, double speed) {
+	private static double randomApex(RandomSource random, boolean high, boolean turnBonus, double speed) {
 		double t = Mth.clamp((speed - APEX_SPEED_LO) / (APEX_SPEED_HI - APEX_SPEED_LO), 0.0D, 1.0D);
 		double lo = Mth.lerp(t, APEX_LOW_FROM, APEX_LOW_TO);
 		double hi = Mth.lerp(t, APEX_HIGH_FROM, APEX_HIGH_TO);
@@ -523,7 +551,7 @@ public final class SnowSpray {
 		double apex = high
 				? mid + random.nextDouble() * (hi - mid)
 				: lo + random.nextDouble() * (mid - lo);
-		if (turning) {
+		if (turnBonus) {
 			apex += FLURRY_APEX_TURN_BONUS;
 		}
 		return Math.min(apex, FLURRY_APEX_CAP);
