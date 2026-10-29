@@ -72,18 +72,21 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>双板 = 弯外侧</b>：按 A（左转，{@code sideSign = +1}）时身体<b>右侧</b>、按 D（{@code -1}）时
  *       <b>左侧</b>那一侧的数量 ×{@link #BIAS_COUNT_MUL}、扬起层顶点 +{@link #BIAS_APEX_BONUS} 格
  *       （所以 {@code biasSide = sideSign(keys)} —— 与 {@code side} 是同一套符号）；</li>
- *   <li><b>单板 = 板端</b>：按 W（前倾）在人<b>背后</b>、按 S（后倾）在人<b>正前方</b>，偏移沿<b>身体朝向</b>
- *       （{@code SnowboardControl.frontLocked}）而不是行进方向 —— 单板横着滑，行进方向几乎与身体正面垂直，
- *       拿它当轴那簇雪就拍到侧面去了 —— 偏移 {@link #END_OFFSET} 格，<b>额外</b>加一簇
- *       {@link #END_EXTRA_PER_TICK}（转向时再加 {@link #TURN_EXTRA_PER_SIDE}）颗扬起级粒子；</li>
+ *   <li><b>单板 = 板端 + 弯外侧（同一套旋钮）</b>：按 W（前倾）在人<b>背后</b>、按 S（后倾）在人<b>正前方</b>，
+ *       偏移沿<b>身体朝向</b>（{@code SnowboardControl.frontLocked}）而不是行进方向 —— 单板横着滑，
+ *       行进方向几乎与身体正面垂直，拿它当轴那簇雪就拍到侧面去了 —— 偏移 {@link #END_OFFSET} 格，
+ *       <b>额外</b>加一簇 {@link #END_EXTRA_PER_TICK}（转向时再加 {@link #TURN_EXTRA_PER_SIDE}）颗扬起级粒子；
+ *       <b>同时</b>「本 tick 速度方向转过的那一侧（弯外侧）」也吃 {@link #BIAS_COUNT_MUL} 与
+ *       {@link #BIAS_APEX_BONUS}（与双板同一套旋钮）：转角 {@code turnDelta > 0} ＝ 右转 ⇒ 弯心在右 ⇒
+ *       外侧是<b>左</b>（{@code side = -1}），{@code turnDelta < 0} 反之；<b>没在转向时两侧仍完全对称</b>；</li>
  *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
  * </ul>
  * <b>转向的对称加成只在「没有任何按键偏向」时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
- * {@link #FLURRY_APEX_TURN_BONUS} 那 0.35 格，在 {@code biasSide != 0}（双板按着 A / D）时<b>只加在受力侧</b>；
- * 在 {@code biasEnd != 0}（单板按着 W / S）时<b>两侧一颗都不加</b>，改由板端那一簇自己吃
- * （否则两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
+ * {@link #FLURRY_APEX_TURN_BONUS} 那 0.35 格，在 {@code biasSide != 0}（双板按着 A / D、单板按着 W / S
+ * 且在转向）时<b>只加在受力侧</b>；在 {@code biasEnd != 0}（单板按着 W / S）时<b>两侧不加这一份对称加成</b>，
+ * 改由板端那一簇自己吃（否则两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
  * —— 双板按住 A/D 时落地对齐每 tick 要转好几度，超过 {@link #TURN_DEGREES_PER_TICK}，{@code turning} 全程为真）。
- * 两个偏向都是 0（没按键 / 拿不到按键 / 其它玩家）时与改前完全一致：两侧都给。
+ * 两个偏向都是 0（没按键 / 拿不到按键 / 其它玩家 / 单板没在转向）时与改前完全一致：两侧都给。
  */
 public final class SnowSpray {
 	/** 唯一的雪粒子：{@code ITEM_SNOWBALL} = 雪球崩碎的白色碎屑（重力 1.0，会落回雪面）。 */
@@ -156,7 +159,8 @@ public final class SnowSpray {
 	private static final double APEX_HIGH_TO = 2.30D;
 	/**
 	 * 转向时顶点再抬高这么多格（转急弯把雪甩到身上）；<b>只有没有按键偏向时才铺到两侧</b>：
-	 * 双板按 A / D 时只落在受力侧，单板按 W / S 时两侧不给、由板端那一簇自己吃（见 {@link #TURN_EXTRA_PER_SIDE}）。
+	 * 双板按 A / D、以及单板按 W / S 且真在转向时只落在受力侧（弯外侧），单板压着刃但没转向时
+	 * 两侧不给、由板端那一簇自己吃（见 {@link #TURN_EXTRA_PER_SIDE}）。
 	 */
 	private static final double FLURRY_APEX_TURN_BONUS = 0.35D;
 	/** 顶点封顶（格）：任何情况下不许超过它（避免又变成雪柱）。 */
@@ -182,8 +186,9 @@ public final class SnowSpray {
 	 * <p><b>只有完全没有按键偏向时才会铺到两侧</b>（{@code symmetricTurn = turning && biasSide == 0 && biasEnd == 0}）：
 	 * <ul>
 	 *   <li>双板按着 A / D（{@code biasSide != 0}）→ 这 4 颗只给受力侧，弯里侧保持基础值；</li>
-	 *   <li>单板按着 W / S（{@code biasEnd != 0}）→ 两侧一颗都不加，这 4 颗改由板端那一簇自己吃
-	 *       （{@link #END_EXTRA_PER_TICK} → 8 + 4 = 12）；</li>
+	 *   <li>单板按着 W / S 且在转向（{@code biasSide != 0} 取弯外侧）→ 同样只给受力侧；</li>
+	 *   <li>单板按着 W / S 但没在转向（{@code biasEnd != 0} 而 {@code biasSide == 0}）→ 两侧都不加这一份，
+	 *       只有板端那一簇照旧多吃这 4 颗（{@link #END_EXTRA_PER_TICK} → 8 + 4 = 12）；</li>
 	 *   <li>没按键 / 拿不到按键 / 其它玩家 → 两侧都给（与改前一致）。</li>
 	 * </ul>
 	 * 否则按着键时两侧同时 +4 颗，看着就是「两边一起变多」、偏向被冲淡。
@@ -196,17 +201,22 @@ public final class SnowSpray {
 	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
 	// 其它玩家拿不到输入 → 下面两个「偏向」都是 0，左右 / 前后保持对称（与旧行为一致）。
 	/**
-	 * <b>双板「弯外侧」的数量倍率</b>：按 A（左转，{@code sideSign = +1}）时<b>身体右侧</b>
+	 * <b>「弯外侧」的数量倍率</b>：双板按 A（左转，{@code sideSign = +1}）时<b>身体右侧</b>
 	 * （{@code side = +1}）、按 D（{@code -1}）时<b>身体左侧</b>（{@code side = -1}）那一侧的贴地层与扬起层
 	 * 数量 × 这个值，弯里侧仍按原公式 —— 切起来的雪本来就该堆在弯外那一侧
 	 * （{@code biasSide = sideSign(keys)}；{@code side} 的正负见侧循环：+1 = 右向量那一侧）。
+	 *
+	 * <p><b>单板同一套旋钮</b>：按着 W / S 且本 tick 速度方向转过
+	 * {@link #TURN_DEGREES_PER_TICK} 以上时，受力侧 = 这一 tick 转弯的<b>外侧</b>
+	 * （{@code turnDelta > 0} ＝ 右转 ⇒ 弯心在右 ⇒ 外侧是左 {@code = -1}；{@code turnDelta < 0} 反之），
+	 * 没在转向时两侧对称。
 	 *
 	 * <p><b>调手感</b>：调「弯外侧比内侧厚多少」—— 2.0 ＝ 两倍；1.0 退回完全对称（即旧手感），
 	 * 3.0 会一眼看出偏向。只改<b>数量</b>，高度看 {@link #BIAS_APEX_BONUS}。
 	 */
 	private static final double BIAS_COUNT_MUL = 2.0D;
 	/**
-	 * <b>受力侧（双板弯外侧 / 单板板端那一簇）的顶点加高</b>（格）：该侧扬起层顶点再 + 这个值，
+	 * <b>受力侧（双板弯外侧 / 单板弯外侧与板端那一簇）的顶点加高</b>（格）：该侧扬起层顶点再 + 这个值，
 	 * 最后仍夹 {@link #FLURRY_APEX_CAP} —— 加在 {@link #randomApex} 抽完之后。
 	 * 转向的 {@link #FLURRY_APEX_TURN_BONUS} 在<b>有按键偏向时只给受力侧</b>，所以两条不会同时叠在一颗上：
 	 * 受力侧拿的是这一条、弯里侧拿基础值（没按键时才是两侧都拿转向那条）。
@@ -367,6 +377,9 @@ public final class SnowSpray {
 			// 转向检测（两板通用）：滑行方向这一 tick 摆了多少。每 tick 都写回（即使这 tick 不喷粒子），
 			// 否则重新开始喷的那一刻会拿一个几秒前的方向去比，误判成「在转向」。
 			boolean turning = false;
+			// 本 tick 速度方向摆过的角度（弧度，已归一化到 (−π, π]，+ = 朝右向量那侧转），
+			// 只给单板定「弯外侧」用；没有上一 tick 的方向 / 没在动时是 0。
+			double turnDelta = 0.0D;
 			if (speed >= 1.0E-4D) {
 				Vec3 motion = player.getDeltaMovement();
 				double dir = Math.atan2(motion.z, motion.x);
@@ -379,7 +392,11 @@ public final class SnowSpray {
 					while (delta < -Math.PI) {
 						delta += Math.PI * 2.0D;
 					}
-					turning = Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK);
+					// 判据带 1e-9 弧度容差：carve 的 rotateVelocity 每 tick 正好转 TURN_RATE_DEGREES（= TURN_DEGREES_PER_TICK）
+					// 2°，严格的 `>` 会让浮点末位噪声决定这一 tick 算不算「在转向」（纯 carve 实测约 1/4–1/3 的 tick
+					// 落在阈值下面），单板的弯外侧偏向与板端簇的转向加成就会跟着闪。按「≥ 阈值 − 1e-9」算。
+					turning = Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK) - 1.0E-9D;
+					turnDelta = delta;
 				}
 			}
 			int cooldown = BURST_COOLDOWN.getOrDefault(id, 0);
@@ -419,13 +436,17 @@ public final class SnowSpray {
 			// 别人（以及本地输入拿不到时）一律 null → 两侧 / 两端保持对称，与旧行为一致。
 			Input keys = player == client.player && client.player != null && client.player.input != null
 					? client.player.input.keyPresses : null;
-			spray(level, player, speed, turning, surface, keys);
+			spray(level, player, speed, turning, turnDelta, surface, keys);
 		}
 	}
 
-	/** 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，数量都随速度变多；扬起层顶点高度随速度长（见 {@link #randomApex}）。 */
-	private static void spray(ClientLevel level, Player player, double speed, boolean turning, double surface,
-			Input keys) {
+	/**
+	 * 滑行中持续扬雪：贴地雪屑 + 扬起雪屑，数量都随速度变多；扬起层顶点高度随速度长（见 {@link #randomApex}）。
+	 *
+	 * @param turnDelta 本 tick 速度方向摆过的角度（弧度，+ = 朝右向量那侧转）；单板据此把受力侧定在<b>弯外侧</b>
+	 */
+	private static void spray(ClientLevel level, Player player, double speed, boolean turning, double turnDelta,
+			double surface, Input keys) {
 		Vec3 motion = player.getDeltaMovement();
 		double dirX = motion.x / speed;
 		double dirZ = motion.z / speed;
@@ -435,18 +456,25 @@ public final class SnowSpray {
 		double rightX = -dirZ;
 		double rightZ = dirX;
 		RandomSource random = player.getRandom();
-		// 两个「偏向」都从按键来，拿不到按键就都是 0 ＝ 对称（旧行为）：
+		// 两个「偏向」：拿不到按键（其它玩家 / 本地输入为空）时都是 0 ＝ 对称（旧行为）：
 		//   双板 → 弯外侧：sideSign A=+1（左转）→ biasSide=+1（身体右侧更猛）、D=-1 → -1（左侧更猛）；
-		//   单板 → 板端：W 前倾 → 背后（biasEnd=-1）、S 后倾 → 正前方（+1），W/S 同按或都没按 → 0。
-		// 两组互斥：单板不算弯外侧，双板不算板端那一簇。
+		//   单板 → 板端：W 前倾 → 背后（biasEnd=-1）、S 后倾 → 正前方（+1），W/S 同按或都没按 → 0；
+		//          板端照旧，另外**按着 W / S 且本 tick 在转向**时，受力侧 = 这一 tick 转弯的**外侧**
+		//          （与双板同一套 BIAS_COUNT_MUL / BIAS_APEX_BONUS），没在转向就仍对称。
 		boolean snowboard = SnowboardControl.isSnowboard(player);
-		int biasSide = snowboard ? 0 : (int) SnowboardControl.sideSign(keys);
 		int biasEnd = (snowboard && keys != null && keys.forward() != keys.backward())
 				? (keys.forward() ? -1 : 1) : 0;
+		// 单板的弯外侧符号：dir = atan2(dz, dx)、右向量 = (−sinθ, cosθ)，θ 增大 ⇒ 速度方向朝右向量偏
+		// （右转）⇒ 弯心在右 ⇒ 外侧是左 = side −1。数值验算（Python，三点定曲率圆心）：θ = 0°/90°/−45° 上
+		// delta = ±2.5° 时圆心都落在 right 向量那侧（dot(圆心−位置, right) 与 delta 同号），外侧符号恒为 −sign(delta)。
+		int biasSide = snowboard
+				? (keys != null && biasEnd != 0 && turning && turnDelta != 0.0D ? (turnDelta > 0.0D ? -1 : 1) : 0)
+				: (int) SnowboardControl.sideSign(keys);
+		// 两组互斥：单板不算「按 A / D 的弯外侧」，双板不算板端那一簇。
 		// 转向的**对称**加成（两侧都 +TURN_EXTRA_PER_SIDE 颗、顶点都 +FLURRY_APEX_TURN_BONUS 格）只在
 		// **完全没有按键偏向**时生效（biasSide = 0 且 biasEnd = 0：没按键 / 拿不到按键 / 其它玩家 —— 与旧行为一致）。
-		// 有偏向时：双板那 4 颗只加在受力侧；单板改由板端那一簇自己吃 —— 否则按 W / S 时两侧同时 +4 颗 / +0.35 格，
-		// 而单板只要在 carve（压着刃）就一直在转向，turning 全程为真，看着就是「两边一起变多」、板端的偏向被冲淡。
+		// 有偏向时：那 4 颗只加在受力侧；单板压着刃但没转向时两侧都不加，改由板端那一簇自己吃 ——
+		// 否则按 W / S 时两侧同时 +4 颗 / +0.35 格，看着就是「两边一起变多」、弯外侧 / 板端的偏向被冲淡。
 		boolean symmetricTurn = turning && biasSide == 0 && biasEnd == 0;
 		// 数量：保底 1 颗 + 随速度线性涨，全程单调（0.1 → 1 / 1、0.3 → 3 / 5、0.85 → 8 / 14）。
 		// 那个 1e-9 是二进制浮点的取整噪声补偿：0.3 − 0.06 会被算成 0.23999…，×20 直接截断会少一颗。
@@ -461,8 +489,8 @@ public final class SnowSpray {
 		double fan = 1.0D + 1.6D * Mth.clamp((speed - MIN_SPEED) / (APEX_SPEED_HI - MIN_SPEED), 0.0D, 1.0D);
 		for (int side = -1; side <= 1; side += 2) {
 			// side 的含义由 rightX/rightZ 决定：+1 = 沿右向量（身体右侧）、-1 = 身体左侧。
-			// 弯外侧（双板按 A / D 的受力侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
-			// biasSide = 0（单板 / 没按键 / 别人）时 side 永远不等于它 ＝ 完全对称。
+			// 弯外侧（双板按 A / D；单板按 W / S 且在转向 = 本 tick 转弯的外侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
+			// biasSide = 0（没按键 / 别人 / 单板没在转向）时 side 永远不等于它 ＝ 完全对称。
 			int biased = side == biasSide ? 1 : 0;
 			int fleckCount = biased != 0 ? (int) (flecks * BIAS_COUNT_MUL) : flecks;
 			// 转向那份额外 4 颗：有按键偏向时**只给受力侧**（弯里侧不加，否则两侧一起变厚、看不出偏向）；
@@ -575,7 +603,8 @@ public final class SnowSpray {
 	 * 高飞档取区间上半、低飞档取下半，{@code turnBonus} 为真时再 +{@link #FLURRY_APEX_TURN_BONUS}，最后一律夹到 {@link #FLURRY_APEX_CAP}。
 	 *
 	 * <p>{@code turnBonus} 是「<b>要不要拿转向的对称加成</b>」，不是裸的 {@code turning}：侧循环传 {@code symmetricTurn}
-	 * （有任何按键偏向时都为假：双板的转向加成改由受力侧的 {@link #BIAS_APEX_BONUS} 承担，单板则整个由板端那一簇承担）；
+	 * （有任何按键偏向时都为假：转向加成改由受力侧的 {@link #BIAS_APEX_BONUS} 承担 —— 双板按 A / D、
+	 * 单板按 W / S 且真在转向时都是这条路；单板没转向时仍由板端那一簇自己吃 {@code turning}）。
 	 * 单板板端那一簇仍传 {@code turning}（它自己吃这一份额外加成）。
 	 */
 	private static double randomApex(RandomSource random, boolean high, boolean turnBonus, double speed) {
