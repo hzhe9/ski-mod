@@ -53,9 +53,10 @@ import net.minecraft.world.phys.Vec3;
  *       不加这三道闸门时从一两格高落地也会炸一大团。</li>
  * </ul>
  *
- * <p><b>横向不再固定成两条线</b>：每颗粒子自己抽横向落点（{@link #LATERAL_MIN}–{@link #LATERAL_MAX}）与
- * 横向速度（{@link #OUTWARD_MIN}–{@link #OUTWARD_MAX}，再叠 {@link #OUTWARD_JITTER} 的正负抖动），
- * 高速再按速度把横向速度扇开（{@code fan}）—— 一片雾，不是两条平行线。
+ * <p><b>横向不再固定成两条线、也不再往回抖</b>：每颗粒子自己抽横向落点（{@link #LATERAL_MIN}–{@link #LATERAL_MAX}）与
+ * 横向速度（{@link #OUTWARD_MIN}–{@link #OUTWARD_MAX}，再叠 {@link #OUTWARD_JITTER} 的<b>只朝外</b>抖动），
+ * 高速再按速度把横向速度扇开（{@code fan}）—— 一片雾，不是两条平行线；而且左侧的雪一定朝左、右侧一定朝右
+ * （抖动只放大外抛量，落点与速度恒同号），全速率下都不存在「一半朝内」抵消。
  * <b>贴地层与扬起层各一套参数</b>：贴地层走 {@link #FLECK_LATERAL_MIN}–{@link #FLECK_LATERAL_MAX}（0.20–1.10 格）、
  * {@link #FLECK_OUTWARD_MIN}–{@link #FLECK_OUTWARD_MAX}、{@link #FLECK_OUTWARD_JITTER}、{@link #FLECK_SPREAD}，
  * 区间更外更宽 —— 低速时视野里几乎全是贴地层，原来那套窄区间看着是一撮挤在板边。
@@ -216,6 +217,17 @@ public final class SnowSpray {
 	 */
 	private static final double BIAS_COUNT_MUL = 2.0D;
 	/**
+	 * <b>受力侧的横向（向外）速度倍率</b>：{@code biasSide} 那一侧（双板 = 弯外侧；单板 = 本 tick 转弯的外侧）
+	 * 的<b>贴地层与扬起层</b>横向速度再 × 这个值 —— 与 {@link #BIAS_COUNT_MUL}（数量）、
+	 * {@link #BIAS_APEX_BONUS}（顶点高度）成套：雪不但在那一侧更多、更高，还<b>抛得更远</b>。
+	 *
+	 * <p>只乘横向分量，不动沿行进方向的分量（{@code along} / {@link #BACKWARD}）；
+	 * 两侧的横向速度都只朝外（抖动只往正方向加，见 {@link #OUTWARD_JITTER}），所以不会与「朝内抖动」抵消。
+	 *
+	 * <p><b>调手感</b>：调「弯外侧的雪比内侧冲多远」—— 1.5 ＝ 横向速度多五成；1.0 退回各侧同速。
+	 */
+	private static final double BIAS_OUTWARD_MUL = 1.5D;
+	/**
 	 * <b>受力侧（双板弯外侧 / 单板弯外侧与板端那一簇）的顶点加高</b>（格）：该侧扬起层顶点再 + 这个值，
 	 * 最后仍夹 {@link #FLURRY_APEX_CAP} —— 加在 {@link #randomApex} 抽完之后。
 	 * 转向的 {@link #FLURRY_APEX_TURN_BONUS} 在<b>有按键偏向时只给受力侧</b>，所以两条不会同时叠在一颗上：
@@ -272,10 +284,17 @@ public final class SnowSpray {
 	 */
 	private static final double LATERAL_MIN = 0.10D;
 	private static final double LATERAL_MAX = 0.80D;
-	/** 横向（向外）速度区间（格/tick）：抽在这个区间里，再叠 {@link #OUTWARD_JITTER} 的正负抖动。 */
-	private static final double OUTWARD_MIN = 0.05D;
-	private static final double OUTWARD_MAX = 0.30D;
-	/** 横向速度的正负抖动：让一部分粒子稍微往里收，避免所有雪都朝同一个方向排开。 */
+	/** 横向（向外）速度区间（格/tick）：抽在这个区间里，再叠 {@link #OUTWARD_JITTER} 的<b>只朝外</b>的抖动。 */
+	private static final double OUTWARD_MIN = 0.10D;
+	private static final double OUTWARD_MAX = 0.42D;
+	/**
+	 * 横向速度的抖动（格/tick，<b>只往正方向加</b>：{@code out = side × (base + jitter)}）——
+	 * 每颗抽 {@code [0, OUTWARD_JITTER]} 叠在基值上，避免所有雪精确认同一个方向上排开。
+	 *
+	 * <p><b>为什么不再是 ±</b>：旧的 {@code randomSign × OUTWARD_JITTER} 会让一部分粒子<b>朝内</b>飞，
+	 * 与「板左侧的雪往左抛、右侧往右抛」正好抵消一截 —— 看着两侧的雪都往板中间塌。
+	 * 现在抖动只放大外抛量，落点（{@code lateral}）与速度恒同号。
+	 */
 	private static final double OUTWARD_JITTER = 0.06D;
 	/** 沿滑行方向的前后抖动（格/tick）：雪屑不排在同一条法线上。 */
 	private static final double ALONG_JITTER = 0.10D;
@@ -296,9 +315,9 @@ public final class SnowSpray {
 	 */
 	private static final double FLECK_LATERAL_MIN = 0.20D;
 	private static final double FLECK_LATERAL_MAX = 1.10D;
-	private static final double FLECK_OUTWARD_MIN = 0.12D;
-	private static final double FLECK_OUTWARD_MAX = 0.45D;
-	/** 贴地层向外速度的正负抖动：比扬起层 ±0.06 大，雪屑才不是一律朝外排。 */
+	private static final double FLECK_OUTWARD_MIN = 0.22D;
+	private static final double FLECK_OUTWARD_MAX = 0.58D;
+	/** 贴地层向外速度的抖动：与扬起层同样<b>只往正方向加</b>（{@code [0, 0.10]}），比扬起层的 0.06 大 —— 雪屑才不是一律同一个外抛速度。 */
 	private static final double FLECK_OUTWARD_JITTER = 0.10D;
 	/** 贴地层出生点的水平散布（格）：比 {@link #SPREAD} 0.16 宽，同样几颗也不排在一条线上。 */
 	private static final double FLECK_SPREAD = 0.22D;
@@ -502,7 +521,12 @@ public final class SnowSpray {
 				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
 				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
 				double lateral = side * fleckLateral(random);
-				double out = side * fleckOutward(random) + randomSign(random) * FLECK_OUTWARD_JITTER;
+				// 横向速度：基值 + 只朝外的抖动，再乘左右符号 —— 抖动不再有「朝内」那一半，落点与速度恒同号。
+				// 受力侧（弯外侧）再 ×BIAS_OUTWARD_MUL，与 BIAS_COUNT_MUL / BIAS_APEX_BONUS 成套。
+				double out = side * (fleckOutward(random) + random.nextDouble() * FLECK_OUTWARD_JITTER);
+				if (biased != 0) {
+					out *= BIAS_OUTWARD_MUL;
+				}
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
 				double up = UPWARD * (FLECK_UPWARD_MIN
 						+ random.nextDouble() * (FLECK_UPWARD_MAX - FLECK_UPWARD_MIN));
@@ -524,7 +548,11 @@ public final class SnowSpray {
 				}
 				double vy = riseFor(apex);
 				double lateral = side * lateralOffset(random);
-				double out = (side * outwardSpeed(random) + randomSign(random) * OUTWARD_JITTER) * fan;
+				// 同样：抖动只朝外（[0, OUTWARD_JITTER]），受力侧 ×BIAS_OUTWARD_MUL，最后再按速度扇开（fan）。
+				double out = side * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan;
+				if (biased != 0) {
+					out *= BIAS_OUTWARD_MUL;
+				}
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
 				// 高飞档要活到顶点（≈26 tick），默认寿命均值才 10 tick —— 只抬这一档。
 				spawn(player.getX() + rightX * lateral + jitter(random),
@@ -593,7 +621,7 @@ public final class SnowSpray {
 		return (random.nextDouble() - 0.5D) * FLECK_SPREAD;
 	}
 
-	/** ±1：横向速度的正负抖动，让一部分雪稍微往里收。 */
+	/** ±1（只给板端那一簇用：它的横向落点围绕身体中线均匀抽，抖动仍允许往里）。 */
 	private static double randomSign(RandomSource random) {
 		return random.nextBoolean() ? 1.0D : -1.0D;
 	}
