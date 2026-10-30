@@ -34,7 +34,7 @@
 | `MOMENTUM_DECAY` | 0.998 | 滑行动量每 tick 保留比例 ＝ 有效摩擦力（**双板**；历史 0.985 → 0.993 → 0.99 → 用户 2026-10-13 定 0.998。0.998 = 每 tick 掉 0.2%，1 秒后剩 96%，半衰期 17.3 s） |
 | `ADD` / `MIN_PEAK` | 0.06 / 0.32 | 滑雪杖助推（原 0.1 / 0.45，用户要“慢一点”） |
 | `MOMENTUM_DECAY` | 0.998 | **单板**（用户 2026-10-13 定 0.998，与双板同值）——**平时（直行 / 未压刃）的摩擦**；0.998 = 每 tick 掉 0.2%，1 秒 −4%，半衰期 17.3 s |
-| `CARVE_MOMENTUM_DECAY` | 0.999 | **单板：转向期间（carve 生效，压着 W / S）专用的摩擦** —— 比平时的 0.998 再滑一点（0.999 = 每 tick 掉 0.1%，1 秒 −2%）。**改成 0.998 ＝ 转向与直行同摩擦**，改成 **1.0 ＝ 转向全程完全不掉速** |
+| `CARVE_MOMENTUM_DECAY` | 0.999 | **单板：转向期间（carve 生效，压着 W / S）专用的摩擦** —— 比平时的 0.998 再滑一点（0.999 = 每 tick 掉 0.1%，1 秒 −2%）。**改成 0.998 ＝ 转向与直行同摩擦**，改成 **1.0 ＝ 转向全程完全不掉速**。同一个常数还当**速度下限的衰减率**用：`SnowboardControl.guardCarveSpeed` 每 tick 拿 `入场速度 × 0.999^已持续 tick` 作下限（撞方块那一 tick 不补），所以平地转向的曲线由它决定，撞墙被砍半之后也能按这条曲线回来 |
 | （无刹车常量） | — | **单板：按 A/D 分“同向 / 反向”两种，但只在没压刃时算刹车**。① **反向按**（向左滑时按 D，且**没**按 W/S）＝刹车 —— 原版横移把人往右挪、速度自然抵消，代码**不覆盖玩家速度、也不托动量**（只把动量对齐当前速度），反着按才真的减得下来；② **同向按**（顺着滑行方向按）＝动量**托住**速度，下落加速攒出来的速度不会被地面摩擦（每 tick ×≈0.55）吃掉 —— 否则一直按住 A/D 下坡会“只有基础速度、叠加不上去”（用户报的正是这个）。③ **压着刃（W/S）时反向按侧压＝换刃转向，不再算刹车**：这也是转向，所以用 `CARVE_MOMENTUM_DECAY` 托住速度（旧行为下起弯那一下 0.5 → 0.165，掉 67% 且动量被清掉后整段弯回不来）。**S 与刹车无关** |
 | `BRAKE_DECAY` / `BRAKE_MIN_ALIGN` | 0.92 / 0.3 | **双板刹车**：按住 S 且「还在往前滑」（速度与**身体前方**点积 > 0.3）时，动量与速度每 tick ×0.92（1 秒剩 ≈19%，约 1 秒刹停），方向**不翻**；低于 0.3（横滑 / 倒滑）按 S 才是真的往后走。单板没有这两个常量 |
 | `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 |
@@ -57,7 +57,7 @@
 | A / D | 沿**身体朝向**的左右平移 —— `ClientInputMixin` 把左右输入按 `(身体朝向 − 视角)` 旋转后交回原版，所以视角转了也仍往同一侧平移；身体朝向不会因此改变。**速度不会被“拨”到侧向**：方向变化一律走 carve 的每 tick 旋转（与 W/S 同一套机制），只靠原版移动把位置走出来 |
 | W | **前倾**（**渐进**到位，不瞬跳；W 与 S 同按判中立，避免快速切换时跳成前倾）：**整个人连同脚上的板**绕脚底向前倾 `TILT_DEGREES`（15°），**相机位置跟着倾斜后的头**（前移 眼高·sin15°），但**视线朝向不变**（仍正对原来的方向）；**不给任何推进** |
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
-| **carve（切雪转弯）：W/S 只转向、不加力** | **前提是压刃**：必须按着 W 或 S，**光按 A/D 只是纯横移**。触发后身体朝向每 tick 转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），**速度的方向跟着转同样的角度**（`rotateVelocity`，大小不变）—— 朝向转多少速度方向转多少，带惯性的路线慢慢弯过去，全程**不补任何推力**（W/S 只改方向）。**转向期间的摩擦比直行更小**：用 `CARVE_MOMENTUM_DECAY` 0.999 托住速度（1 秒 −2%），而且此时按反向侧压是**换刃转向**、不再按刹车处理（`SnowboardControl.isCarving`）。<br>转向方向：按 A/D 时由侧压决定，没按 A/D 时只要滑速 ≥ `CARVE_MIN_SPEED` 就前倾/后倾各走一边；**后倾（S）＝后刃**，转向与前倾相反。腾空也能转 |
+| **carve（切雪转弯）：W/S 只转向、不加力** | **前提是压刃**：必须按着 W 或 S，**光按 A/D 只是纯横移**。触发后身体朝向每 tick 转 `TURN_RATE_DEGREES`（2°/tick ＝ 180°/s），**速度的方向跟着转同样的角度**（`rotateVelocity`，大小不变）—— 朝向转多少速度方向转多少，带惯性的路线慢慢弯过去，全程**不补任何推力**（W/S 只改方向）。**转向期间的摩擦比直行更小**：用 `CARVE_MOMENTUM_DECAY` 0.999 托住速度（1 秒 −2%），而且此时按反向侧压是**换刃转向**、不再按刹车处理（`SnowboardControl.isCarving`）。**转向期间速度不衰减（`guardCarveSpeed`）**：`SkiGlide` 在动量结算之后对单板调一次 `SnowboardControl.guardCarveSpeed`，每 tick 算下限 `入场速度 × CARVE_MOMENTUM_DECAY^持续 tick`，没撞到方块（`horizontalCollision` 为假）且当前水平速度低于它就缩放回去（方向不变、y 不动、`hurtMarked = true`），退出 carve 时清表 —— **只做下限、不封顶**（下坡加速自己涨上去的不会被拉回），撞墙那一 tick 不补，但下一个自由 tick 就回到这条曲线上。<br>转向方向：按 A/D 时由侧压决定，没按 A/D 时只要滑速 ≥ `CARVE_MIN_SPEED` 就前倾/后倾各走一边；**后倾（S）＝后刃**，转向与前倾相反。腾空也能转 |
 | 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（135°），合计 270 —— 只剩背后 90° 是禁区。**限位只有一处权威状态**：`client/SkiViewSmoothing` 的 `headOffset`（视角相对身体朝向的偏角）。鼠标每帧转视角时（`SkiHeadLimitMixin` 拦 `Entity#turn` 的 HEAD/TAIL）只把这一帧转过的角度记进 `headOffset` 并夹一次、撤掉越界那点；每帧再由 `CameraViewSmoothingMixin`（`Camera#alignWithEntity` 的 HEAD）用「按 `partialTick` 插值后的身体朝向 + `headOffset`」写一次 yaw。没顶到限位时视角留在世界坐标里不动（只听鼠标），顶到之后头随身体平滑拖走；**往回转立刻响应，没有死区** |
 | 空格 | **能跳** —— 原版跳跃（2026-10-15 起 `makeJump` 不再被取消；单板以前是禁止跳的） |
 | 鼠标（头 / 视角） | 可以转，但相对身体朝向限在 ±`VIEW_LIMIT_DEGREES`（见上一行的单一限位实现） |
@@ -66,7 +66,7 @@
 | 点杖冲刺 | 单板时不给冲刺（`SkiBoost.burst` 直接 return） |
 | 换朝向 | 把板脱下来再穿上（重新锁定） |
 
-> 单板的动量只在「下落加速」「按着 A / D 横移」和「转向（carve）」这三种情形下跟随，松开就靠原版摩擦停住；转向期间用的是更小的摩擦 `CARVE_MOMENTUM_DECAY` 0.999（直行仍是 `MOMENTUM_DECAY` 0.998）；双板同为 `SkisControl.MOMENTUM_DECAY` 0.998。
+> 单板的动量只在「下落加速」「按着 A / D 横移」和「转向（carve）」这三种情形下跟随，松开就靠原版摩擦停住；转向期间用的是更小的摩擦 `CARVE_MOMENTUM_DECAY` 0.999（直行仍是 `MOMENTUM_DECAY` 0.998），**并且另有一道速度下限 `guardCarveSpeed`（入场速度 × 0.999^持续 tick，撞方块那一 tick 不补，只做下限不封顶）—— 转向期间不会因为摩擦 / 撞墙把速度吃掉，撞完下一个自由 tick 就回到曲线上**；双板同为 `SkisControl.MOMENTUM_DECAY` 0.998。
 
 双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `util/IdMap` 的默认上限 64 就整表清空（所有这类 id 表都是 `IdMap`，超限自清）；双板的 A / D 每 tick 转 3.5°（`SkisControl.TURN_RATE_DEGREES`，≈70°/s，180° 约 2.6 s），**按 W 时身体再朝视角方向补 4°/tick**（`SkisControl.turnTowardView`）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
 
@@ -238,5 +238,5 @@
 | 站姿 | 腿往后倾 `SKI_LEG_TILT` -0.15 | 腿往后倾 `BOARD_LEG_TILT` -0.15（**与双板同值**，用户 2026-10-13 定） |
 | 视角限位 | **±`VIEW_LIMIT_DEGREES` 90°**（`SkisControl`）：鼠标能转，但相对锁定的身体朝向最多左右各 90°（合计 180°，刚好到正侧方）；没顶到限位时视角**留在世界坐标里不动**（身体在下面转），顶到之后头被身体拖着走。**按 W 时身体朝视角方向追 4°/tick**（`VIEW_TURN_RATE_DEGREES`）—— 追的是身体，视角在世界坐标里仍然不动 | **±`VIEW_LIMIT_DEGREES` 135°**（`SnowboardControl`）：同一套实现（`client/SkiViewSmoothing` 的唯一 `headOffset`，鼠标只记账、相机每帧写一次）、**各自一个常量** |
 | 音效 / 粒子 | 同一套：滑行雪粒子 + 随速度变密的切雪声（暂停即停，无风声） | 同左 |
-| 摩擦（动量每 tick 保留） | `SkisControl.MOMENTUM_DECAY` **0.998** | `SnowboardControl.MOMENTUM_DECAY` **0.998**（直行）/ **0.999**（carve 转向期间）—— 两板同值，用户 2026-10-13 定 |
+| 摩擦（动量每 tick 保留） | `SkisControl.MOMENTUM_DECAY` **0.998** | `SnowboardControl.MOMENTUM_DECAY` **0.998**（直行）/ **0.999**（carve 转向期间）—— 两板同值，用户 2026-10-13 定；单板 carve 另有速度下限 `guardCarveSpeed`（转向期间实际不衰减） |
 | 重力 | 穿板时 `GRAVITY_MULTIPLIER` **1.5**（`Attributes.GRAVITY` 0.08 → 0.12 格/tick²，跳高 → 0.93 格），脱板还原 | 单板 **1.3**（0.104 格/tick²，跳高 → 1.03 格）；各自一个常量，改一个不动另一个 |

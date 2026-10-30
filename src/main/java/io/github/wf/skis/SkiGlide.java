@@ -105,6 +105,9 @@ public final class SkiGlide {
 				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
 				trackDescent(player);
 				applyMomentum(player);
+				if (SnowboardControl.isSnowboard(player)) {
+					SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
+				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
 				}

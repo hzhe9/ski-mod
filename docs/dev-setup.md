@@ -67,7 +67,7 @@ python -m venv .venv
 | `SnowLanding.java` | 穿板摔在雪 / 冰面上免摔伤：Fabric `ServerLivingEntityEvents.ALLOW_DAMAGE` 事件（挂在 `hurtServer` 上，不需要 mixin），只拦 `DamageTypeTags.IS_FALL` |
 | `SkisControl.java` | **双板专属数值**（下落基数 0.1 / 单 tick 上限 / 重力倍数 1.5 / 速度上限 0.85 / 动量衰减 0.998 / 刹车 0.92）＋**身体朝向锁表 `BODY_YAW`** 与按键转向 `turnBody`（A / D 每 tick `TURN_RATE_DEGREES` 3.5°，只转身体；地面转向、空中不转）＋ **W 朝视角转向 `turnTowardView`**（`VIEW_TURN_RATE_DEGREES` 4°/tick，限幅不越过、残余 < 0.5° 停；同样只转身体）＋**视角限位 `VIEW_LIMIT_DEGREES` 90°**（左右各 90、合计 180；与单板各自一份常量） |
 | `SkiControl.java` | 方向控制：读玩家真实按键、离地高度判定、速度上限（单板不参与方向） |
-| `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致 |
+| `SnowboardControl.java` | 单板状态：锁住并**可被 carve 转动**的身体朝向、俯仰姿态、视角限制、carve 常量；`applyCarve` 由服务端与客户端**各跑一遍同一规则**以保持一致；`guardCarveSpeed` 在 carve 持续期间给水平速度一个「入场速度 × `CARVE_MOMENTUM_DECAY`^tick」的下限（撞方块那一 tick 不补），**转向期间不掉速** —— 由 `SkiGlide` 在动量结算之后调一次（只对单板） |
 | `mixin/client/ClientInputMixin.java` | 穿单板时把 A/D 换算到身体左右轴、丢掉前后分量（**空格不再被拦截**：2026-10-15 起单板也能跳）；**双板把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系**（W/S 沿身体前后走）并清掉横向输入（A/D 只转身体）；**没穿板原样交回原版** |
 | `client/SkiViewSmoothing.java` | **单板「身体拖视角」的每帧插值 + `turnView` 工具**：在 `Camera#alignWithEntity` 的 HEAD 每帧跑一次，把**锁定的身体朝向按 `partialTick` 插值**、用插值后的朝向把视角夹回各自限位（**双板 90° / 单板 135°**，`limit(snowboard)` 从两块板各自的常量取）；`renderBodyYaw` 供 `SnowboardHeadLimitMixin` 共用同一基准；`turnView` 给 `yRot / yRotO / yHeadRot / yHeadRotO` 同量偏移。**单板双板共用**：限位状态只有一个 `headOffset`，鼠标入口（`SkiHeadLimitMixin`）只按 `headOffset` 记账并撤掉越界那点，`frame` 是**唯一**的每帧写入点（目标 = 插值后的身体朝向 + `headOffset`），所以不会出现「两处各夹一次、基准差一帧互相拉回」。**为什么必须每帧**：`LocalPlayer#getViewYRot(float)` 不是乘客时直接返回裸 `getYRot()`，本地镜头没有任何帧间插值 |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |

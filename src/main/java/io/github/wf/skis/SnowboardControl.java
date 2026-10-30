@@ -2,6 +2,7 @@ package io.github.wf.skis;
 
 import io.github.wf.skis.util.IdMap;
 
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -36,6 +37,13 @@ public final class SnowboardControl {
 	private static final IdMap<Integer> HEAD_SIDE = new IdMap<>();
 	/** 实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
 	private static final IdMap<Float> HEAD_OFFSET = new IdMap<>();
+	/**
+	 * 实体 id → <b>本次 carve 的入口水平速度</b>（格/tick），见 {@link #guardCarveSpeed}。
+	 * 退出 carve 就清掉 —— 下一段弯重新记一次入口速度。
+	 */
+	private static final IdMap<Double> CARVE_SPEED = new IdMap<>();
+	/** 实体 id → 本次 carve <b>已经持续的 tick 数</b>（入口那一 tick 记 0），配 {@link #CARVE_SPEED} 算速度下限。 */
+	private static final IdMap<Integer> CARVE_TICKS = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -146,6 +154,8 @@ public final class SnowboardControl {
 		TILT_TARGET.remove(entityId);
 		HEAD_SIDE.remove(entityId);
 		HEAD_OFFSET.remove(entityId);
+		CARVE_SPEED.remove(entityId);
+		CARVE_TICKS.remove(entityId);
 	}
 
 	public static void forgetAll() {
@@ -154,6 +164,8 @@ public final class SnowboardControl {
 		TILT_TARGET.clear();
 		HEAD_SIDE.clear();
 		HEAD_OFFSET.clear();
+		CARVE_SPEED.clear();
+		CARVE_TICKS.clear();
 	}
 
 	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
@@ -321,6 +333,56 @@ public final class SnowboardControl {
 	/** 单板：下落加速每累计这么多格结算一次（比双板的 1.0 格细）。 */
 	public static double descentStepBlocks() {
 		return DESCENT_STEP_BLOCKS;
+	}
+
+	/**
+	 * <b>转向期间不掉速</b>：carve 持续期间给水平速度一个「按入口速度缓慢衰减」的下限。
+	 *
+	 * <p>口径（每 tick 在 {@code SkiGlide} 的动量结算<b>之后</b>调一次）：
+	 * <ul>
+	 *   <li><b>进入</b>（上一 tick 没在 carve、这一 tick {@link #isCarving} 为真）：记下
+	 *       {@code entrySpeed = 当前水平速度}，本 tick 只是记账，不动速度；</li>
+	 *   <li><b>持续期间</b>每 tick 算下限 {@code target = entrySpeed × CARVE_MOMENTUM_DECAY^持续 tick 数}；
+	 *       只有<b>没撞到方块</b>（{@code horizontalCollision} 为假）且当前水平速度 &lt; target 时，
+	 *       才把水平速度<b>缩放</b>到 target（方向沿用当前方向、y 不动）并 {@code hurtMarked = true}；</li>
+	 *   <li><b>退出</b>（{@link #isCarving} 变假，比如松开 W / S）：两个表一起清掉，下一段弯重新记入口速度。</li>
+	 * </ul>
+	 *
+	 * <p><b>只做下限、不封顶</b>：下坡 / 下落加速自己涨上去的速度不会被它拉回去 —— 撞墙那一 tick 动量被砍半之后，
+	 * 下一个自由 tick 就能回到这条曲线上（旧行为是从被砍半的动量继续衰减，整段弯都回不来）。
+	 * 用的是与动量同一个衰减常数，所以平地上这条下限与「动量托底」等价；它的意义是把<b>被截断后的恢复</b>
+	 * 锚定在入口速度上，而不是锚在被截断的那个值上。
+	 */
+	public static void guardCarveSpeed(ServerPlayer player) {
+		int entityId = player.getId();
+		Input keys = player.getLastClientInput();
+		Vec3 motion = player.getDeltaMovement();
+		double speed = motion.horizontalDistance();
+
+		if (!isCarving(keys, speed)) {
+			CARVE_SPEED.remove(entityId);
+			CARVE_TICKS.remove(entityId);
+			return;
+		}
+		Double entry = CARVE_SPEED.get(entityId);
+		if (entry == null) {
+			// 进入 carve 这一 tick：只记入口速度（下限就等于当前速度，不必动速度）
+			CARVE_SPEED.put(entityId, speed);
+			CARVE_TICKS.put(entityId, 0);
+			return;
+		}
+		int elapsed = CARVE_TICKS.getOrDefault(entityId, 0);
+		CARVE_TICKS.put(entityId, elapsed + 1);
+		if (player.horizontalCollision) {
+			return;   // 撞到方块这一 tick 不补（否则等于顶着墙往前推）
+		}
+		double target = Math.min(entry * Math.pow(CARVE_MOMENTUM_DECAY, elapsed), MAX_SPEED);
+		if (speed >= target || speed <= 1.0E-6D) {
+			return;   // 已经够快（下坡加速涨上去的也算）；速度几乎为 0 时没有方向可缩放
+		}
+		double keep = target / speed;
+		player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
+		player.hurtMarked = true;
 	}
 
 	/**
