@@ -82,8 +82,12 @@ def check_constants(tuning_path=None):
             checked += 1
             if name not in src:
                 problems.append(f"tuning.md:{lineno} 幻名 {name}（源码里没有这个常量）")
-            elif not any(abs(v - vals[i]) < 1e-9 for v in src[name]):
-                problems.append(f"tuning.md:{lineno} {name} 文档 {vals[i]} != 源码 {src[name]}")
+                continue
+            # 只比数值常量：布尔 / 枚举类常量（如 `SINGLE_SIDE_SPRAY = true`、`SNOW = ParticleTypes...`）
+            # 在源码里是字符串，拿去减会抛 TypeError —— 它们的值列没有数字，本来也进不到这里。
+            numeric = [v for v in src[name] if isinstance(v, (int, float))]
+            if numeric and not any(abs(v - vals[i]) < 1e-9 for v in numeric):
+                problems.append(f"tuning.md:{lineno} {name} 文档 {vals[i]} != 源码 {numeric}")
     return checked
 
 

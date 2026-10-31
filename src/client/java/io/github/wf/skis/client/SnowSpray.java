@@ -79,7 +79,9 @@ import net.minecraft.world.phys.Vec3;
  *       <b>额外</b>加一簇 {@link #END_EXTRA_PER_TICK}（转向时再加 {@link #TURN_EXTRA_PER_SIDE}）颗扬起级粒子；
  *       <b>同时</b>「本 tick 速度方向转过的那一侧（弯外侧）」也吃 {@link #BIAS_COUNT_MUL} 与
  *       {@link #BIAS_APEX_BONUS}（与双板同一套旋钮）：转角 {@code turnDelta > 0} ＝ 右转 ⇒ 弯心在右 ⇒
- *       外侧是<b>左</b>（{@code side = -1}），{@code turnDelta < 0} 反之；<b>没在转向时两侧仍完全对称</b>；</li>
+ *       外侧是<b>左</b>（{@code side = -1}），{@code turnDelta < 0} 反之；<b>没在转向时两侧仍完全对称</b>；
+ *       <b>真在转向时弯内侧一颗都不喷</b>（{@link #SINGLE_SIDE_SPRAY}）：那侧的贴地层与扬起层数量都置 0，
+ *       所以单板切弯只看到<b>弯外侧一条雪线</b>（这是「转向时往两边扩散成两条线」的修法）；</li>
  *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
  * </ul>
  * <b>转向的对称加成只在「没有任何按键偏向」时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
@@ -202,6 +204,20 @@ public final class SnowSpray {
 	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
 	// 其它玩家拿不到输入 → 下面两个「偏向」都是 0，左右 / 前后保持对称（与旧行为一致）。
 	/**
+	 * <b>单板转向时只喷弯外侧</b>（<b>开关，默认开</b>）：置 {@code true} 时，若本 tick 的
+	 * {@code biasSide != 0}（＝单板按着 W / S 且确实在转向）且 {@code snowboard}，则<b>弯内侧那一侧</b>
+	 * 的贴地层 {@code fleckCount} 与扬起层 {@code flurryCount} 都置 <b>0</b> —— 视野里只剩弯外侧<b>一条雪线</b>，
+	 * 不再左右各一条。弯外侧照旧吃 {@link #BIAS_COUNT_MUL} / {@link #TURN_EXTRA_PER_SIDE} /
+	 * {@link #BIAS_APEX_BONUS} / {@link #BIAS_OUTWARD_MUL}。
+	 *
+	 * <p>只有单板、且只在真转向时生效：<b>双板按 A / D 一行不动</b>（弯外侧加强、内侧保留基础值）；
+	 * {@code biasSide == 0}（没在转向 / 拿不到按键 / 其它玩家）时两侧保持完全对称；
+	 * 板端那一簇（{@link #END_EXTRA_PER_TICK}，跟着 {@code biasEnd} 走）也不受这个开关影响。
+	 *
+	 * <p><b>想改回「两侧都喷」的旧行为</b>：这一行置 {@code false} 即可，其它都不用动。
+	 */
+	private static final boolean SINGLE_SIDE_SPRAY = true;
+	/**
 	 * <b>「弯外侧」的数量倍率</b>：双板按 A（左转，{@code sideSign = +1}）时<b>身体右侧</b>
 	 * （{@code side = +1}）、按 D（{@code -1}）时<b>身体左侧</b>（{@code side = -1}）那一侧的贴地层与扬起层
 	 * 数量 × 这个值，弯里侧仍按原公式 —— 切起来的雪本来就该堆在弯外那一侧
@@ -210,7 +226,8 @@ public final class SnowSpray {
 	 * <p><b>单板同一套旋钮</b>：按着 W / S 且本 tick 速度方向转过
 	 * {@link #TURN_DEGREES_PER_TICK} 以上时，受力侧 = 这一 tick 转弯的<b>外侧</b>
 	 * （{@code turnDelta > 0} ＝ 右转 ⇒ 弯心在右 ⇒ 外侧是左 {@code = -1}；{@code turnDelta < 0} 反之），
-	 * 没在转向时两侧对称。
+	 * 没在转向时两侧对称。单板转向时<b>弯里侧不是「按原公式」，而是直接归零</b>（{@link #SINGLE_SIDE_SPRAY}：
+	 * 两层数量都置 0）—— 只剩弯外侧一条雪线；双板的弯里侧仍是原公式。
 	 *
 	 * <p><b>调手感</b>：调「弯外侧比内侧厚多少」—— 2.0 ＝ 两倍；1.0 退回完全对称（即旧手感），
 	 * 3.0 会一眼看出偏向。只改<b>数量</b>，高度看 {@link #BIAS_APEX_BONUS}。
@@ -517,6 +534,14 @@ public final class SnowSpray {
 			int turnExtra = biased != 0 ? (turning ? TURN_EXTRA_PER_SIDE : 0)
 					: (symmetricTurn ? TURN_EXTRA_PER_SIDE : 0);
 			int flurryCount = (biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries) + turnExtra;
+			// 单板转向时**弯内侧一颗都不喷**（SINGLE_SIDE_SPRAY）：贴地层与扬起层都归零，只剩弯外侧一条雪线。
+			// 只在 snowboard && biasSide != 0（单板按着 W / S 且真在转向）时生效 —— 双板按 A / D 走不到这里
+			// （它的 biasSide 来自 sideSign(keys)，但 snowboard 为假），没在转向时 biasSide == 0 也走不到，
+			// 所以双板与「两侧对称」的旧行为一行不变；置 false 就整段失效、回到两侧都喷。
+			if (SINGLE_SIDE_SPRAY && snowboard && biasSide != 0 && side != biasSide) {
+				fleckCount = 0;
+				flurryCount = 0;
+			}
 			for (int i = 0; i < fleckCount; i++) {
 				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
 				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
