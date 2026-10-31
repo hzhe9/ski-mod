@@ -44,7 +44,7 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>扬起雪屑</b>：每颗抽一个<b>随速度增长</b>的顶点高度（{@link #randomApex}：速度 0.10 时
  *       0.20–0.40 格贴着地面，0.85 时 1.00–2.30 格胸到头），初速由 {@link #riseFor} 按离散粒子物理反解；
  *       按 {@link #FLURRY_HIGH_FRACTION} 拆两档在空中形成层次；高飞档寿命抬到 {@link #FLURRY_HIGH_LIFETIME}；
- *       转向（一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上）时这一层更多、再抬高 {@link #FLURRY_APEX_TURN_BONUS} 格
+ *       转向（一 tick 转过 {@link #TURN_DEGREES_PER_TICK} 度以上<b>且滑速 ≥ {@link #TURN_MIN_SPEED}</b>）时这一层更多、再抬高 {@link #FLURRY_APEX_TURN_BONUS} 格
  *       （<b>只在没有按键偏向时才两侧都给</b>，见下面的受力侧一段）；</li>
  *   <li><b>急减速雪屑</b>（{@link #burst}）：一 tick 内速度掉了 {@link #BURST_DROP} 以上时，
  *       从脚下一圈炸开一大团雪屑（急刹车 / 撞墙 / 压刃刹车都是这个形状），粒子数随掉落量增加。
@@ -92,6 +92,12 @@ import net.minecraft.world.phys.Vec3;
  * 改由板端那一簇自己吃（否则两侧同时 +4 颗 / +0.35 格，看着就是<b>两边一起变多</b>、偏向被冲淡
  * —— 双板按住 A/D 时落地对齐每 tick 要转好几度，超过 {@link #TURN_DEGREES_PER_TICK}，{@code turning} 全程为真）。
  * 两个偏向都是 0（没按键 / 拿不到按键 / 其它玩家 / 单板没在转向）时与改前完全一致：两侧都给。
+ *
+ * <p><b>低速一概不算转向</b>（{@link #TURN_MIN_SPEED} 0.25 格/tick）：速度低于它时 {@code turning} 为假、
+ * {@code biasSide} 与 {@code biasEnd} 都被置 0 —— 上面这一整套「因转向而生」的雪（弯外侧 ×{@link #BIAS_COUNT_MUL} /
+ * +{@link #BIAS_APEX_BONUS} 格 / ×{@link #BIAS_OUTWARD_MUL} 外抛 / 单边喷射 / 板端那一簇）<b>一颗都不出</b>，
+ * 两侧完全对称；速度上去了才按上面的规则偏。慢慢挪一步时角度阈值容易被压低的速度方向噪声点着，
+ * 这条速度门槛把它挡掉（持续扬雪自己的门槛是 {@link #MIN_SPEED} 0.06，急减速 burst 不走这条判据）。
  */
 public final class SnowSpray {
 	/** 唯一的雪粒子：{@code ITEM_SNOWBALL} = 雪球崩碎的白色碎屑（重力 1.0，会落回雪面）。 */
@@ -207,8 +213,26 @@ public final class SnowSpray {
 	 * {@code SkisControl.TURN_RATE_DEGREES} 2.0°/tick，两板按 W / S 的最大偏转 2.4°/tick（{@code VEER_MAX_DEGREES} /
 	 * {@code VIEW_TURN_RATE_DEGREES}），四档都在这条线以上。走位那种低幅方向修正一般不到 1°/tick，
 	 * 0.5° / 0.8° 的抖动不会被误判成转向。
+	 *
+	 * <p>只是「在转向」的两个条件之一：另一条是滑速 ≥ {@link #TURN_MIN_SPEED} 0.25 格/tick
+	 * （低速时速度方向随便就转几度，光看角度会把挪步当成切弯）。
 	 */
 	private static final double TURN_DEGREES_PER_TICK = 1.0D;
+	/**
+	 * <b>算「在转向」的最低滑速</b>（格/tick）：速度低于它时，<b>任何</b>「因转向而生」的雪都不出现 ——
+	 * {@code turning} 直接为假，{@code biasSide} / {@code biasEnd} 也被置 0，于是两侧雪<b>完全对称</b>：
+	 * 没有弯外侧 ×{@link #BIAS_COUNT_MUL} / +{@link #BIAS_APEX_BONUS} 格 / ×{@link #BIAS_OUTWARD_MUL} 外抛、
+	 * 没有单边喷射（{@link #SINGLE_SIDE_SPRAY}）、也没有板端那一簇（{@link #END_EXTRA_PER_TICK}）。
+	 *
+	 * <p>为什么需要：低速（刚起步、坡底、雪上一点点挪）时速度方向本来就容易被按键 / 对齐改得转几度 ——
+	 * 角度阈值 {@link #TURN_DEGREES_PER_TICK} 只看「转了多少」、不看「有多快」，于是慢慢挪一步也会
+	 * 被当成压刃切弯，雪全堆到一侧（单板甚至只剩一条雪线）。速度门槛把这种「没有速度也谈不上拐弯」的情形挡掉。
+	 *
+	 * <p><b>改这个值就是改「低速转向的起点」</b>：调低 → 更早就开始有弯外侧 / 板端偏向；调高 → 要滑得更快才出。
+	 * 取 0.25＝单板上限 0.55 的约 45%、双板上限 0.85 的约 29%，落在「明显在滑」这一档；
+	 * 低于持续扬雪门槛 {@link #MIN_SPEED} 0.06 的静止/挪步完全不受影响，急减速 burst（{@link #BURST_MIN_SPEED}）也不走这条判据。
+	 */
+	private static final double TURN_MIN_SPEED = 0.25D;
 
 	// ---------------------------------------------------- 按键不对称（弯外侧 / 板端）
 	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
@@ -448,7 +472,10 @@ public final class SnowSpray {
 					// （单板 1.2°、双板 2.0°），而这里的阈值是 1.0° —— 只差 0.2°，严格的 `>` 会让浮点末位噪声决定
 					// 这一 tick 算不算「在转向」（纯 carve 会有 1/4–1/3 的 tick 落在阈值下面），单板的弯外侧偏向
 					// 与板端簇的转向加成就会跟着闪。按「≥ 阈值 − 1e-9」算。
-					turning = Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK) - 1.0E-9D;
+					// **还要够快**：速度低于 TURN_MIN_SPEED 时不算转向 —— 角度阈值只看「转了多少」，
+					// 低速挪动时速度方向本来就会被按键/对齐改得转几度，那时雪不该往一侧堆。
+					turning = speed >= TURN_MIN_SPEED
+							&& Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK) - 1.0E-9D;
 					turnDelta = delta;
 				}
 			}
@@ -523,6 +550,14 @@ public final class SnowSpray {
 		int biasSide = snowboard
 				? (keys != null && biasEnd != 0 && turning && turnDelta != 0.0D ? (turnDelta > 0.0D ? -1 : 1) : 0)
 				: (int) SnowboardControl.sideSign(keys);
+		// **低速不出「因转向而生」的雪**：速度低于 TURN_MIN_SPEED 时两个偏向直接归零 —— 双板（sideSign）
+		// 与单板（板端 / 弯外侧）都走这一道，两侧雪完全对称：没有 ×BIAS_COUNT_MUL、+BIAS_APEX_BONUS、
+		// ×BIAS_OUTWARD_MUL、没有单边喷射、也没有板端那一簇。turning 本身在 tick() 里已按同一条速度门槛为假，
+		// 这里再把偏向值清掉是因为双板的 biasSide 来自按键、不看 turning。
+		if (speed < TURN_MIN_SPEED) {
+			biasSide = 0;
+			biasEnd = 0;
+		}
 		// 两组互斥：单板不算「按 A / D 的弯外侧」，双板不算板端那一簇。
 		// 转向的**对称**加成（两侧都 +TURN_EXTRA_PER_SIDE 颗、顶点都 +FLURRY_APEX_TURN_BONUS 格）只在
 		// **完全没有按键偏向**时生效（biasSide = 0 且 biasEnd = 0：没按键 / 拿不到按键 / 其它玩家 —— 与旧行为一致）。
