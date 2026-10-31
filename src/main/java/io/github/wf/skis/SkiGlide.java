@@ -88,7 +88,7 @@ public final class SkiGlide {
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					carve(player);
 				} else {
-					// ——— 双板：A / D 转身体（3.5°/tick）；W 再朝视角方向补 4°/tick。视角一律不动 ———
+					// ——— 双板：A / D 转身体（2.0°/tick）；W 再朝视角方向补 2.4°/tick。视角一律不动 ———
 					SkisControl.ensureLocked(player.getId(), player.getYRot());
 					Input input = player.getLastClientInput();
 					double side = SnowboardControl.sideSign(input);

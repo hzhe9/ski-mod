@@ -40,8 +40,12 @@ import net.minecraft.world.phys.Vec3;
 public final class SkisControl {
 	/** 实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
 	private static final IdMap<Float> BODY_YAW = new IdMap<>();
-	/** 双板：按住 A / D 时每 tick 转身体多少度（3.5°/tick ≈ 70°/s，180° 约 2.6 s）。 */
-	private static final float TURN_RATE_DEGREES = 3.5F;
+	/**
+	 * 双板：按住 A / D 时每 tick 转身体多少度（<b>2.0</b>°/tick ＝ 40°/s，转满 180° 需 90 tick ＝ 4.5 s）。
+	 * 8.0 → 4.5 → 3.5 → <b>2.0</b>（用户 2026-10-31 要「再慢一档」）。速度方向由 {@link #alignTurnHeading}
+	 * 从身体推导，所以模型慢多少、速度方向就慢多少。
+	 */
+	private static final float TURN_RATE_DEGREES = 2.0F;
 	/**
 	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
 	 * 刚好看到正侧方，背后整片都是禁区。
@@ -51,8 +55,11 @@ public final class SkisControl {
 	 */
 	public static final float VIEW_LIMIT_DEGREES = 90.0F;
 
-	/** W 时身体每 tick 朝视角方向转多少度（4°/tick ≈ 80°/s；90° 残余约 1.15 s 对齐）。 */
-	private static final float VIEW_TURN_RATE_DEGREES = 4.0F;
+	/**
+	 * W 时身体每 tick 朝视角方向转多少度（<b>2.4</b>°/tick ＝ 48°/s；90° 残余约 38 tick ≈ 1.9 s 对齐，
+	 * 转满 180° 需 75 tick ＝ 3.75 s）。4.0 → <b>2.4</b>：与 A / D 同步降速。
+	 */
+	private static final float VIEW_TURN_RATE_DEGREES = 2.4F;
 
 	/** 残余偏角小于它就当成对齐（防抖，不要每 tick 无限逼近）。 */
 	private static final float VIEW_TURN_MIN_DEGREES = 0.5F;

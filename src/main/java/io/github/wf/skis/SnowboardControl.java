@@ -89,9 +89,11 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>carve（切雪转向）</b>：前倾（W）＋ 横移（A / D）同时按住时，身体朝向每 tick 朝那一侧转多少度。
-	 * 2.0 度/tick ＝ 180 度/秒 —— 一直按着就会在雪地上画圈。
+	 * <b>1.2 度/tick ＝ 24 度/秒</b>，一直按着就会在雪地上画圈，转满 180° 需 150 tick ＝ 7.5 s。
+	 * 2.0 → <b>1.2</b>（用户 2026-10-31「转向再慢一档」）：速度方向由 {@code alignCarveHeading} 从身体推导，
+	 * 模型慢多少、速度就慢多少。
 	 */
-	private static final float TURN_RATE_DEGREES = 2.0F;
+	private static final float TURN_RATE_DEGREES = 1.2F;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
@@ -137,8 +139,11 @@ public final class SnowboardControl {
 	private static final double DESCENT_STEP_BLOCKS = 0.5D;
 	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
 	private static final double VEER_SMOOTHING = 0.35D;
-	/** 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。 */
-	private static final double VEER_MAX_DEGREES = 4.0D;
+	/**
+	 * 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。
+	 * <b>2.4</b>°/tick ＝ 48°/s（转满 180° 需 75 tick ＝ 3.75 s）；4.0 → <b>2.4</b>，与双板的 W 转向同速。
+	 */
+	private static final double VEER_MAX_DEGREES = 2.4D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */

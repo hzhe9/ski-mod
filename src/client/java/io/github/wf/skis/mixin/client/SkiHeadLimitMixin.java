@@ -25,7 +25,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p><b>这里不再用身体朝向当基准把 yRot 夹一遍</b>。旧写法在鼠标这次（TAIL）按「上一帧的 bodyRender」夹、
  * 相机那次（{@code CameraViewSmoothingMixin}）按「本帧的 bodyRender」再夹一次 —— 两个基准差一帧，
- * 身体又在转（单板 carve 2°/tick、双板 A/D 3.5°/tick），视角顶在限位上时每帧被拉回再推出去，
+ * 身体又在转（单板 carve 1.2°/tick、双板 A/D 2.0°/tick），视角顶在限位上时每帧被拉回再推出去，
  * 就是「贴到极限时画面一卡一抽」的来源。现在改的是同一个标量、夹的是同一个限位，
  * 结构上不可能再互相拉回。
  */
