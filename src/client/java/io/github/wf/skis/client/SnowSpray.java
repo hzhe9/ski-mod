@@ -199,8 +199,16 @@ public final class SnowSpray {
 	 * 否则按着键时两侧同时 +4 颗，看着就是「两边一起变多」、偏向被冲淡。
 	 */
 	private static final int TURN_EXTRA_PER_SIDE = 4;
-	/** 滑行方向这一 tick 转了多少度算「在转向」。 */
-	private static final double TURN_DEGREES_PER_TICK = 2.0D;
+	/**
+	 * 滑行方向这一 tick 转了多少度算「在转向」。
+	 *
+	 * <p><b>阈值必须低于两板最小的每 tick 转角</b>：单板 A / D carve 走 {@code SnowboardControl.TURN_RATE_DEGREES}
+	 * ＝ 1.2°/tick（两板里最小的稳定转向量），阈值取 1.0° 留 0.2° 余量；双板 A / D 是
+	 * {@code SkisControl.TURN_RATE_DEGREES} 2.0°/tick，两板按 W / S 的最大偏转 2.4°/tick（{@code VEER_MAX_DEGREES} /
+	 * {@code VIEW_TURN_RATE_DEGREES}），四档都在这条线以上。走位那种低幅方向修正一般不到 1°/tick，
+	 * 0.5° / 0.8° 的抖动不会被误判成转向。
+	 */
+	private static final double TURN_DEGREES_PER_TICK = 1.0D;
 
 	// ---------------------------------------------------- 按键不对称（弯外侧 / 板端）
 	// 只有**本地玩家**的按键是真读的（见 tick 里 `player == client.player` 那一步）；
@@ -436,9 +444,10 @@ public final class SnowSpray {
 					while (delta < -Math.PI) {
 						delta += Math.PI * 2.0D;
 					}
-					// 判据带 1e-9 弧度容差：carve 的 rotateVelocity 每 tick 正好转 TURN_RATE_DEGREES（= TURN_DEGREES_PER_TICK）
-					// 2°，严格的 `>` 会让浮点末位噪声决定这一 tick 算不算「在转向」（纯 carve 实测约 1/4–1/3 的 tick
-					// 落在阈值下面），单板的弯外侧偏向与板端簇的转向加成就会跟着闪。按「≥ 阈值 − 1e-9」算。
+					// 判据带 1e-9 弧度容差：carve 的 rotateVelocity 每 tick 转的就是板子的 TURN_RATE_DEGREES
+					// （单板 1.2°、双板 2.0°），而这里的阈值是 1.0° —— 只差 0.2°，严格的 `>` 会让浮点末位噪声决定
+					// 这一 tick 算不算「在转向」（纯 carve 会有 1/4–1/3 的 tick 落在阈值下面），单板的弯外侧偏向
+					// 与板端簇的转向加成就会跟着闪。按「≥ 阈值 − 1e-9」算。
 					turning = Math.abs(delta) > Math.toRadians(TURN_DEGREES_PER_TICK) - 1.0E-9D;
 					turnDelta = delta;
 				}
