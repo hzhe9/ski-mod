@@ -107,6 +107,9 @@ public final class SkiGlide {
 				applyMomentum(player);
 				if (SnowboardControl.isSnowboard(player)) {
 					SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
+					// 单板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」直接推导，
+					// 不再靠每 tick 增量（增量会被上面的回落加速 / 动量托底拽回去，累计滞后且 W / S 不一致）。
+					SnowboardControl.alignCarveHeading(player);
 				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);

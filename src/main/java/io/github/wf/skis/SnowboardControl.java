@@ -44,6 +44,18 @@ public final class SnowboardControl {
 	private static final IdMap<Double> CARVE_SPEED = new IdMap<>();
 	/** 实体 id → 本次 carve <b>已经持续的 tick 数</b>（入口那一 tick 记 0），配 {@link #CARVE_SPEED} 算速度下限。 */
 	private static final IdMap<Integer> CARVE_TICKS = new IdMap<>();
+	/**
+	 * 实体 id → <b>入弯时的水平速度方向角</b>（弧度，{@code atan2(z, x)} 口径，见 {@link #alignCarveHeading}）。
+	 *
+	 * <p>转向期间速度方向<b>不再靠每 tick 增量维持</b>（那样会被回落加速 / 动量托底一路往回拽，
+	 * 累计滞后），而是每 tick 用它 + 身体累计转角<b>直接算出来</b>。退出 carve 就清掉。
+	 */
+	private static final IdMap<Double> CARVE_HEADING = new IdMap<>();
+	/**
+	 * 实体 id → <b>入弯时的身体朝向</b>（度，{@code BODY_YAW} 的那个 yaw）。
+	 * 期望速度方向 = {@link #CARVE_HEADING} + ({@code BODY_YAW 现在 − 它})，所以「身体转多少、速度就转多少」。
+	 */
+	private static final IdMap<Float> CARVE_YAW0 = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -156,6 +168,8 @@ public final class SnowboardControl {
 		HEAD_OFFSET.remove(entityId);
 		CARVE_SPEED.remove(entityId);
 		CARVE_TICKS.remove(entityId);
+		CARVE_HEADING.remove(entityId);
+		CARVE_YAW0.remove(entityId);
 	}
 
 	public static void forgetAll() {
@@ -166,6 +180,8 @@ public final class SnowboardControl {
 		HEAD_OFFSET.clear();
 		CARVE_SPEED.clear();
 		CARVE_TICKS.clear();
+		CARVE_HEADING.clear();
+		CARVE_YAW0.clear();
 	}
 
 	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
@@ -386,20 +402,94 @@ public final class SnowboardControl {
 	}
 
 	/**
+	 * <b>速度方向由身体朝向推导</b>：转向期间每 tick 把水平速度方向<b>直接写成</b>
+	 * 「入弯时的速度方向角 + 身体累计转角」，大小与 y 都不动。
+	 *
+	 * <p>为什么不是「每 tick 转 delta」：同一个 tick 里还有别的写者会把速度方向拽回去 ——
+	 * 回落加速沿<b>身体左右轴</b>（{@code SkiGlide.descentDirection}，对单板就是体轴）加一份、
+	 * 动量托底又按当前方向重写一遍。速度方向每 tick 只跟着转一部分，累计下来永远落在身体朝向后面，
+	 * 而且 W / S 两条路拽偏的方向相反（W 时速度转得比身体慢、S 时比身体快）—— 症状就是
+	 * 「模型已经转了 180°，速度才转了 150°，W 和 S 的差距还不一样」。
+	 *
+	 * <p>改成推导式之后，速度方向与身体朝向之间只差一个<b>入弯时的固定偏角</b>，不再随时变长：
+	 * <ul>
+	 *   <li>入弯那一 tick（{@link #applyCarve}）记下 {@link #CARVE_HEADING}（{@code atan2(z, x)}，弧度）
+	 *       与 {@link #CARVE_YAW0}（当时的 bodyYaw）；退出 carve 时清掉；</li>
+	 *   <li>期望方向角 = {@code CARVE_HEADING + toRadians(wrapDegrees(bodyYawNow - CARVE_YAW0))}
+	 *       —— {@code atan2(z, x)} 与 yaw 在同一个旋转方向上（都随 yaw 增量增大），所以直接相加；</li>
+	 *   <li>变化超过 {@code 1e-4} 就 {@code setDeltaMovement} 并 {@code hurtMarked = true}（客户端才吃得到）。</li>
+	 * </ul>
+	 *
+	 * <p>调用点是整 tick 里<b>最后一个</b>写速度的地方（{@code SkiGlide.register} 里 {@link #guardCarveSpeed}
+	 * 之后），所以同 tick 内别的写者造成的偏角不会累下去；只改方向，不改大小、不改 y。
+	 */
+	public static void alignCarveHeading(ServerPlayer player) {
+		int entityId = player.getId();
+		Input keys = player.getLastClientInput();
+		Vec3 motion = player.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		double speed = horizontal.length();
+
+		if (!isCarving(keys, speed)) {
+			// 已经不在 carve：两份状态一起清掉，下一段弯重新记
+			CARVE_HEADING.remove(entityId);
+			CARVE_YAW0.remove(entityId);
+			return;
+		}
+		Double heading = CARVE_HEADING.get(entityId);
+		Float yaw0 = CARVE_YAW0.get(entityId);
+		if (heading == null || yaw0 == null || speed < 1.0E-6D) {
+			return;   // 没有入弯记录 / 没有方向可对齐
+		}
+
+		float yawNow = bodyYaw(entityId, player.getYRot());
+		double turned = Mth.wrapDegrees(yawNow - yaw0);      // 身体从入弯到现在累计转了多少度
+		double wantRad = heading + Math.toRadians(turned);    // 期望方向角（弧度，atan2(z, x) 口径）
+		double wantX = Math.cos(wantRad) * speed;
+		double wantZ = Math.sin(wantRad) * speed;
+		if (Math.abs(wantX - horizontal.x) <= 1.0E-4D && Math.abs(wantZ - horizontal.z) <= 1.0E-4D) {
+			return;   // 已经在期望方向上（没被拽偏）就不写，省一次同步
+		}
+		player.setDeltaMovement(wantX, motion.y, wantZ);
+		player.hurtMarked = true;
+	}
+
+	/**
 	 * <b>carve 一步（只转向、不加力）</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并让
 	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）。
 	 * 服务端与客户端各跑一次，两边朝向与速度方向保持一致。
 	 *
 	 * <p>腾空也照跑（从高处落下时要能带着速度拐弯）。
 	 *
+	 * <p>另外，本方法兼作<b>入弯登记</b>：进入 carve 那一 tick 记下速度方向角与 bodyYaw
+	 * （{@link #CARVE_HEADING} / {@link #CARVE_YAW0}），退出 carve 清掉；每 tick 的方向最终由
+	 * {@link #alignCarveHeading} 在 tick 末尾按「入弯方向角 + 身体累计转角」重写 —— 这里的
+	 * {@link #rotateVelocity} 只是让同 tick 内的后续计算（客户端尤其）方向先对上。
+	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
 	public static float applyCarve(Entity entity, Input input, double speed) {
-		if (input == null || (!input.forward() && !input.backward())) {
-			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向
+		int entityId = entity.getId();
+		if (!isCarving(input, speed)) {
+			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向。
+			// 退出 carve 就把入弯记录清掉 —— 下一段弯重新记一次速度方向角与 bodyYaw。
+			CARVE_HEADING.remove(entityId);
+			CARVE_YAW0.remove(entityId);
 			return 0.0F;
 		}
-		int entityId = entity.getId();
+		Vec3 entry = entity.getDeltaMovement();
+		Vec3 entryHorizontal = new Vec3(entry.x, 0.0D, entry.z);
+		if (entryHorizontal.lengthSqr() < 1.0E-6D) {
+			// 速度几乎为 0：没有方向可记（下面照旧转身体，原地压刃也照样摆姿态）
+			CARVE_HEADING.remove(entityId);
+			CARVE_YAW0.remove(entityId);
+		} else if (CARVE_HEADING.get(entityId) == null) {
+			// 本 tick 开始 carve：记下入弯时的速度方向角（atan2(z, x)，弧度）与当时的 bodyYaw。
+			// 之后每 tick 由 alignCarveHeading 用「它 + 身体累计转角」直接算出期望方向 ——
+			// 不再靠每 tick 的增量，增量会被回落加速 / 动量托底一路拽回去，越滑越落后。
+			CARVE_HEADING.put(entityId, Math.atan2(entryHorizontal.z, entryHorizontal.x));
+			CARVE_YAW0.put(entityId, bodyYaw(entityId, entity.getYRot()));
+		}
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
 		double turn;
 		if (side != 0.0D) {
