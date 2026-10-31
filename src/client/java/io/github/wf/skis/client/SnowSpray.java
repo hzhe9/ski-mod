@@ -81,7 +81,9 @@ import net.minecraft.world.phys.Vec3;
  *       {@link #BIAS_APEX_BONUS}（与双板同一套旋钮）：转角 {@code turnDelta > 0} ＝ 右转 ⇒ 弯心在右 ⇒
  *       外侧是<b>左</b>（{@code side = -1}），{@code turnDelta < 0} 反之；<b>没在转向时两侧仍完全对称</b>；
  *       <b>真在转向时弯内侧一颗都不喷</b>（{@link #SINGLE_SIDE_SPRAY}）：那侧的贴地层与扬起层数量都置 0，
- *       所以单板切弯只看到<b>弯外侧一条雪线</b>（这是「转向时往两边扩散成两条线」的修法）；</li>
+ *       所以单板切弯只看到<b>弯外侧一条雪线</b>（这是「转向时往两边扩散成两条线」的修法）；
+ *       <b>板端那一簇同理</b>：起点仍在板的那一端，但转向时横向只朝弯外侧单侧落 0.08–0.55 格、速度同向，
+ *       不转向时仍是围绕身体中线 ±{@link #END_LATERAL}（用户：「起点是对的，喷出来之后只往一边就够了」）；</li>
  *   <li>其它玩家拿不到输入 → 两个偏向都是 0，左右 / 前后完全对称（与不改时的行为一致）。</li>
  * </ul>
  * <b>转向的对称加成只在「没有任何按键偏向」时才铺到两侧</b>：{@link #TURN_EXTRA_PER_SIDE} 那 4 颗与
@@ -212,7 +214,9 @@ public final class SnowSpray {
 	 *
 	 * <p>只有单板、且只在真转向时生效：<b>双板按 A / D 一行不动</b>（弯外侧加强、内侧保留基础值）；
 	 * {@code biasSide == 0}（没在转向 / 拿不到按键 / 其它玩家）时两侧保持完全对称；
-	 * 板端那一簇（{@link #END_EXTRA_PER_TICK}，跟着 {@code biasEnd} 走）也不受这个开关影响。
+	 * <p><b>板端那一簇也归这个开关管</b>（{@link #END_EXTRA_PER_TICK}，跟着 {@code biasEnd} 走）：单板转向时
+	 * 它的横向落点从 ±{@link #END_LATERAL} 改成只朝弯外侧 0.15–1.0 ×{@link #END_LATERAL}（≈0.08–0.55 格），
+	 * 横向速度也同向、不再带 {@code randomSign}；没在转向时仍是对称的 ±{@link #END_LATERAL}。
 	 *
 	 * <p><b>想改回「两侧都喷」的旧行为</b>：这一行置 {@code false} 即可，其它都不用动。
 	 */
@@ -274,8 +278,12 @@ public final class SnowSpray {
 	 */
 	private static final double END_SPREAD = 0.40D;
 	/**
-	 * <b>板端那一簇的横向落点</b>（格，±，相对身体左右轴）：与扬起层的 {@link #LATERAL_MIN}–{@link #LATERAL_MAX}
+	 * <b>板端那一簇的横向落点</b>（格，相对身体左右轴）：与扬起层的 {@link #LATERAL_MIN}–{@link #LATERAL_MAX}
 	 * 不同，这一簇是<b>围绕身体中线</b>均匀抽 ± 这个值（受力的是板的一端，不是某一侧）。
+	 *
+	 * <p><b>转向时只朝一侧</b>（{@link #SINGLE_SIDE_SPRAY} 且 {@code biasSide != 0}）：横向改成
+	 * {@code biasSide × [0.15, 1.0] × END_LATERAL} ＝ <b>只落在弯外侧</b>、0.08–0.55 格，横向速度也同向 ——
+	 * 起点还是板那一端，但不再从左一点右一点「向两边开花」。不转向时仍是上面那条对称的 ±0.55。
 	 *
 	 * <p><b>调手感</b>：调「那簇雪摊多宽」—— 0.55 ≈ 左右各半格；改小更聚、改大更散。
 	 */
@@ -590,7 +598,9 @@ public final class SnowSpray {
 		// 单板「板端」额外那一簇（W 前倾 → 人物背后 / S 后倾 → 人物正前方；biasEnd = 0 就整段跳过）：
 		// 出生点在「身体位置 + 身体前方 × biasEnd × END_OFFSET」处 —— 前后轴用的是**身体朝向**（frontLocked），
 		// 不是行进方向：单板横着滑，行进方向几乎与身体正面垂直，拿它当轴那簇雪会拍到侧面去。
-		// 横向轴取身体朝向的右手边（endRight = (−frontZ, frontX)），横向 ±END_LATERAL、沿向 ±END_SPREAD 摊开；
+		// 横向轴取身体朝向的右手边（endRight = (−frontZ, frontX)），沿向 ±END_SPREAD 摊开；
+		// 横向落点：**不转向时**围绕身体中线 ±END_LATERAL；**单板转向时**（SINGLE_SIDE_SPRAY && biasSide != 0）
+		// 只朝弯外侧单侧 0.15–1.0 × END_LATERAL（≈0.08–0.55 格），横向速度同向 —— 板端这簇不再左右开花。
 		// 顶点走与扬起层同一套 randomApex（这里仍传 turning：板端簇自己吃转向的加成）再 +BIAS_APEX_BONUS，仍夹 FLURRY_APEX_CAP。
 		if (biasEnd != 0) {
 			Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot());   // 沿锁定的身体朝向，不是视角
@@ -602,15 +612,25 @@ public final class SnowSpray {
 			double endZ = player.getZ() + frontZ * (biasEnd * END_OFFSET);
 			// 转向时这一簇自己多吃 TURN_EXTRA_PER_SIDE 颗（8 → 12）：两侧的对称转向加成已被 symmetricTurn 收走。
 			int endCount = END_EXTRA_PER_TICK + (turning ? TURN_EXTRA_PER_SIDE : 0);
+			// 单板转向时这一簇也只朝一侧（弯外侧）飞：起点仍是对的（板那一端），只是不再向两边开花。
+			// biasSide == 0（没在转向 / 拿不到按键 / 其它玩家）或开关关闭 → 保持原来的 ±END_LATERAL 对称行为。
+			boolean endOneSide = SINGLE_SIDE_SPRAY && biasSide != 0;
 			for (int i = 0; i < endCount; i++) {
-				double lateral = (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;    // 横向 ±END_LATERAL
+				// 单侧：biasSide × [0.15, 1.0] × END_LATERAL ＝ 0.08–0.55 格，永远落在弯外侧那一边。
+				double lateral = endOneSide
+						? biasSide * (0.15D + random.nextDouble() * 0.85D) * END_LATERAL
+						: (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;            // 横向 ±END_LATERAL
 				double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿身体前后轴 ±END_SPREAD
 				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
 				double apex = Math.min(randomApex(random, high, turning, speed) + BIAS_APEX_BONUS, FLURRY_APEX_CAP);
 				// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数；
+				// 单板转向时（endOneSide）与侧循环同一写法：biasSide × (基值 + [0, OUTWARD_JITTER] 只朝外抖动)，
+				// 与上面的 lateral 恒同号（都朝弯外侧）—— 不再有 randomSign 把一部分粒子甩向内侧。
 				// 速度方向仍按行进方向（dir）往后带 —— 只改出生点的轴向，粒子怎么飞保持原样。
-				double out = ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
-						+ randomSign(random) * OUTWARD_JITTER) * fan;
+				double out = endOneSide
+						? biasSide * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan
+						: ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
+								+ randomSign(random) * OUTWARD_JITTER) * fan;
 				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
 				spawn(endX + endRightX * lateral + frontX * alongOffset + jitter(random),
 						spawnY + yJitter(random),
