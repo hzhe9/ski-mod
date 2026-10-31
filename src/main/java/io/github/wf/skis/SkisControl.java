@@ -26,6 +26,13 @@ import net.minecraft.world.phys.Vec3;
  * {@link #ALIGN_DEGREES_PER_TICK} 度（{@link #shouldAlignOnGround} / {@link #alignVelocity}，
  * 由 {@link SkiGlide} 的双板分支调用）—— 转完身落地，方向立刻跟上，不靠 {@code SkiControl.steer} 慢慢摆。
  *
+ * <p><b>转向期间速度方向由身体朝向推导</b>（{@link #alignTurnHeading}）：只要这一 tick {@link #BODY_YAW}
+ * 真的被 {@link #turnBody} / {@link #turnTowardView} 转过，整 tick 末尾就把水平速度方向<b>直接写成</b>
+ * 「入弯方向角 + 身体累计转角」—— 模型转多少、速度方向就转多少。上面那条 {@code alignVelocity} 是 9°/tick 的
+ * <b>限幅趋近</b>，空中 / 按 S 时干脆不跑，所以只靠它速度会落后于身体；末尾这一道锁定把偏角钉在「入弯时的
+ * 身体−速度偏角」上，不再逐 tick 拉大。<b>与单板的 {@code SnowboardControl#alignCarveHeading}
+ * 完全独立</b>（各一套表、各一个方法，互相不借用）。
+ *
  * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
  * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
  * 不动（身体在下面转）；顶到之后头被身体拖着走。
@@ -49,6 +56,33 @@ public final class SkisControl {
 
 	/** 残余偏角小于它就当成对齐（防抖，不要每 tick 无限逼近）。 */
 	private static final float VIEW_TURN_MIN_DEGREES = 0.5F;
+
+	/** 本 tick 的 bodyYaw 与上一次 {@link #alignTurnHeading} 相比变化小于它 → 这一 tick 没在转向。 */
+	private static final float TURN_EPS_DEGREES = 1.0E-4F;
+
+	/**
+	 * 实体 id → <b>入弯（开始转向）时的水平速度方向角</b>（度，{@code atan2(-x, z)} 口径 ——
+	 * 与 {@link #alignVelocity} 同一套参数化）。
+	 *
+	 * <p>转向期间速度方向<b>不再靠每 tick 增量维持</b>（{@link #alignVelocity} 是 9°/tick 的限幅趋近，
+	 * 空中 / 按 S 时干脆不跑，累计下来速度越来越落后于身体），而是每 tick 用它 + 身体累计转角<b>直接算出来</b>。
+	 * 退出转向就清掉。<b>双板专属</b>，与单板的 {@code CARVE_HEADING} 各一份、互不相干。
+	 */
+	private static final IdMap<Double> TURN_HEADING = new IdMap<>();
+	/**
+	 * 实体 id → <b>入弯时的身体朝向</b>（度，{@link #BODY_YAW} 的那个 yaw）。
+	 * 期望速度方向 = {@link #TURN_HEADING} + ({@code BODY_YAW 现在 − 它})，所以「身体转多少、速度就转多少」；
+	 * 两者之差就是<b>入弯那一刻固有的「身体−速度」偏角</b>，整段弯保持不变。
+	 */
+	private static final IdMap<Float> TURN_YAW0 = new IdMap<>();
+	/**
+	 * 实体 id → <b>上一次 tick 结束时的 bodyYaw</b>（{@link #alignTurnHeading} 每次跑都刷新）。
+	 *
+	 * <p>「这一 tick 到底有没有在转向」就看 {@code BODY_YAW 现在} 与它的差：{@link #turnBody} /
+	 * {@link #turnTowardView} 真的转过才说明在转（A / D 按下一定转；按 W 且朝视角还有残差才转）。
+	 * 不靠那两个方法打标记 —— 客户端与服务端都会在 tick 里写 {@code BODY_YAW}，比对<b>实际写入量</b>才准。
+	 */
+	private static final IdMap<Float> TURN_LAST_YAW = new IdMap<>();
 
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
@@ -159,10 +193,17 @@ public final class SkisControl {
 
 	public static void forgetBody(int entityId) {
 		BODY_YAW.remove(entityId);
+		// 转向推导的三份状态一起清：脱板 / 换板之后不能拿着上一段弯的入弯方向继续算
+		TURN_HEADING.remove(entityId);
+		TURN_YAW0.remove(entityId);
+		TURN_LAST_YAW.remove(entityId);
 	}
 
 	public static void forgetBodyAll() {
 		BODY_YAW.clear();
+		TURN_HEADING.clear();
+		TURN_YAW0.clear();
+		TURN_LAST_YAW.clear();
 	}
 
 	// ---------------------------------------------------------------- 参数
@@ -260,6 +301,77 @@ public final class SkisControl {
 		double cos = Math.cos(rad);
 		double sin = Math.sin(rad);
 		player.setDeltaMovement(motion.x * cos - motion.z * sin, motion.y, motion.z * cos + motion.x * sin);
+		player.hurtMarked = true;
+	}
+
+	// ---------------------------------------------------------------- 转向时的速度方向（双板专用）
+
+	/**
+	 * <b>转向期间速度方向由身体朝向推导</b>（双板专用，由 {@link SkiGlide} 的双板分支在整 tick
+	 * <b>最后一个</b>写速度的位置调用）：把水平速度方向<b>直接写成</b>
+	 * 「{@link #TURN_HEADING 入弯时的速度方向角} + 身体累计转角」，大小与 {@code y} 都不动。
+	 *
+	 * <p>为什么要这一道：{@link #alignVelocity} 是 9°/tick 的限幅趋近，而且只在「贴地 + 没按 S」时跑
+	 * （{@link #shouldAlignOnGround}），空中 / 刹车时速度方向<b>一点都不转</b>；{@code SkiControl.steer}
+	 * 那条 0.2 的 lerp 又是另一套节奏。于是同一段转里模型转了 180°、速度才转 150°，两条路各按各的速率走。
+	 * 改成推导式之后，两者之差只剩<b>入弯那一刻固有的「身体−速度」偏角</b>，整段弯不变。
+	 *
+	 * <p>口径（每 tick 一次）：
+	 * <ul>
+	 *   <li><b>判定在不在转向</b>：拿 {@code BODY_YAW 现在} 与上一次调用时记下的 {@link #TURN_LAST_YAW}
+	 *       比 —— {@link #turnBody} / {@link #turnTowardView} 这一 tick 真的转过才算（A / D 按下一定转；
+	 *       按 W 且朝视角还有残差才转）；没转就把 {@link #TURN_HEADING} / {@link #TURN_YAW0} 一起清掉；</li>
+	 *   <li><b>入弯那一 tick</b>：记下当前速度方向角（{@code atan2(-x, z)}，与 {@link #alignVelocity}
+	 *       同一套参数化）与当前 bodyYaw，本 tick 不改速度（off = 0）；</li>
+	 *   <li><b>持续期间</b>：{@code off = wrapDegrees(bodyYawNow − TURN_YAW0)}，
+	 *       期望方向角 {@code = wrapDegrees(TURN_HEADING + off)}，水平分量按这个角重写；</li>
+	 *   <li>与当前速度差 &gt; {@code 1e-4} 才 {@code setDeltaMovement} 并 {@code hurtMarked = true}
+	 *       （客户端才吃得到）。</li>
+	 * </ul>
+	 *
+	 * <p>只改方向，不改大小、不改 y，也不碰动量；{@link #alignVelocity} / {@code SkiControl.steer} /
+	 * {@code desiredDirection} 的判据一个没动 —— 转向期间它们写的方向被这里覆盖只是<b>自然结果</b>。
+	 * <b>与单板的 {@code SnowboardControl#alignCarveHeading} 各写一套，不共用表、不共用方法。</b>
+	 */
+	public static void alignTurnHeading(ServerPlayer player) {
+		int entityId = player.getId();
+		Vec3 motion = player.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+		double speed = horizontal.length();
+
+		float yawNow = bodyYaw(entityId, player.getYRot());
+		Float lastYaw = TURN_LAST_YAW.put(entityId, yawNow);   // 记下本 tick 结束时的朝向，供下一 tick 比对
+		boolean turning = lastYaw != null
+				&& Math.abs(Mth.wrapDegrees(yawNow - lastYaw)) > TURN_EPS_DEGREES;
+
+		if (!turning) {
+			// 这一 tick 身体没动：退出转向，入弯记录一起清，下一段弯重新记
+			TURN_HEADING.remove(entityId);
+			TURN_YAW0.remove(entityId);
+			return;
+		}
+		if (speed < 1.0E-6D) {
+			return;   // 速度几乎为 0：没有方向可推导（身体照旧转，下一 tick 有速度了再记 / 再锁）
+		}
+
+		Double heading = TURN_HEADING.get(entityId);
+		Float yaw0 = TURN_YAW0.get(entityId);
+		if (heading == null || yaw0 == null) {
+			// 入弯这一 tick：记下速度方向角与当时的 bodyYaw。本 tick 期望方向 == 当前方向，不必写。
+			TURN_HEADING.put(entityId, Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z)));
+			TURN_YAW0.put(entityId, yawNow);
+			return;
+		}
+
+		double off = Mth.wrapDegrees(yawNow - yaw0);                  // 身体从入弯到现在累计转了多少度
+		double wantDeg = Mth.wrapDegrees((float) (heading + off));    // 期望方向角（度，atan2(-x, z) 口径）
+		double wantRad = Math.toRadians(wantDeg);
+		double wantX = -Math.sin(wantRad) * speed;
+		double wantZ = Math.cos(wantRad) * speed;
+		if (Math.abs(wantX - horizontal.x) <= 1.0E-4D && Math.abs(wantZ - horizontal.z) <= 1.0E-4D) {
+			return;   // 已经在期望方向上（没被拽偏）就不写，省一次同步
+		}
+		player.setDeltaMovement(wantX, motion.y, wantZ);
 		player.hurtMarked = true;
 	}
 }

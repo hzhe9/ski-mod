@@ -110,6 +110,10 @@ public final class SkiGlide {
 					// 单板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」直接推导，
 					// 不再靠每 tick 增量（增量会被上面的回落加速 / 动量托底拽回去，累计滞后且 W / S 不一致）。
 					SnowboardControl.alignCarveHeading(player);
+				} else {
+					// 双板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」推导，
+					// 模型转多少、速度方向就转多少（上面 alignVelocity 是 9°/tick 限幅，空中 / 按 S 不跑）。
+					SkisControl.alignTurnHeading(player);
 				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
