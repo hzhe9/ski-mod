@@ -115,6 +115,36 @@ public final class SkisControl {
 	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（撑杖冲刺的峰值也封顶在这里）。 */
 	private static final double MAX_SPEED = 0.85D;
 
+	/**
+	 * <b>双板：静止（水平速度 0）起跳的力度</b>（格/tick，原版 0.42）。
+	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.50、
+	 * 满速 0.85 → 0.95。与单板各一份：调这里不动单板。
+	 */
+	private static final double JUMP_BASE_POWER = 0.50D;
+	/** <b>双板</b>：满速时起跳力度再抬多少（0.45 → 满速共 0.95，约 1.9 倍静止力度）。 */
+	private static final double JUMP_SPEED_POWER_GAIN = 0.45D;
+	/** <b>双板</b>：起跳水平速度低于它就不翻（0.25 ≈ 双板上限 0.85 的 29%）。 */
+	private static final double FLIP_MIN_SPEED = 0.25D;
+	/** <b>双板</b>：后空翻每 tick 转多少度（30°/tick，360° 要 12 tick ＝ 0.6 s）。与单板同值、各一个常量。 */
+	private static final double FLIP_DEGREES_PER_TICK = 30.0D;
+	/** <b>双板</b>：落地时缺多少度以内还算翻满（5°）。 */
+	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
+	/** <b>双板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */
+	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
+	/** <b>双板</b>：硬着陆后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
+	private static final int CRASH_STUN_TICKS = 20;
+	/**
+	 * <b>双板</b>：硬着陆扣血的上限（0 = 关闭，默认）。{@code > 0} 时服务端按
+	 * 「缺失角度 / 360 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
+	 */
+	private static final double CRASH_DAMAGE_MAX = 0.0D;
+
+	/** 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
+	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
+			JUMP_BASE_POWER, JUMP_SPEED_POWER_GAIN, MAX_SPEED,
+			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_COMPLETE_TOLERANCE_DEGREES,
+			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
+
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%）：两板同值，滑行手感的基线
 
@@ -171,6 +201,9 @@ public final class SkisControl {
 	 * 所以按 A（左）要<b>减</b>、按 D（右）要加。这里<b>只动身体朝向</b>，视角一律不碰。
 	 */
 	public static float turnBody(int entityId, float fallback, double side) {
+		if (SkiAir.isStunned(entityId)) {
+			return BODY_YAW.getOrDefault(entityId, fallback);   // 硬着陆失控：A / D 不再转身体
+		}
 		float yaw = BODY_YAW.getOrDefault(entityId, fallback) - (float) side * TURN_RATE_DEGREES;
 		BODY_YAW.put(entityId, yaw);
 		return yaw;
@@ -188,6 +221,9 @@ public final class SkisControl {
 	 */
 	public static float turnTowardView(int entityId, float fallback, float viewYaw) {
 		float yaw = BODY_YAW.getOrDefault(entityId, fallback);
+		if (SkiAir.isStunned(entityId)) {
+			return yaw;   // 硬着陆失控：W 不再把身体朝视角追过去
+		}
 		float delta = Mth.wrapDegrees(viewYaw - yaw);
 		if (Float.isNaN(delta) || Math.abs(delta) < VIEW_TURN_MIN_DEGREES) {
 			return yaw;
@@ -204,6 +240,7 @@ public final class SkisControl {
 		TURN_HEADING.remove(entityId);
 		TURN_YAW0.remove(entityId);
 		TURN_LAST_YAW.remove(entityId);
+		SkiAir.forget(entityId);   // 空中状态（含失控计时）一起清
 	}
 
 	public static void forgetBodyAll() {
@@ -223,6 +260,11 @@ public final class SkisControl {
 	/** 双板：速度上限（格/tick）。 */
 	public static double maxSpeed() {
 		return MAX_SPEED;
+	}
+
+	/** 双板这一份起跳 / 空翻数值（{@link SkiAir} 用；两块板各一份，互不影响）。 */
+	public static SkiAir.Tuning airTuning() {
+		return AIR_TUNING;
 	}
 
 	/** 双板：单 tick 下落加速上限。 */
@@ -271,6 +313,9 @@ public final class SkisControl {
 	 * </ol>
 	 */
 	public static boolean shouldAlignOnGround(ServerPlayer player, Input input) {
+		if (SkiAir.isStunned(player.getId())) {
+			return false;   // 硬着陆失控：落地对齐也跳闸（不另开写速度的点）
+		}
 		if (!player.onGround()) {
 			return false;
 		}

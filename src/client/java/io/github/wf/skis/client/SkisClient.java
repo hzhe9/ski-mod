@@ -1,6 +1,7 @@
 package io.github.wf.skis.client;
 
 import io.github.wf.skis.SkisMod;
+import io.github.wf.skis.SkiAir;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -56,8 +57,12 @@ public class SkisClient implements ClientModInitializer {
 				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
 					SnowboardControl.forget(player.getId());
 					SkisControl.forgetBody(player.getId());
+					SkiAir.forget(player.getId());
 					continue;
 				}
+				// 起跳力度 / 后空翻 / 落地硬着陆：与服务端同一条规则、客户端每 tick 每玩家各跑一次
+				// （没穿板已在上面的分支清掉；数值按脚上的板取）
+				SkiAir.tick(player, SkiAir.tuning(player));
 				// 单板 / 双板各自一套，互不干涉
 				Input keys = player == client.player && client.player != null
 						? client.player.input.keyPresses : null;

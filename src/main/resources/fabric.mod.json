@@ -24,6 +24,9 @@
 	},
 	"mixins": [
 		{
+			"config": "skis.mixins.json"
+		},
+		{
 			"config": "skis.client.mixins.json",
 			"environment": "client"
 		},

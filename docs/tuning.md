@@ -59,7 +59,7 @@
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
 | **carve（切雪转弯）：W/S 只转向、不加力** | **前提是压刃**：必须按着 W 或 S，**光按 A/D 只是纯横移**。触发后身体朝向每 tick 转 `TURN_RATE_DEGREES`（**1.2**°/tick ＝ 24°/s：转满 180° 需 150 tick ＝ 7.5 s），**速度的方向跟着转同样的角度**（`rotateVelocity`，大小不变；整 tick 结束时再由下面的 `alignCarveHeading` 按身体朝向直接重写）—— 朝向转多少速度方向转多少，带惯性的路线慢慢弯过去，全程**不补任何推力**（W/S 只改方向）。**转向期间的摩擦比直行更小**：用 `CARVE_MOMENTUM_DECAY` 0.999 托住速度（1 秒 −2%），而且此时按反向侧压是**换刃转向**、不再按刹车处理（`SnowboardControl.isCarving`）。**转向期间速度不衰减（`guardCarveSpeed`）**：`SkiGlide` 在动量结算之后对单板调一次 `SnowboardControl.guardCarveSpeed`，每 tick 算下限 `入场速度 × CARVE_MOMENTUM_DECAY^持续 tick`，没撞到方块（`horizontalCollision` 为假）且当前水平速度低于它就缩放回去（方向不变、y 不动、`hurtMarked = true`），退出 carve 时清表 —— **只做下限、不封顶**（下坡加速自己涨上去的不会被拉回），撞墙那一 tick 不补，但下一个自由 tick 就回到这条曲线上。**速度方向由身体朝向推导（`alignCarveHeading`）**：转向期间速度方向不再靠每 tick 转 `delta` 累加 —— 那样同一 tick 里回落加速（沿身体左右轴加一份）与动量托底会把方向拽回去，速度方向越滑越落后于身体朝向，而且 W 与 S 拽偏方向相反（W 落后、S 超前）。入弯那一 tick 记下 `CARVE_HEADING`（入弯速度方向角，`atan2(z, x)` 弧度）与 `CARVE_YAW0`（入弯 bodyYaw），之后每 tick 由 `alignCarveHeading` 把水平速度方向**直接写成** 「`CARVE_HEADING` + `wrapDegrees(bodyYaw现在 − CARVE_YAW0)`」（大小与 y 都不动，变化 > 1e-4 才写并 `hurtMarked = true`），退出 carve 清表。**调用点是整 tick 最后一个写速度的地方**（`SkiGlide.register` 里 `guardCarveSpeed` 之后，只在单板分支），所以同 tick 内别的写者造成的偏角不会累下去：身体转多少、速度方向就转多少。<br>转向方向：按 A/D 时由侧压决定，没按 A/D 时只要滑速 ≥ `CARVE_MIN_SPEED` 就前倾/后倾各走一边；**后倾（S）＝后刃**，转向与前倾相反。腾空也能转 |
 | 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（135°），合计 270 —— 只剩背后 90° 是禁区。**限位只有一处权威状态**：`client/SkiViewSmoothing` 的 `headOffset`（视角相对身体朝向的偏角）。鼠标每帧转视角时（`SkiHeadLimitMixin` 拦 `Entity#turn` 的 HEAD/TAIL）只把这一帧转过的角度记进 `headOffset` 并夹一次、撤掉越界那点；每帧再由 `CameraViewSmoothingMixin`（`Camera#alignWithEntity` 的 HEAD）用「按 `partialTick` 插值后的身体朝向 + `headOffset`」写一次 yaw。没顶到限位时视角留在世界坐标里不动（只听鼠标），顶到之后头随身体平滑拖走；**往回转立刻响应，没有死区** |
-| 空格 | **能跳** —— 原版跳跃（2026-10-15 起 `makeJump` 不再被取消；单板以前是禁止跳的） |
+| 空格 | **能跳** —— 原版跳跃（2026-10-15 起 `makeJump` 不再被取消；单板以前是禁止跳的）。起跳力度**随滑行速度放大**、滑得快时空中**自动后空翻**（见「跳跃与后空翻」） |
 | 鼠标（头 / 视角） | 可以转，但相对身体朝向限在 ±`VIEW_LIMIT_DEGREES`（见上一行的单一限位实现） |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot`（渲染读的是 render state 的 `bodyRot`）。**`yBodyRotO` 不再写** —— 原版 `baseTick` 每 tick 把它记成「上一 tick 的 yBodyRot」，留着它身体转动才是插值过去的（一起写成新值等于把插值掐掉，第三人称每 tick 跳 2°） |
 | 滑行物理 | **只保留下落加速**：每降 1 格 +`FALL_GAIN_PER_BLOCK` 0.15（基数比双板 0.08 大；每 0.5 格结算一次）。方向按 **单板只有左右**：把当前移动方向**投影到身体横轴**，只取左右分量（绝不给“往前”的加速），没左右分量又不按 A/D 就不加。空中也照样给。不做雪面推进、动量也不捕获玩家自己走出来的速度 —— 否则平地走路 / 站坡上都会“莫名往前” |
@@ -71,6 +71,42 @@
 双板现在也是「锁身体 + 按键转」，两块的锁表各自一份：单板 `SnowboardControl.BODY_YAW`、双板 `SkisControl.BODY_YAW`（实体 id → 角度），条数超过 `util/IdMap` 的默认上限 64 就整表清空（所有这类 id 表都是 `IdMap`，超限自清）；双板的 A / D 每 tick 转 **2.0°**（`SkisControl.TURN_RATE_DEGREES`，≈40°/s，180° 需 90 tick ＝ 4.5 s），**按 W 时身体再朝视角方向补 2.4°/tick**（≈48°/s，180° 需 75 tick ＝ 3.75 s；`SkisControl.turnTowardView`）。**转向期间速度方向由身体朝向推导**（`SkisControl.alignTurnHeading`，整 tick 最后一个写速度的点，单独一套 `TURN_HEADING` / `TURN_YAW0`）：身体转多少、速度方向就转多少，不再依赖 `alignVelocity` 那条 9°/tick 的限幅（空中 / 按 S 时它根本不跑）。**视角限位共用同一套实现、两块板各一个值**（`client/SkiViewSmoothing` 的唯一 `headOffset` + 两处入口：鼠标 `Entity#turn` 只记账、相机 `Camera#alignWithEntity` 每帧写一次）：双板限在身体左右各 **90°**，单板仍是 **135°**。
 
 **越肩视角模式（Shoulder Surfing 打开时）**：**相机完全自由** —— `client/SkiViewSmoothing` 不再每帧写视角、`SkiHeadLimitMixin` 不再按 `VIEW_LIMIT_DEGREES` 限位（判定走反射 `IShoulderSurfing#isShoulderSurfing()`，见 `client/ShoulderSurfingCompat`；对方没装就与原来完全一致）；**头模型朝横移方向** —— 双板 = 身体朝向（正前方，偏移 0），单板 = 身体朝向 + **带符号的头偏角**：**朝哪一侧滑就朝哪一侧**（水平速度投到身体左轴定方向，侧向分量 < `HEAD_SIDE_MIN_SPEED` 0.05 时看 A / D，都没有就锁存上一次 —— 停下不会自己回正），幅度 **默认 `SNOWBOARD_HEAD_NEUTRAL_DEGREES` 75° / 按 W 前倾 `SNOWBOARD_HEAD_FORWARD_DEGREES` 90° / 按 S 后倾 `SNOWBOARD_HEAD_BACKWARD_DEGREES` 60°**；**左右翻转与幅度变化都平滑扫过**（`SnowboardControl.tickHead`：比例 0.45 + 单步上限 9°/tick —— 150° 翻转 25 tick ≈ 1.25 s、中途经过 0° 正前方；幅度变化约 10 tick ≈ 0.5 s；松手也是滑回当前方向的 75°）；**按 W 也不再让身体追视角**（客户端 `turnTowardView` 跳过）。退出越肩后限位与 W 追视角立刻按原规则恢复（状态在退出后第一帧按当时的视角重新起算）。
+
+### 跳跃与后空翻 `SkiAir.java`（状态机共用，数值两块板各一套）
+
+穿板时空格仍然是**原版跳跃**（不新开按键、也不拦 `makeJump`；按住空格＝落地即再跳＝连跳）：
+
+- **起跳力度随水平滑行速度线性放大**：`power = JUMP_BASE_POWER + JUMP_SPEED_POWER_GAIN × min(水平速度 / MAX_SPEED, 1)`（`MAX_SPEED` 就是该板的速度上限 0.55 / 0.85）。注入点是原版 `LivingEntity#getJumpPower()`（`jumpFromGround` 里唯一一次取值，common mixin `LivingEntityJumpPowerMixin`），**没穿板 / 生物一律原版值**。
+- **后空翻**：真正离地起跳（`onGround` 由真变假且 `vy > 0` —— 走下坡 / 掉悬崖不算起跳）时，起跳水平速度 ≥ `FLIP_MIN_SPEED` 才开始翻；角度按空中 tick 每 tick 加 `FLIP_DEGREES_PER_TICK`，**超过 360° 就停在 360°**（不多翻圈）。速度不够＝普通小跳，不翻。
+- **落地判定**（翻过才判定，小跳永远不算摔）：角度 ≥ 360 − `FLIP_COMPLETE_TOLERANCE_DEGREES` ＝ **干净落地**（角度归零、速度不掉、无惩罚）；否则＝**硬着陆**：水平速度 ×`CRASH_SPEED_MULTIPLIER`、进入 `CRASH_STUN_TICKS` 的失控 —— 失控期间两块板的**转向 / 压刃 / carve / 追视角**在各自入口一律跳过（`SnowboardControl.isCarving`、`SkisControl.turnBody / turnTowardView / shouldAlignOnGround`），且**不能再次起跳空翻**。`CRASH_DAMAGE_MAX > 0` 时服务端按「缺失角度 / 360 × 它」`hurtServer` 扣血（**默认 0＝关闭**）。
+- 状态机只有一份（`SkiAir`，每玩家状态用 `util/IdMap` 存：角度、上一 tick 角度、在空中、在翻、失控计时）；**客户端与服务端各跑同一条规则、各只跑一次**（服务端 `SkiGlide.register`、客户端 `SkisClient` 的玩家循环），不靠网络包 —— 与 carve、转向推导同一套做法。
+- 观感：渲染时**整个人 + 板**绕自身左右轴**向后**翻（`EntityTiltMixin` 的 poseStack 旋转，绕**腰部高度** 1.0 格、按 `partialTick` 插值）；落地那一帧状态机已把角度归零，所以插值两端都是 0、不留残余角度。**相机不跟着转**，第一人称不处理。
+
+| 常量（单板 `SnowboardControl`） | 当前值 | 作用 |
+|---|---|---|
+| `JUMP_BASE_POWER`（单板） | 0.46 | 静止起跳的力度（格/tick，原版 0.42）—— 实际力度再加下面那一份 |
+| `JUMP_SPEED_POWER_GAIN`（单板） | 0.35 | 满速时在静止力度上再抬多少（满速 0.81 ≈ 1.76 倍） |
+| `FLIP_MIN_SPEED`（单板） | 0.20 格/tick | 起跳水平速度低于它就不翻（0.20 ≈ 单板上限 0.55 的 36%） |
+| `FLIP_DEGREES_PER_TICK`（单板） | 30 度/tick | 后空翻每 tick 转多少（360° 要 12 tick ＝ 0.6 s） |
+| `FLIP_COMPLETE_TOLERANCE_DEGREES`（单板） | 5 度 | 落地时缺这么多度以内仍算翻满（＝至少转到 355°） |
+| `CRASH_SPEED_MULTIPLIER`（单板） | 0.35 | 硬着陆时水平速度保留的比例（掉 65%） |
+| `CRASH_STUN_TICKS`（单板） | 20 tick | 硬着陆后失控多久（1 s）：转向 / 压刃 / carve / 追视角跳过、不能再起跳空翻 |
+| `CRASH_DAMAGE_MAX`（单板） | 0.0 | 硬着陆扣血上限（0＝关闭；>0 时服务端按缺失角度比例扣） |
+
+| 常量（双板 `SkisControl`） | 当前值 | 作用 |
+|---|---|---|
+| `JUMP_BASE_POWER`（双板） | 0.50 | 静止起跳的力度（比单板高 0.04：双板重力更沉，站着跳也要有一点手感） |
+| `JUMP_SPEED_POWER_GAIN`（双板） | 0.45 | 满速时再抬多少（满速 0.95 ≈ 1.9 倍；比单板更高，因为双板上限也更高） |
+| `FLIP_MIN_SPEED`（双板） | 0.25 格/tick | 起跳水平速度低于它就不翻（0.25 ≈ 双板上限 0.85 的 29%） |
+| `FLIP_DEGREES_PER_TICK`（双板） | 30 度/tick | 与单板同值，但**各一个常量**：改一块不动另一块 |
+| `FLIP_COMPLETE_TOLERANCE_DEGREES`（双板） | 5 度 | 与单板同值、各一个常量 |
+| `CRASH_SPEED_MULTIPLIER`（双板） | 0.35 | 与单板同值、各一个常量 |
+| `CRASH_STUN_TICKS`（双板） | 20 tick | 与单板同值、各一个常量 |
+| `CRASH_DAMAGE_MAX`（双板） | 0.0 | 与单板同值、各一个常量（默认关闭） |
+
+**两块板的差异就三处**：起跳基数（单板 0.46 / 双板 0.50）、每 tick 提速增益（0.35 / 0.45，满速力度 0.81 / 0.95）、翻的门槛速度（0.20 / 0.25，占各自上限 36% / 29%）；空翻速率、容差、惩罚与失控时长两边同值但各自一份常量，改一块不会带走另一块。
+
+**这套数值的后果**（离散模拟：起跳 `vy = power`，每 tick 先位移、再 `vy = (vy − g) × 0.98`，重力按各自倍数 0.104 / 0.12）：单板静止跳 1.21 格 / 空中 10 tick（翻不满 → 只算小跳，不判摔）、满速 0.81 → 3.30 格 / 17 tick；双板静止 1.25 格 / 10 tick、满速 0.95 → 3.92 格 / 17 tick。**两块板在 `FLIP_MIN_SPEED` 附近就已经有 12–13 tick 滞空**，所以「转不满摔地上」主要来自**提前落地**（跳上台阶、撞头、落在斜坡 / 更高地面），而不是速度不够 —— 想让它更容易摔，调高 `FLIP_DEGREES_PER_TICK`（翻得更快、更吃滞空）或调高 `FLIP_MIN_SPEED`。
 
 ### 滑行雪粒子 `SnowSpray.java`（纯客户端观感）
 
@@ -242,3 +278,4 @@
 | 音效 / 粒子 | 同一套：滑行雪粒子 + 随速度变密的切雪声（暂停即停，无风声） | 同左 |
 | 摩擦（动量每 tick 保留） | `SkisControl.MOMENTUM_DECAY` **0.998** | `SnowboardControl.MOMENTUM_DECAY` **0.998**（直行）/ **0.999**（carve 转向期间）—— 两板同值，用户 2026-10-13 定；单板 carve 另有速度下限 `guardCarveSpeed`（转向期间实际不衰减） |
 | 重力 | 穿板时 `GRAVITY_MULTIPLIER` **1.5**（`Attributes.GRAVITY` 0.08 → 0.12 格/tick²，跳高 → 0.93 格），脱板还原 | 单板 **1.3**（0.104 格/tick²，跳高 → 1.03 格）；各自一个常量，改一个不动另一个 |
+| 跳跃 / 空翻 | 起跳力度 `0.50 + 0.45 × (水平速度 / 0.85)`（静止 0.50、满速 0.95）；起跳速度 ≥ `0.25` 才翻，翻满 360° 才干净落地 | `0.46 + 0.35 × (水平速度 / 0.55)`（静止 0.46、满速 0.81）；起跳速度 ≥ `0.20` 才翻。空翻速率 30°/tick、容差 5°、硬着陆速度 ×0.35 + 20 tick 失控 —— 两边同值，但**各自一份常量** |
