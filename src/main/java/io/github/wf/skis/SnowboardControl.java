@@ -107,22 +107,23 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>单板：静止（水平速度 0）起跳的力度</b>（格/tick，原版 0.42）。
-	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.46、
-	 * 满速 0.55 → 0.81。与双板各一份：调这里不动双板。
+	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.22、
+	 * 满速 0.55 → 1.05。静止只跳 0.34 格（低速不高跳），满速才 5 格多 —— 跳高随速度严格单调上升。
+	 * 与双板各一份：调这里不动双板。
 	 */
-	private static final double JUMP_BASE_POWER = 0.46D;
-	/** <b>单板</b>：满速时起跳力度再抬多少（0.35 → 满速共 0.81，约 1.9 倍静止力度）。 */
-	private static final double JUMP_SPEED_POWER_GAIN = 0.35D;
+	private static final double JUMP_BASE_POWER = 0.22D;
+	/** <b>单板</b>：满速时起跳力度再抬多少（0.83 → 满速共 1.05，约 4.8 倍静止力度）。 */
+	private static final double JUMP_SPEED_POWER_GAIN = 0.83D;
 	/**
 	 * <b>单板</b>：起跳水平速度低于它就不翻（只是普通小跳）。0.20 ≈ 单板上限 0.55 的 36% ——
 	 * 慢滑时的空格仍然是「小跳一下」，滑起来才会自动后空翻。
 	 */
 	private static final double FLIP_MIN_SPEED = 0.20D;
 	/**
-	 * <b>单板</b>：后空翻每 tick 转多少度（30°/tick ＝ 600°/s，360° 要 12 tick ＝ 0.6 s）。
+	 * <b>单板</b>：后空翻每 tick 转多少度（18°/tick ＝ 360°/s，360° 要 20 tick ＝ 1.0 s）。
 	 * 与双板同值，但两块板各一个常量。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 30.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 18.0D;
 	/** <b>单板</b>：落地时缺多少度以内还算翻满（5° ＝ 至少转到 355° 才干净落地）。 */
 	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
 	/** <b>单板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */

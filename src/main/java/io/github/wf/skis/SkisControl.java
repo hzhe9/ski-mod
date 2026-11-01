@@ -117,16 +117,16 @@ public final class SkisControl {
 
 	/**
 	 * <b>双板：静止（水平速度 0）起跳的力度</b>（格/tick，原版 0.42）。
-	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.50、
-	 * 满速 0.85 → 0.95。与单板各一份：调这里不动单板。
+	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.24、
+	 * 满速 0.85 → 1.20。静止只跳 0.36 格（低速不高跳），满速近 6 格。与单板各一份：调这里不动单板。
 	 */
-	private static final double JUMP_BASE_POWER = 0.50D;
-	/** <b>双板</b>：满速时起跳力度再抬多少（0.45 → 满速共 0.95，约 1.9 倍静止力度）。 */
-	private static final double JUMP_SPEED_POWER_GAIN = 0.45D;
+	private static final double JUMP_BASE_POWER = 0.24D;
+	/** <b>双板</b>：满速时起跳力度再抬多少（0.96 → 满速共 1.20，约 5 倍静止力度）。 */
+	private static final double JUMP_SPEED_POWER_GAIN = 0.96D;
 	/** <b>双板</b>：起跳水平速度低于它就不翻（0.25 ≈ 双板上限 0.85 的 29%）。 */
 	private static final double FLIP_MIN_SPEED = 0.25D;
-	/** <b>双板</b>：后空翻每 tick 转多少度（30°/tick，360° 要 12 tick ＝ 0.6 s）。与单板同值、各一个常量。 */
-	private static final double FLIP_DEGREES_PER_TICK = 30.0D;
+	/** <b>双板</b>：后空翻每 tick 转多少度（18°/tick，360° 要 20 tick ＝ 1.0 s）。与单板同值、各一个常量。 */
+	private static final double FLIP_DEGREES_PER_TICK = 18.0D;
 	/** <b>双板</b>：落地时缺多少度以内还算翻满（5°）。 */
 	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
 	/** <b>双板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */
