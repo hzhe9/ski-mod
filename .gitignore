@@ -40,6 +40,7 @@ replay_*.log
 __pycache__/
 *.pyc
 
-# Claude Code 本机口径（个人，不进版本库）
+# 外部 agent 的本机口径（个人，不进版本库）
+AGENTS.md
 CLAUDE.local.md
 .claude/
