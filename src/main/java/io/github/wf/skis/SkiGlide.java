@@ -84,8 +84,9 @@ public final class SkiGlide {
 					SkiAir.forget(player.getId());  // 空中状态 / 失控计时
 					continue;
 				}
-				// 起跳力度 / 后空翻 / 落地硬着陆：每 tick 每玩家一次（数值按脚上的板取，与客户端同一条规则）
-				SkiAir.tick(player, SkiAir.tuning(player));
+				// 起跳力度 / 后空翻 / 落地：服务端只管失控计时 —— 角度只有客户端知道（按住空格），
+				// 落地时客户端发 {@code SkiFlip} 包过来，服务端用同一份判定结算（见 {@link SkiAir#applyLanding}）
+				SkiAir.tickServer(player, SkiAir.tuning(player));
 				if (SnowboardControl.isSnowboard(player)) {
 					// ——— 单板 ———
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());

@@ -9,35 +9,51 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * <b>起跳力度 / 后空翻 / 落地硬着陆</b>的共用状态机（不依赖任何客户端类）。
- *
- * <p>每玩家每 tick 跑一次，由两端各自的每 tick 入口调用（服务端 {@link SkiGlide#register()}、
- * 客户端 {@code client/SkisClient} 的玩家循环）——<b>客户端与服务端各跑同一条规则、各只跑一次</b>，
- * 不走网络包：两边都从本地物理（{@code onGround} / 速度）自己算，和 carve、转向推导是同一套做法。
+ * <b>起跳力度 / 按住空格的后空翻 / 落地判定</b>的共用状态机（不依赖任何客户端类）。
  *
  * <p><b>三件事</b>：
  * <ol>
  *   <li><b>起跳力度</b>（{@link #jumpPower(Player)}）：按该板的 <b>11 点速度→起法力查找表</b>
  *       （{@code JUMP_POWER_BY_SPEED_LUT}，s ＝ 水平速度 / {@code MAX_SPEED} 为下标、两点之间线性插值）取值 ——
  *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 2.0 格（{@code JUMP_MAX_HEIGHT}）。
- *       只在「穿着本模组的板」时返回值，
- *       没穿板（或不是玩家）返回 −1，原版跳跃原样不动。注入点是原版 {@code LivingEntity#getJumpPower()}
- *       （{@code jumpFromGround} 里唯一一次取值），所以空格仍然是<b>原版跳跃</b>、按住连跳照旧。</li>
- *   <li><b>后空翻</b>：每次真正离地起跳（离地且 {@code vy > 0}）时，起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
- *       就开始翻；角度按空中 tick 每 tick 加 {@code FLIP_DEGREES_PER_TICK}，<b>超过 360° 就停在 360°</b>
- *       （不多翻圈）。速度不够＝普通小跳，不翻。</li>
- *   <li><b>落地判定</b>：翻过（{@code flipStarted}）才判定 —— 角度 ≥ 360 − {@code FLIP_COMPLETE_TOLERANCE_DEGREES}
- *       算干净落地（角度归零、速度不掉、无惩罚）；否则＝硬着陆：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、
- *       进入 {@code CRASH_STUN_TICKS} 的失控（{@code isStunned}，两块板的转向 / 压刃 / carve / 追视角
- *       在各自入口按它跳闸），{@code CRASH_DAMAGE_MAX > 0} 时服务端再按「缺失角度 / 360 × 它」扣血。</li>
+ *       只在「穿着本模组的板」时返回值，没穿板（或不是玩家）返回 −1，原版跳跃原样不动。
+ *       注入点是原版 {@code LivingEntity#getJumpPower()}（{@code jumpFromGround} 里唯一一次取值）。</li>
+ *   <li><b>后空翻（按住才转）</b>：离地起跳（离地且 {@code vy > 0}）时起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
+ *       且没在失控里 ＝ <b>进入可翻转状态</b>，但角度<b>不在这一刻自动累加</b>。
+ *       之后<b>只有「按住跳跃键」的 tick</b> 才每 tick 加 {@code FLIP_DEGREES_PER_TICK}；
+ *       <b>松手立刻定格</b>（角度与模型都停在那偏角），再次按住接着转。
+ *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
+ *   <li><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
+ *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
+ *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、进入 {@code CRASH_STUN_TICKS} 的失控。
+ *       多翻了几圈只要停在直立附近也算净落。</li>
  * </ol>
+ *
+ * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
+ * <ul>
+ *   <li><b>客户端</b> {@link #tickClient}：读本地跳跃键、推进角度、跑落地判定，落地时把<b>最终角度</b>
+ *       通过 {@link SkiFlip} 的 C2S 包交给服务端；本地同时按判定结果进失控（画观 / 输入门与服务器一致）。</li>
+ *   <li><b>服务端</b> {@link #tickServer}：只递减失控计时（角度不归它算）；收到包后走
+ *       {@link #applyLanding} —— 降速 + {@code hurtMarked}，<b>不 setPos</b>。</li>
+ *   <li><b>判定只有一份</b>：{@link #isCleanLanding}。客户端落地与 {@link #applyLanding} 都调它，
+ *       两边不各写一套公式。</li>
+ * </ul>
  *
  * <p><b>数值不在这里</b>：两块板各一套 {@link Tuning}（单板 {@code SnowboardControl.airTuning()}、
  * 双板 {@code SkisControl.airTuning()}），本类只按 {@link SnowboardControl#isSnowboard} 选一份。
  */
 public final class SkiAir {
-	/** 一整圈。翻满到这个角度就不再涨（不会翻第二圈）。 */
+	/** 一整圈。角度按它取模保存（多圈只体现在落地判定上）。 */
 	public static final double FULL_TURN_DEGREES = 360.0D;
+
+	/** 客户端交上来的角度上限（度，＝10 圈）：超过直接当非法包丢掉。 */
+	public static final double MAX_NET_ANGLE_DEGREES = 3600.0D;
+
+	/** 落地回调：把「最终角度 + 是否净落」交给调用方（客户端用它发包）。 */
+	@FunctionalInterface
+	public interface LandingListener {
+		void landed(double angleDegrees, boolean clean);
+	}
 
 	/**
 	 * 一块板的起跳 / 空翻数值。
@@ -51,21 +67,21 @@ public final class SkiAir {
 		private final double jumpMaxHeight;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
 		private final double maxSpeed;
-		/** 起跳水平速度低于它就不翻（只是普通小跳）。 */
+		/** 起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。 */
 		private final double flipMinSpeed;
-		/** 空中每 tick 转多少度。 */
+		/** 按住跳跃时，空中每 tick 转多少度。 */
 		private final double flipDegreesPerTick;
-		/** 落地时允许缺多少度还算翻满。 */
-		private final double flipToleranceDegrees;
-		/** 硬着陆时水平速度保留的比例。 */
+		/** 落地时与直立（0°/360°/720°…）的角距在这个范围内就算净落。 */
+		private final double flipLandingToleranceDegrees;
+		/** 摔倒时水平速度保留的比例。 */
 		private final double crashSpeedMultiplier;
-		/** 硬着陆后失控多少 tick（转向 / 压刃 / carve / 追视角全部跳过）。 */
+		/** 摔倒后失控多少 tick（转向 / 压刃 / carve / 追视角全部跳过）。 */
 		private final int crashStunTicks;
-		/** 硬着陆扣血上限（0 = 关闭）。 */
+		/** 摔倒扣血上限（0 = 关闭）。 */
 		private final double crashDamageMax;
 
 		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double maxSpeed, double flipMinSpeed,
-				double flipDegreesPerTick, double flipToleranceDegrees, double crashSpeedMultiplier,
+				double flipDegreesPerTick, double flipLandingToleranceDegrees, double crashSpeedMultiplier,
 				int crashStunTicks, double crashDamageMax) {
 			if (powerBySpeedLut == null || powerBySpeedLut.length < 2) {
 				throw new IllegalArgumentException("powerBySpeedLut 至少要 2 个点（线性插值两端）");
@@ -75,7 +91,7 @@ public final class SkiAir {
 			this.maxSpeed = maxSpeed;
 			this.flipMinSpeed = flipMinSpeed;
 			this.flipDegreesPerTick = flipDegreesPerTick;
-			this.flipToleranceDegrees = flipToleranceDegrees;
+			this.flipLandingToleranceDegrees = flipLandingToleranceDegrees;
 			this.crashSpeedMultiplier = crashSpeedMultiplier;
 			this.crashStunTicks = crashStunTicks;
 			this.crashDamageMax = crashDamageMax;
@@ -104,17 +120,42 @@ public final class SkiAir {
 		public double jumpMaxHeight() {
 			return jumpMaxHeight;
 		}
+
+		/** 按住跳跃时每 tick 转多少度。 */
+		public double flipDegreesPerTick() {
+			return flipDegreesPerTick;
+		}
+
+		/** 落地「净落」允许与直立差多少度。 */
+		public double flipLandingToleranceDegrees() {
+			return flipLandingToleranceDegrees;
+		}
+
+		/** 摔倒时水平速度保留的比例。 */
+		public double crashSpeedMultiplier() {
+			return crashSpeedMultiplier;
+		}
+
+		/** 摔倒后的失控 tick 数。 */
+		public int crashStunTicks() {
+			return crashStunTicks;
+		}
+
+		/** 摔倒扣血上限（0 = 关闭）。 */
+		public double crashDamageMax() {
+			return crashDamageMax;
+		}
 	}
 
 	/** 每个玩家的空中状态。{@code angle} / {@code prevAngle} 就是渲染插值用的那一对（对着 partialTick 取）。 */
 	private static final class AirState {
-		/** 本 tick 结束时的翻滚角（度，0…360，向后翻）。 */
+		/** 本 tick 结束时的翻滚角（度，[0,360)，向后翻；多圈只在落地判定里体现）。 */
 		private double angle;
 		/** 上一 tick 结束时的翻滚角（渲染插值下限）。 */
 		private double prevAngle;
 		/** 上一 tick 结束时是不是在空中（落地判定的边沿检测）。 */
 		private boolean airborne;
-		/** 这一次离地在翻（起跳速度够快且没在失控中）。 */
+		/** 这一次离地是否进入了可翻转状态（起跳速度够快且没在失控中）。 */
 		private boolean flipping;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
@@ -158,21 +199,20 @@ public final class SkiAir {
 	}
 
 	/**
-	 * 每 tick 一次的状态机（两端各跑一遍、各只跑一次）。
+	 * <b>客户端</b>每 tick 一次（只对本机玩家跑）。
 	 *
-	 * <p>顺序：① 先把上一 tick 的角度记进 {@code prevAngle}（渲染插值用）；② 递减失控计时；
-	 * ③ 落地那一 tick 做判定（{@link #land}）；④ 在空中：刚离地那一 tick 决定翻不翻，翻就累加角度。
+	 * <p>顺序：① 记录上一 tick 的角度（渲染插值用）；② 递减失控计时；
+	 * ③ 落地那一 tick 做判定并回调（{@link LandingListener}）；④ 空中：刚离地那一 tick 只决定「能不能翻」，
+	 * 之后<b>只有 {@code holdingJump} 为真</b>才累加角度 —— 这就是「按住才转、松手定格」。
+	 *
+	 * @param holdingJump 本 tick 是否按住跳跃键（{@code LocalPlayer#input.keyPresses.jump()}）
+	 * @param listener    落地回调（把最终角度交给服务端）；可为 {@code null}
 	 */
-	public static void tick(Player player, Tuning tuning) {
+	public static void tickClient(Player player, Tuning tuning, boolean holdingJump, LandingListener listener) {
 		if (player == null || tuning == null) {
 			return;
 		}
-		int entityId = player.getId();
-		AirState state = STATES.get(entityId);
-		if (state == null) {
-			state = new AirState();
-			STATES.put(entityId, state);
-		}
+		AirState state = state(player);
 		state.prevAngle = state.angle;
 		if (state.stunTicks > 0) {
 			state.stunTicks--;
@@ -180,7 +220,7 @@ public final class SkiAir {
 
 		if (player.onGround()) {
 			if (state.airborne) {
-				land(player, state, tuning);
+				landClient(state, tuning, listener);
 			}
 			state.airborne = false;
 			state.flipping = false;
@@ -188,7 +228,8 @@ public final class SkiAir {
 		}
 
 		if (!state.airborne) {
-			// 刚离地：只有「真的起跳」（竖直速度向上）才可能翻 —— 走下坡 / 掉下悬崖（vy ≤ 0）不算起跳
+			// 刚离地：只有「真的起跳」（竖直速度向上）且速度够、不在失控里，才进入可翻转状态。
+			// 这里<b>不转角</b> —— 起跳本身不再自动开始空翻。
 			state.airborne = true;
 			state.angle = 0.0D;
 			state.prevAngle = 0.0D;
@@ -196,50 +237,126 @@ public final class SkiAir {
 					&& player.getDeltaMovement().y > 0.0D
 					&& player.getDeltaMovement().horizontalDistance() >= tuning.flipMinSpeed;
 		}
-		if (state.flipping) {
-			state.angle = Math.min(FULL_TURN_DEGREES, state.angle + tuning.flipDegreesPerTick);
+		// 唯一的累加点：按住跳跃才转。松手 = 这个分支不进 → 角度原地定格（模型停在同一偏角）。
+		if (state.flipping && holdingJump) {
+			state.angle = normalizeAngle(state.angle + tuning.flipDegreesPerTick);
 		}
 	}
 
-	/** 落地：翻满了＝干净落地（角度归零、速度不掉）；没翻满＝硬着陆（速度惩罚＋失控，惩罚只在服务端落）。 */
-	private static void land(Player player, AirState state, Tuning tuning) {
+	/**
+	 * <b>服务端</b>每 tick 一次：只递减失控计时。角度归客户端算，服务端只在收到
+	 * {@link SkiFlip} 的落地包时用 {@link #applyLanding} 结算 ——
+	 * 所以这里<b>没有任何角度累加</b>（上轮的「起跳即开翻、转到 360° 就停」那套已全部删除）。
+	 */
+	public static void tickServer(Player player, Tuning tuning) {
+		if (player == null || tuning == null) {
+			return;
+		}
+		AirState state = state(player);
+		if (state.stunTicks > 0) {
+			state.stunTicks--;
+		}
+	}
+
+	/**
+	 * <b>落地判定（唯一一份）</b>：与直立的最小角距 {@code |a|} ≤ {@code FLIP_LANDING_TOLERANCE_DEGREES} ＝净落。
+	 *
+	 * <p>客户端落地与 {@link #applyLanding}（服务端收到包）都调这一个方法 —— 两边不允许各写一套公式。
+	 */
+	public static boolean isCleanLanding(double angleDegrees, Tuning tuning) {
+		if (tuning == null || !Double.isFinite(angleDegrees)) {
+			return true;
+		}
+		return Math.abs(uprightOffsetDegrees(angleDegrees)) <= tuning.flipLandingToleranceDegrees;
+	}
+
+	/**
+	 * 与直立的最小角距（度，(−180,180]）：0 / 360 / 720 … 都返回 0，350 返回 −10，370 返回 10。
+	 */
+	public static double uprightOffsetDegrees(double angleDegrees) {
+		double a = angleDegrees % FULL_TURN_DEGREES;
+		if (a > 180.0D) {
+			a -= FULL_TURN_DEGREES;
+		} else if (a <= -180.0D) {
+			a += FULL_TURN_DEGREES;
+		}
+		return a;
+	}
+
+	/** 内部保存用的取模：[0,360)，多圈不会把数值越叠越大。 */
+	static double normalizeAngle(double angleDegrees) {
+		double a = angleDegrees % FULL_TURN_DEGREES;
+		if (a < 0.0D) {
+			a += FULL_TURN_DEGREES;
+		}
+		return a;
+	}
+
+	/** 客户端落地：判定 → 回调（发包）→ 摔倒则本地也进失控（降速只在服务端做）。 */
+	private static void landClient(AirState state, Tuning tuning, LandingListener listener) {
 		double angle = state.angle;
-		boolean failed = state.flipping && angle < FULL_TURN_DEGREES - tuning.flipToleranceDegrees;
-		// 不管翻成没翻成，落地那一帧都回到 0°（渲染读 0，模型直立；插值区间两头一起归零，不会倒着转回去）
+		boolean clean = isCleanLanding(angle, tuning);
+		// 落地那一帧回到 0°（渲染读 0，模型直立；插值区间两头一起归零，不会倒着转回去）
 		state.angle = 0.0D;
 		state.prevAngle = 0.0D;
 		state.flipping = false;
-		if (!failed) {
-			return;
+		if (listener != null) {
+			listener.landed(angle, clean);
 		}
+		if (!clean) {
+			state.stunTicks = tuning.crashStunTicks;
+		}
+	}
+
+	/**
+	 * <b>服务端落地结算</b>（{@link SkiFlip} 的包处理器调这里）：用同一份 {@link #isCleanLanding} 判定；
+	 * 净落什么都不做；摔倒则水平速度 ×{@code CRASH_SPEED_MULTIPLIER} + {@code hurtMarked} 并进失控。
+	 * <b>只走 deltaMovement + hurtMarked，不 setPos</b>。
+	 *
+	 * @return 是否净落
+	 */
+	public static boolean applyLanding(ServerPlayer player, double angleDegrees, Tuning tuning) {
+		if (player == null || tuning == null) {
+			return true;
+		}
+		boolean clean = isCleanLanding(angleDegrees, tuning);
+		if (clean) {
+			return true;
+		}
+		AirState state = state(player);
 		state.stunTicks = tuning.crashStunTicks;
-		if (!(player instanceof ServerPlayer serverPlayer)) {
-			return;   // 速度与伤害都是服务端的事（客户端只是跟着进入失控状态）
-		}
-		Vec3 motion = serverPlayer.getDeltaMovement();
-		serverPlayer.setDeltaMovement(motion.x * tuning.crashSpeedMultiplier, motion.y,
+		Vec3 motion = player.getDeltaMovement();
+		player.setDeltaMovement(motion.x * tuning.crashSpeedMultiplier, motion.y,
 				motion.z * tuning.crashSpeedMultiplier);
-		serverPlayer.hurtMarked = true;
-		if (tuning.crashDamageMax > 0.0D) {
-			double missing = (FULL_TURN_DEGREES - angle) / FULL_TURN_DEGREES;
-			serverPlayer.hurtServer(serverPlayer.level(), serverPlayer.damageSources().fall(),
-					(float) (missing * tuning.crashDamageMax));
+		player.hurtMarked = true;   // 让客户端跟着服务端速度走（不 setPos）
+		if (tuning.crashDamageMax() > 0.0D) {
+			double missing = Math.abs(uprightOffsetDegrees(angleDegrees)) / 180.0D;
+			player.hurtServer(player.level(), player.damageSources().fall(),
+					(float) (missing * tuning.crashDamageMax()));
 		}
+		return false;
 	}
 
 	/**
 	 * 渲染用：当前翻滚角（度）按 {@code partialTick} 在「上一 tick / 本 tick」之间插值。
 	 * 没有状态（没穿板 / 还没 tick 过）返回 0 ＝不转。
+	 *
+	 * <p>内部角度是 [0,360) 取模的：本 tick 比上一 tick 小＝刚绕过 360°，插值下限减一圈，
+	 * 否则模型会在那一帧倒着转回去。
 	 */
 	public static float angleDegrees(int entityId, float partialTick) {
 		AirState state = STATES.get(entityId);
 		if (state == null) {
 			return 0.0F;
 		}
-		return Mth.lerp(partialTick, (float) state.prevAngle, (float) state.angle);
+		double prev = state.prevAngle;
+		if (state.angle < prev) {
+			prev -= FULL_TURN_DEGREES;
+		}
+		return Mth.lerp(partialTick, (float) prev, (float) state.angle);
 	}
 
-	/** 这个实体现在是不是在硬着陆的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。 */
+	/** 这个实体现在是不是在摔倒的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。 */
 	public static boolean isStunned(int entityId) {
 		AirState state = STATES.get(entityId);
 		return state != null && state.stunTicks > 0;
@@ -248,5 +365,15 @@ public final class SkiAir {
 	/** 脱板 / 离开世界：整份状态丢掉（失控计时也一起清）。 */
 	public static void forget(int entityId) {
 		STATES.remove(entityId);
+	}
+
+	private static AirState state(Player player) {
+		int entityId = player.getId();
+		AirState state = STATES.get(entityId);
+		if (state == null) {
+			state = new AirState();
+			STATES.put(entityId, state);
+		}
+		return state;
 	}
 }

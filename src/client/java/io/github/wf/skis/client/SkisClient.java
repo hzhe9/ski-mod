@@ -2,6 +2,7 @@ package io.github.wf.skis.client;
 
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SkiAir;
+import io.github.wf.skis.SkiFlip;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -10,6 +11,7 @@ import io.github.wf.skis.SnowboardControl;
 import io.github.wf.skis.SwingHooks;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 import net.minecraft.client.player.LocalPlayer;
@@ -60,12 +62,15 @@ public class SkisClient implements ClientModInitializer {
 					SkiAir.forget(player.getId());
 					continue;
 				}
-				// 起跳力度 / 后空翻 / 落地硬着陆：与服务端同一条规则、客户端每 tick 每玩家各跑一次
-				// （没穿板已在上面的分支清掉；数值按脚上的板取）
-				SkiAir.tick(player, SkiAir.tuning(player));
-				// 单板 / 双板各自一套，互不干涉
-				Input keys = player == client.player && client.player != null
-						? client.player.input.keyPresses : null;
+				// 起跳力度 / 后空翻 / 落地：空翻角度与「有没有按住空格」只有本机知道（服务端读不到这个输入），
+				// 所以状态机只对本机玩家跑；落地那一 tick 把最终角度发给服务端（同一份判定在那边结算 + 降速）。
+				Input keys = player == self && self != null && self.input != null
+						? self.input.keyPresses : null;
+				if (player == self) {
+					SkiAir.tickClient(player, SkiAir.tuning(player),
+							keys != null && keys.jump(),
+							(angle, clean) -> ClientPlayNetworking.send(new SkiFlip.Payload((float) angle)));
+				}
 				boolean board = SnowboardControl.isSnowboard(player);
 				float yaw;
 				if (board) {

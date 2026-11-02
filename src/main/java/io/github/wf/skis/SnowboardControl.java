@@ -134,35 +134,37 @@ public final class SnowboardControl {
 		}
 	}
 	/**
-	 * <b>单板</b>：起跳水平速度低于它就不翻（只是普通小跳）。0.20 ≈ 单板上限 0.55 的 36% ——
-	 * 慢滑时的空格仍然是「小跳一下」，滑起来才会自动后空翻。
+	 * <b>单板</b>：起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。0.20 ≈ 单板上限 0.55 的 36% ——
+	 * 慢滑时的空格仍然只是「小跳一下」，滑起来才翻得动。
 	 */
 	private static final double FLIP_MIN_SPEED = 0.20D;
 	/**
-	 * <b>单板</b>：后空翻每 tick 转多少度（<b>12.0</b>°/tick ＝ 240°/s，360° 要 <b>30 tick</b> ＝ <b>1.5 s</b>）。
+	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>12.0</b>°/tick ＝ 240°/s，一圈 360° 要 <b>30 tick</b> ＝ <b>1.5 s</b>）。
 	 *
-	 * <p>单板比双板快一圈（双板 <b>9.0</b>°/tick ＝ 40 tick ＝ 2.0 s）—— 两块板<b>不再同值</b>，
-	 * 各一个常量、改一块不动另一块。满速起跳的滞空在平地上只有 13 tick（0.65 s），
-	 * 30° / 45° 坡 20 / 25 tick；要凑满 30 tick 约需 52–55° 的落差
-	 * （详见 {@code docs/tuning.md} 的待机滞空表）。
+	 * <p>起跳本身<b>不再自动开翻</b>：拿中空格才转，松手立刻定格（模型停在那偏角），落地看与直立差多少
+	 * （见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。角度不封顶，可以按住转多圈。
+	 * 单板比双板快一圈（双板 <b>9.0</b>°/tick ＝ 40 tick ＝ 2.0 s）—— 各一个常量、改一块不动另一块。
 	 */
 	private static final double FLIP_DEGREES_PER_TICK = 12.0D;
-	/** <b>单板</b>：落地时缺多少度以内还算翻满（5° ＝ 至少转到 355° 才干净落地）。 */
-	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
-	/** <b>单板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */
+	/**
+	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±25°）＝干净落地；
+	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
+	 */
+	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 25.0D;
+	/** <b>单板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
-	/** <b>单板</b>：硬着陆后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
+	/** <b>单板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
 	private static final int CRASH_STUN_TICKS = 20;
 	/**
-	 * <b>单板</b>：硬着陆扣血的上限（0 = 关闭，默认）。{@code > 0} 时服务端按
-	 * 「缺失角度 / 360 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
+	 * <b>单板</b>：摔倒扣血的上限（0 = 关闭，默认）。{@code > 0} 时服务端按
+	 * 「与直立偏差 / 180 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
 	 */
 	private static final double CRASH_DAMAGE_MAX = 0.0D;
 
 	/** 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
 			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, MAX_SPEED,
-			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_COMPLETE_TOLERANCE_DEGREES,
+			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
 	/**

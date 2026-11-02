@@ -38,6 +38,7 @@ public class SkisMod implements ModInitializer {
 		SkiGlide.register();
 		SkiBoost.register();
 		SnowLanding.register();   // 穿板落到雪面上免摔伤
+		SkiFlip.register();       // 空翻落地包（C2S：客户端交最终角度，服务端结算）
 
 		ModCreativeTabs.register();
 
