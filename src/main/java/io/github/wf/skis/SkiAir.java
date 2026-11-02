@@ -18,10 +18,11 @@ import net.minecraft.world.phys.Vec3;
  *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 2.0 格（{@code JUMP_MAX_HEIGHT}）。
  *       只在「穿着本模组的板」时返回值，没穿板（或不是玩家）返回 −1，原版跳跃原样不动。
  *       注入点是原版 {@code LivingEntity#getJumpPower()}（{@code jumpFromGround} 里唯一一次取值）。</li>
- *   <li><b>后空翻（按住才转）</b>：离地起跳（离地且 {@code vy > 0}）时起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
+ *   <li><b>后空翻（按住够久才转）</b>：离地起跳（离地且 {@code vy > 0}）时起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
  *       且没在失控里 ＝ <b>进入可翻转状态</b>，但角度<b>不在这一刻自动累加</b>。
- *       之后<b>只有「按住跳跃键」的 tick</b> 才每 tick 加 {@code FLIP_DEGREES_PER_TICK}；
- *       <b>松手立刻定格</b>（角度与模型都停在那偏角），再次按住接着转。
+ *       之后要<b>连续按住跳跃满 {@code FLIP_HOLD_DELAY_TICKS}（5）tick</b> 才开始每 tick 加
+ *       {@code FLIP_DEGREES_PER_TICK}（短按＝纯跳跃，一点都不转）；
+ *       <b>松手立刻定格</b>（角度与模型都停在那偏角），并且<b>连续计数归零</b> —— 再按住要重新数满 5 tick。
  *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
  *   <li><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
  *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
@@ -71,6 +72,8 @@ public final class SkiAir {
 		private final double flipMinSpeed;
 		/** 按住跳跃时，空中每 tick 转多少度。 */
 		private final double flipDegreesPerTick;
+		/** 起跳后要「连续按住」满多少 tick 才开始累加角度（短按＝纯跳跃）。 */
+		private final int flipHoldDelayTicks;
 		/** 落地时与直立（0°/360°/720°…）的角距在这个范围内就算净落。 */
 		private final double flipLandingToleranceDegrees;
 		/** 摔倒时水平速度保留的比例。 */
@@ -81,8 +84,8 @@ public final class SkiAir {
 		private final double crashDamageMax;
 
 		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double maxSpeed, double flipMinSpeed,
-				double flipDegreesPerTick, double flipLandingToleranceDegrees, double crashSpeedMultiplier,
-				int crashStunTicks, double crashDamageMax) {
+				double flipDegreesPerTick, int flipHoldDelayTicks, double flipLandingToleranceDegrees,
+				double crashSpeedMultiplier, int crashStunTicks, double crashDamageMax) {
 			if (powerBySpeedLut == null || powerBySpeedLut.length < 2) {
 				throw new IllegalArgumentException("powerBySpeedLut 至少要 2 个点（线性插值两端）");
 			}
@@ -91,6 +94,7 @@ public final class SkiAir {
 			this.maxSpeed = maxSpeed;
 			this.flipMinSpeed = flipMinSpeed;
 			this.flipDegreesPerTick = flipDegreesPerTick;
+			this.flipHoldDelayTicks = flipHoldDelayTicks;
 			this.flipLandingToleranceDegrees = flipLandingToleranceDegrees;
 			this.crashSpeedMultiplier = crashSpeedMultiplier;
 			this.crashStunTicks = crashStunTicks;
@@ -126,6 +130,11 @@ public final class SkiAir {
 			return flipDegreesPerTick;
 		}
 
+		/** 起跳后要「连续按住」满多少 tick 才开始累加角度。 */
+		public int flipHoldDelayTicks() {
+			return flipHoldDelayTicks;
+		}
+
 		/** 落地「净落」允许与直立差多少度。 */
 		public double flipLandingToleranceDegrees() {
 			return flipLandingToleranceDegrees;
@@ -157,6 +166,8 @@ public final class SkiAir {
 		private boolean airborne;
 		/** 这一次离地是否进入了可翻转状态（起跳速度够快且没在失控中）。 */
 		private boolean flipping;
+		/** 已<b>连续</b>按住跳跃多少 tick（松开 / 落地 / 再起跳都归零）；满 {@code FLIP_HOLD_DELAY_TICKS} 才开始转角。 */
+		private int holdTicks;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
 	}
@@ -203,7 +214,8 @@ public final class SkiAir {
 	 *
 	 * <p>顺序：① 记录上一 tick 的角度（渲染插值用）；② 递减失控计时；
 	 * ③ 落地那一 tick 做判定并回调（{@link LandingListener}）；④ 空中：刚离地那一 tick 只决定「能不能翻」，
-	 * 之后<b>只有 {@code holdingJump} 为真</b>才累加角度 —— 这就是「按住才转、松手定格」。
+	 * 之后<b>连续按住跳跃满 {@code flipHoldDelayTicks} tick</b> 起才累加角度 —— 这就是
+	 * 「短按＝纯跳跃、按住满 5 tick 才开翻、松手定格且计数归零」。
 	 *
 	 * @param holdingJump 本 tick 是否按住跳跃键（{@code LocalPlayer#input.keyPresses.jump()}）
 	 * @param listener    落地回调（把最终角度交给服务端）；可为 {@code null}
@@ -224,6 +236,7 @@ public final class SkiAir {
 			}
 			state.airborne = false;
 			state.flipping = false;
+			state.holdTicks = 0;
 			return;
 		}
 
@@ -233,13 +246,22 @@ public final class SkiAir {
 			state.airborne = true;
 			state.angle = 0.0D;
 			state.prevAngle = 0.0D;
+			state.holdTicks = 0;
 			state.flipping = state.stunTicks <= 0
 					&& player.getDeltaMovement().y > 0.0D
 					&& player.getDeltaMovement().horizontalDistance() >= tuning.flipMinSpeed;
 		}
-		// 唯一的累加点：按住跳跃才转。松手 = 这个分支不进 → 角度原地定格（模型停在同一偏角）。
-		if (state.flipping && holdingJump) {
-			state.angle = normalizeAngle(state.angle + tuning.flipDegreesPerTick);
+		if (state.flipping) {
+			if (holdingJump) {
+				// 连续按住的 tick 计数：满 FLIP_HOLD_DELAY_TICKS 之前<b>一点都不转</b>（短按＝纯跳跃）
+				state.holdTicks++;
+				if (state.holdTicks >= tuning.flipHoldDelayTicks()) {
+					state.angle = normalizeAngle(state.angle + tuning.flipDegreesPerTick());
+				}
+			} else {
+				// 中途松开：连续计数归零（角度原地定格，不清零），再按住要重新数满
+				state.holdTicks = 0;
+			}
 		}
 	}
 
@@ -300,6 +322,7 @@ public final class SkiAir {
 		state.angle = 0.0D;
 		state.prevAngle = 0.0D;
 		state.flipping = false;
+		state.holdTicks = 0;
 		if (listener != null) {
 			listener.landed(angle, clean);
 		}

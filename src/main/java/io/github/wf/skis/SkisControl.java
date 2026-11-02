@@ -148,13 +148,21 @@ public final class SkisControl {
 	/** <b>双板</b>：起跳水平速度低于它就不进入可翻转状态（0.25 ≈ 双板上限 0.85 的 29%）。 */
 	private static final double FLIP_MIN_SPEED = 0.25D;
 	/**
-	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>9.0</b>°/tick ＝ 180°/s，一圈 360° 要 <b>40 tick</b> ＝ <b>2.0 s</b>）。
+	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>12.0</b>°/tick ＝ 240°/s，一圈 360° 要 <b>30 tick</b> ＝ <b>1.50 s</b>）。
 	 *
-	 * <p>起跳本身<b>不再自动开翻</b>：拿中空格才转，松手立刻定格（模型停在那偏角），落地看与直立差多少
-	 * （见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。角度不封顶，可以按住转多圈。
-	 * 双板比单板慢一圈（单板 <b>12.0</b>°/tick ＝ 30 tick ＝ 1.5 s）—— 各一个常量、改一块不动另一块。
+	 * <p>空中的起跳本身<b>不自动开翻</b>：必须先连续按住满 {@link #FLIP_HOLD_DELAY_TICKS} tick 才开始转，松手立刻定格
+	 * （模型停在那偏角），落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。角度不封顶，可以按住转多圈。
+	 * 双板比单板慢一圈（单板 <b>18.0</b>°/tick ＝ 20 tick ＝ 1.0 s）—— 各一个常量、改一块不动另一块。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 9.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 12.0D;
+	/**
+	 * <b>双板</b>：起跳后要<b>连续按住空格</b>满多少 tick 才开始累加角度（<b>5</b> tick ＝ 0.25 s）。
+	 *
+	 * <p>空格<b>永远先起跳</b>（原版跳跃那一行没改）：这条只决定「起跳之后按住多久才进入后空翻」。
+	 * 短按（&lt; 5 tick）＝ 纯跳跃、一点不转；连续按住满 5 tick 起才每 tick 加 {@link #FLIP_DEGREES_PER_TICK}。
+	 * 中途一松开，计数<b>归零</b>（角度继续定格），再按住要重新数满 5 tick 才接着转。
+	 */
+	private static final int FLIP_HOLD_DELAY_TICKS = 5;
 	/**
 	 * <b>双板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在这个范围（±25°）＝干净落地；
 	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
@@ -173,7 +181,7 @@ public final class SkisControl {
 	/** 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
 			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, MAX_SPEED,
-			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_LANDING_TOLERANCE_DEGREES,
+			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
 	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
