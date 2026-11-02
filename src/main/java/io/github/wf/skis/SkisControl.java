@@ -148,13 +148,14 @@ public final class SkisControl {
 	/** <b>双板</b>：起跳水平速度低于它就不翻（0.25 ≈ 双板上限 0.85 的 29%）。 */
 	private static final double FLIP_MIN_SPEED = 0.25D;
 	/**
-	 * <b>双板</b>：后空翻每 tick 转多少度（<b>3.6</b>°/tick ＝ 72°/s，360° 要 100 tick ＝ <b>5.0 s</b>）。
+	 * <b>双板</b>：后空翻每 tick 转多少度（<b>9.0</b>°/tick ＝ 180°/s，360° 要 <b>40 tick</b> ＝ <b>2.0 s</b>）。
 	 *
-	 * <p>18.0 → <b>3.6</b>（1.0 s → 5.0 s）：慢翻才要得起落差 —— 双板满速起跳滞空在平地上只有 12 tick
-	 * （0.60 s），普通雪道 20–45° 也只有 0.90–1.45 s；240°–360° 要 ≥ 67–100 tick，
-	 * 对应 ≥ 70–75° 的落差（详见 {@code docs/tuning.md} 的待机滞空表）。与单板同值、各一个常量。
+	 * <p>双板比单板慢一圈（单板 <b>12.0</b>°/tick ＝ 30 tick ＝ 1.5 s）—— 两块板<b>不再同值</b>，
+	 * 各一个常量、改一块不动另一块。满速起跳滞空在平地上只有 12 tick（0.60 s），
+	 * 30° / 45° 坡 21 / 29 tick；要凑满 40 tick 约需 56–57° 的落差
+	 * （详见 {@code docs/tuning.md} 的待机滞空表）。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 3.6D;
+	private static final double FLIP_DEGREES_PER_TICK = 9.0D;
 	/** <b>双板</b>：落地时缺多少度以内还算翻满（5°）。 */
 	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
 	/** <b>双板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */
