@@ -106,24 +106,46 @@ public final class SnowboardControl {
 	private static final double MAX_SPEED = 0.55D;
 
 	/**
-	 * <b>单板：静止（水平速度 0）起跳的力度</b>（格/tick，原版 0.42）。
-	 * 实际力度 = 它 + {@link #JUMP_SPEED_POWER_GAIN} × min(水平速度 / {@link #MAX_SPEED}, 1)，所以 0 → 0.22、
-	 * 满速 0.55 → 1.05。静止只跳 0.34 格（低速不高跳），满速才 5 格多 —— 跳高随速度严格单调上升。
+	 * <b>单板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − 0.104) × 0.98}）下
+	 * 正好落在 <b>2.00</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
+	 * <b>只是表的上限依据</b>：代码不拿它反推力度（表才是唯一事实源），改上限要整张表重算。
+	 */
+	private static final double JUMP_MAX_HEIGHT = 2.0D;
+	/** <b>单板</b>：速度→起法力查找表的点数（s = 0.0 / 0.1 / … / 1.0 共 11 点，步长 0.1）。 */
+	private static final int JUMP_CURVE_SAMPLES = 11;
+	/**
+	 * <b>单板：速度 → 起跳力度</b>（格/tick）的 11 点查找表，下标 = s × 10（s = 0.0 / 0.1 / … / 1.0，
+	 * s ＝ 水平速度 / {@link #MAX_SPEED}），两点之间由 {@link SkiAir.Tuning#jumpPower} <b>线性插值</b>。
+	 *
+	 * <p>表来自<b>对数曲线</b> {@code h(s) = 0.34 + (2.0 − 0.34) × ln(1 + 9s) / ln(10)}（h = 跳高，格）
+	 * 在离散 tick 物理下反解力度：<b>前半段涨得快、越往后越平、末段增量趋于 0</b> ——
+	 * 20% 速度已经拿到 54% 的高度，满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 2.00 格。
+	 *
+	 * <p>对应跳高（格）：0.34 / 0.80 / 1.08 / 1.28 / 1.44 / 1.57 / 1.68 / 1.77 / 1.86 / 1.93 / 2.00。
 	 * 与双板各一份：调这里不动双板。
 	 */
-	private static final double JUMP_BASE_POWER = 0.22D;
-	/** <b>单板</b>：满速时起跳力度再抬多少（0.83 → 满速共 1.05，约 4.8 倍静止力度）。 */
-	private static final double JUMP_SPEED_POWER_GAIN = 0.83D;
+	private static final double[] JUMP_POWER_BY_SPEED_LUT = {
+			0.219D, 0.362D, 0.433D, 0.475D, 0.508D, 0.535D, 0.555D, 0.571D, 0.586D, 0.599D, 0.611D
+	};
+	static {
+		// 表长必须＝采样点数（插值步长 = 1 / (SAMPLES − 1) = 0.1）：长度写错在这里立刻炸，别带到游戏里
+		if (JUMP_POWER_BY_SPEED_LUT.length != JUMP_CURVE_SAMPLES) {
+			throw new IllegalStateException("JUMP_POWER_BY_SPEED_LUT 应有 " + JUMP_CURVE_SAMPLES + " 点");
+		}
+	}
 	/**
 	 * <b>单板</b>：起跳水平速度低于它就不翻（只是普通小跳）。0.20 ≈ 单板上限 0.55 的 36% ——
 	 * 慢滑时的空格仍然是「小跳一下」，滑起来才会自动后空翻。
 	 */
 	private static final double FLIP_MIN_SPEED = 0.20D;
 	/**
-	 * <b>单板</b>：后空翻每 tick 转多少度（18°/tick ＝ 360°/s，360° 要 20 tick ＝ 1.0 s）。
-	 * 与双板同值，但两块板各一个常量。
+	 * <b>单板</b>：后空翻每 tick 转多少度（<b>3.6</b>°/tick ＝ 72°/s，360° 要 100 tick ＝ <b>5.0 s</b>）。
+	 *
+	 * <p>18.0 → <b>3.6</b>（1.0 s → 5.0 s）：慢翻才要得起落差 —— 满速起跳的滞空在平地上只有 13 tick
+	 * （0.65 s），普通雪道 20–45° 也只有 0.90–1.45 s；240°–360° 要 ≥ 67–100 tick，
+	 * 对应 ≥ 70–75° 的落差（详见 {@code docs/tuning.md} 的待机滞空表）。与双板同值，但两块板各一个常量。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 18.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 3.6D;
 	/** <b>单板</b>：落地时缺多少度以内还算翻满（5° ＝ 至少转到 355° 才干净落地）。 */
 	private static final double FLIP_COMPLETE_TOLERANCE_DEGREES = 5.0D;
 	/** <b>单板</b>：翻转失败硬着陆时，水平速度保留的比例（0.35 ＝ 掉 65%）。 */
@@ -138,7 +160,7 @@ public final class SnowboardControl {
 
 	/** 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
-			JUMP_BASE_POWER, JUMP_SPEED_POWER_GAIN, MAX_SPEED,
+			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_COMPLETE_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
@@ -153,7 +175,8 @@ public final class SnowboardControl {
 	 * <b>穿单板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
 	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
 	 * 1.0 = 原版；1.3 = 0.104 格/tick²（比平时重力更快，又不至于跳得太矮 / 落地太砸）。
-	 * 1.5 / 2.0 都试过——值越大下落越干脆，但跳高与滞空跟着被压（1.3 时跳高 ≈1.05 格）。
+	 * 1.5 / 2.0 都试过——值越大下落越干脆，最大跳高就是按这个重力反解的
+	 * {@link #JUMP_POWER_BY_SPEED_LUT}（满速 2.00 格，见 {@link #JUMP_MAX_HEIGHT}）。
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.3D;
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */

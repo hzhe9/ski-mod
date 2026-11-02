@@ -17,8 +17,10 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p><b>三件事</b>：
  * <ol>
- *   <li><b>起跳力度</b>（{@link #jumpPower(Player)}）：{@code JUMP_BASE_POWER + JUMP_SPEED_POWER_GAIN ×
- *       min(水平速度 / MAX_SPEED, 1)} —— 滑得越快跳得越高。只在「穿着本模组的板」时返回值，
+ *   <li><b>起跳力度</b>（{@link #jumpPower(Player)}）：按该板的 <b>11 点速度→起法力查找表</b>
+ *       （{@code JUMP_POWER_BY_SPEED_LUT}，s ＝ 水平速度 / {@code MAX_SPEED} 为下标、两点之间线性插值）取值 ——
+ *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 2.0 格（{@code JUMP_MAX_HEIGHT}）。
+ *       只在「穿着本模组的板」时返回值，
  *       没穿板（或不是玩家）返回 −1，原版跳跃原样不动。注入点是原版 {@code LivingEntity#getJumpPower()}
  *       （{@code jumpFromGround} 里唯一一次取值），所以空格仍然是<b>原版跳跃</b>、按住连跳照旧。</li>
  *   <li><b>后空翻</b>：每次真正离地起跳（离地且 {@code vy > 0}）时，起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
@@ -43,10 +45,10 @@ public final class SkiAir {
 	 * <p>做成对象而不是一串裸参数：状态机只有一份，数值由各自的板类在 {@code airTuning()} 里给。
 	 */
 	public static final class Tuning {
-		/** 静止起跳的力度（格/tick，原版 0.42）。 */
-		private final double basePower;
-		/** 满速时在 {@link #basePower} 之上再抬多少。 */
-		private final double speedPowerGain;
+		/** 速度 → 起跳力度（格/tick）的查找表：下标 s = 0, 1/(n−1), …, 1（长度 11 ＝ 步长 0.1）。 */
+		private final double[] powerBySpeedLut;
+		/** 这张表对应的跳高上限（格）：只作依据/自检，不参与反推（表才是唯一事实源）。 */
+		private final double jumpMaxHeight;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
 		private final double maxSpeed;
 		/** 起跳水平速度低于它就不翻（只是普通小跳）。 */
@@ -62,11 +64,14 @@ public final class SkiAir {
 		/** 硬着陆扣血上限（0 = 关闭）。 */
 		private final double crashDamageMax;
 
-		public Tuning(double basePower, double speedPowerGain, double maxSpeed, double flipMinSpeed,
+		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double maxSpeed, double flipMinSpeed,
 				double flipDegreesPerTick, double flipToleranceDegrees, double crashSpeedMultiplier,
 				int crashStunTicks, double crashDamageMax) {
-			this.basePower = basePower;
-			this.speedPowerGain = speedPowerGain;
+			if (powerBySpeedLut == null || powerBySpeedLut.length < 2) {
+				throw new IllegalArgumentException("powerBySpeedLut 至少要 2 个点（线性插值两端）");
+			}
+			this.powerBySpeedLut = powerBySpeedLut.clone();   // 拷一份：外部那张表以后被改也不影响已建的 Tuning
+			this.jumpMaxHeight = jumpMaxHeight;
 			this.maxSpeed = maxSpeed;
 			this.flipMinSpeed = flipMinSpeed;
 			this.flipDegreesPerTick = flipDegreesPerTick;
@@ -77,15 +82,27 @@ public final class SkiAir {
 		}
 
 		/**
-		 * 起跳力度：{@code basePower + speedPowerGain × min(水平速度 / maxSpeed, 1)} —— <b>线性</b>，
-		 * 满速时正好是 {@code basePower + speedPowerGain}。
+		 * 起跳力度：把 s ＝ min(水平速度 / {@link #maxSpeed}, 1) 映射到 {@link #powerBySpeedLut} 的下标
+		 * （0 … n−1），<b>两点之间线性插值</b>。表本身是对数形曲线（前段涨得快、后段趋平），
+		 * 所以这里只做「按表取值」，不再有任何线性公式。满速返回表的最后一点（＝跳高上限 2.0 格）。
 		 */
 		public double jumpPower(double horizontalSpeed) {
-			if (maxSpeed <= 0.0D) {
-				return basePower;
+			double normalized = maxSpeed <= 0.0D
+					? 0.0D
+					: Mth.clamp(horizontalSpeed / maxSpeed, 0.0D, 1.0D);
+			int last = powerBySpeedLut.length - 1;
+			double scaled = normalized * last;   // 0 … last（11 点表 → 0 … 10，步长 1 ＝ 速度步长 0.1）
+			int index = (int) Math.floor(scaled);
+			if (index >= last) {
+				return powerBySpeedLut[last];
 			}
-			double normalized = Mth.clamp(horizontalSpeed / maxSpeed, 0.0D, 1.0D);
-			return basePower + speedPowerGain * normalized;
+			double lower = powerBySpeedLut[index];
+			return lower + (powerBySpeedLut[index + 1] - lower) * (scaled - index);
+		}
+
+		/** 这张表对应的跳高上限（格）：给调试 / 文档对账用，不参与力度计算。 */
+		public double jumpMaxHeight() {
+			return jumpMaxHeight;
 		}
 	}
 
