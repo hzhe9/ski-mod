@@ -6,6 +6,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -28,6 +31,9 @@ import net.minecraft.world.phys.Vec3;
  *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
  *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、进入 {@code CRASH_STUN_TICKS} 的失控。
  *       多翻了几圈只要停在直立附近也算净落。</li>
+ *   <li><b>离地补跳</b>（{@link #tryAirJump}）：不在 {@code onGround}、脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}
+ *       （1.0 格，向下碰撞射线）、{@code vy ≤ 0}、按住空格 → 再给一次起跳速度（力度仍取 {@link Tuning#jumpPower}）。
+ *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked}，<b>不碰角度 / holdTicks / 失控计时</b>。</li>
  * </ol>
  *
  * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
@@ -66,6 +72,8 @@ public final class SkiAir {
 		private final double[] powerBySpeedLut;
 		/** 这张表对应的跳高上限（格）：只作依据/自检，不参与反推（表才是唯一事实源）。 */
 		private final double jumpMaxHeight;
+		/** 离地补跳的高度门槛（格）：腾空时脚底到下方地面 ≤ 它就还能再起跳一次；0 ＝ 关掉。 */
+		private final double jumpGroundRange;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
 		private final double maxSpeed;
 		/** 起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。 */
@@ -83,7 +91,8 @@ public final class SkiAir {
 		/** 摔倒扣血上限（0 = 关闭）。 */
 		private final double crashDamageMax;
 
-		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double maxSpeed, double flipMinSpeed,
+		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double jumpGroundRange, double maxSpeed,
+				double flipMinSpeed,
 				double flipDegreesPerTick, int flipHoldDelayTicks, double flipLandingToleranceDegrees,
 				double crashSpeedMultiplier, int crashStunTicks, double crashDamageMax) {
 			if (powerBySpeedLut == null || powerBySpeedLut.length < 2) {
@@ -91,6 +100,7 @@ public final class SkiAir {
 			}
 			this.powerBySpeedLut = powerBySpeedLut.clone();   // 拷一份：外部那张表以后被改也不影响已建的 Tuning
 			this.jumpMaxHeight = jumpMaxHeight;
+			this.jumpGroundRange = jumpGroundRange;
 			this.maxSpeed = maxSpeed;
 			this.flipMinSpeed = flipMinSpeed;
 			this.flipDegreesPerTick = flipDegreesPerTick;
@@ -123,6 +133,11 @@ public final class SkiAir {
 		/** 这张表对应的跳高上限（格）：给调试 / 文档对账用，不参与力度计算。 */
 		public double jumpMaxHeight() {
 			return jumpMaxHeight;
+		}
+
+		/** 离地补跳的高度门槛（格）：脚底到下方地面 ≤ 它 ＋ {@code vy ≤ 0} ＋ 按住空格 ＝ 再起跳一次。 */
+		public double jumpGroundRange() {
+			return jumpGroundRange;
 		}
 
 		/** 按住跳跃时每 tick 转多少度。 */
@@ -207,6 +222,50 @@ public final class SkiAir {
 			return -1.0F;
 		}
 		return (float) tuning.jumpPower(player.getDeltaMovement().horizontalDistance());
+	}
+
+	/**
+	 * <b>离地补跳</b>（只在客户端本地玩家那条 tick 路径里调 —— 服务端读不到「有没有按住空格」）：
+	 * 穿板、<b>不在</b> {@code onGround}、脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}
+	 * （向下那 {@code range} 格的<b>碰撞射线</b>，{@link ClipContext.Block#COLLIDER}，不拿 {@code blockPosition} 猜）、
+	 * 竖直速度 {@code vy ≤ 0}、且按住空格 —— 再拿到一次起跳速度。
+	 *
+	 * <p>力度<b>就是地面起跳那一份</b>：{@link Tuning#jumpPower(double)}（同一张 11 点表、同一个插值），
+	 * 不另写第二份公式。写入方式与地面跳跃一致：只改 {@code deltaMovement.y} ＋ {@code hurtMarked}，<b>不 setPos</b>。
+	 *
+	 * <p><b>不碰空翻状态</b>：角度（{@code angle} / {@code prevAngle}）、连续按住计数（{@code holdTicks}）、
+	 * 失控计时（{@code stunTicks}）一个字段都不写 —— 否则按住空格连点就能靠补跳把角度 / 计数清零、逃过摔倒判定。
+	 * 状态机 {@link #tickClient} 照常往下数，补跳只是给它一个向上的速度。
+	 */
+	public static void tryAirJump(Player player, Tuning tuning, boolean holdingJump) {
+		if (player == null || tuning == null || !holdingJump) {
+			return;
+		}
+		if (player.onGround()) {
+			return;                          // 贴地起跳归原版 jumpFromGround 管，这里不抢
+		}
+		if (player.getDeltaMovement().y > 0.0D) {
+			return;                          // 只在开始下落 / 平抛之后补，上升段不动（不会变成二段跳）
+		}
+		double range = tuning.jumpGroundRange();
+		if (range <= 0.0D || groundDistance(player, range) > range) {
+			return;                          // 离地超过门槛：这次不算「贴地」小跳
+		}
+		Vec3 motion = player.getDeltaMovement();
+		player.setDeltaMovement(motion.x, tuning.jumpPower(motion.horizontalDistance()), motion.z);
+		player.hurtMarked = true;            // 把这份速度同步出去（不 setPos）
+	}
+
+	/** 脚底到下方地面的距离（格）：向下 {@code range} 格的碰撞射线；探不到东西返回 {@link Double#MAX_VALUE}。 */
+	private static double groundDistance(Player player, double range) {
+		Vec3 from = player.position();
+		Vec3 to = from.add(0.0D, -range, 0.0D);
+		BlockHitResult hit = player.level().clip(new ClipContext(from, to,
+				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return Double.MAX_VALUE;
+		}
+		return from.y - hit.getLocation().y;
 	}
 
 	/**

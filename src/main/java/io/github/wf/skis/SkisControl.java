@@ -153,6 +153,13 @@ public final class SkisControl {
 			throw new IllegalStateException("JUMP_POWER_BY_SPEED_LUT 应有 " + JUMP_CURVE_SAMPLES + " 点");
 		}
 	}
+	/**
+	 * <b>双板：离地补跳的高度门槛</b>（格）：腾空时脚底到下方地面 ≤ 这个距离、{@code vy ≤ 0}、且按住空格，
+	 * 就能再拿到一次起跳速度（力度照 {@link #JUMP_POWER_BY_SPEED_LUT}，与地面起跳同一个取值方法）。
+	 * 只补竖直速度，<b>不碰空翻角度 / 连续按住计数 / 失控计时</b>。
+	 * 1.0 ＝ 离地不到一格（过台阶、贴地小跳的余量）仍可再跳；0 ＝ 关掉。
+	 */
+	private static final double JUMP_GROUND_RANGE = 1.0D;
 	/** <b>双板</b>：起跳水平速度低于它就不进入可翻转状态（0.25 ≈ 双板上限 0.85 的 29%）。 */
 	private static final double FLIP_MIN_SPEED = 0.25D;
 	/**
@@ -188,7 +195,7 @@ public final class SkisControl {
 
 	/** 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
-			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, MAX_SPEED,
+			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, JUMP_GROUND_RANGE, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
