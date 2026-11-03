@@ -194,8 +194,14 @@ public final class SkiGlide {
 	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
 	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
 	 *
-	 * <p>改的是真重力，不是每 tick 补一份向下的速度 —— 所以上升段一起变沉（跳得更矮、滞空更短），
-	 * 全程生效。原版重力在穿板时太轻（下落像飘在空里），所以取「比平时更快」这一档。
+	 * <p><b>贴地 / 腾空两档</b>，每 tick 按 {@code player.onGround()} 二选一：
+	 * 贴地（滑行、落地压雪）用 {@code GRAVITY_MULTIPLIER}（单 1.3 / 双 1.5，下落干脆、不发飘），
+	 * 腾空（跳跃 / 坠落）用 {@code AIR_GRAVITY_MULTIPLIER}（两板 0.8 ＝ 原版 0.064，飘一点、滞空长一点）。
+	 * <b>这是全类唯一一处写 GRAVITY 属性的地方</b>，每 tick 只在末尾写一次 —— 不要另加第二个写点
+	 * （本工程踩过「两处各 clamp 一次」的坑）。
+	 *
+	 * <p>原版重力在穿板时太轻（贴地下落像飘在空里），所以贴地取「比平时更快」这一档；
+	 * 空中则比原版还轻 —— 跳高表就是按空中的 0.064 反解的。
 	 * （试过「贴地 / 腾空两态 + 前馈地形跟随」的控制器，实测贴太紧、会瞬间吸到下一格，
 	 * 已回退到这条重力方案 —— 别再自作主张加贴地控制。）
 	 * 与 {@link #setStepHeight} 同一套做法：只在穿板时生效，脱板由 {@link #resetGravity} 还原。
@@ -205,9 +211,12 @@ public final class SkiGlide {
 		if (attribute == null) {
 			return;
 		}
-		double multiplier = SnowboardControl.isSnowboard(player)
-				? SnowboardControl.gravityMultiplier()
-				: SkisControl.gravityMultiplier();
+		boolean board = SnowboardControl.isSnowboard(player);
+		boolean grounded = player.onGround();
+		// 贴地 → 该板的 GRAVITY_MULTIPLIER；腾空 → 该板的 AIR_GRAVITY_MULTIPLIER（两板 0.8）
+		double multiplier = grounded
+				? (board ? SnowboardControl.gravityMultiplier() : SkisControl.gravityMultiplier())
+				: (board ? SnowboardControl.airGravityMultiplier() : SkisControl.airGravityMultiplier());
 		attribute.setBaseValue(Attributes.GRAVITY.value().getDefaultValue() * multiplier);
 	}
 

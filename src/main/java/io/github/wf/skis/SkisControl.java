@@ -105,19 +105,27 @@ public final class SkisControl {
 	private static final double FALL_GAIN_PER_TICK_MAX = 0.3D;
 
 	/**
-	 * <b>穿双板时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
-	 * <b>全程生效</b>（贴地滑行、跳跃、坠落都算）。
+	 * <b>穿双板、<u>贴地</u>时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
+	 * <b>只在 {@code onGround()} 时生效</b>（滑行贴地、落地压雪）。腾空时改用 {@link #AIR_GRAVITY_MULTIPLIER}。
 	 * 1.0 = 原版；1.3 = 0.104 格/tick²；<b>1.5 = 0.12 格/tick²</b>。
-	 * 值越大下落越干脆，最大跳高就是按这个重力反解的
-	 * {@link #JUMP_POWER_BY_SPEED_LUT}（满速 2.00 格，见 {@link #JUMP_MAX_HEIGHT}）。
+	 * 值越大贴地下落越干脆；跳高<b>不吃这个值</b>（空中按 {@link #AIR_GRAVITY_MULTIPLIER} 0.064 反解，
+	 * 见 {@link #JUMP_POWER_BY_SPEED_LUT}、{@link #JUMP_MAX_HEIGHT}）。
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.5D;
+
+	/**
+	 * <b>穿双板、<u>腾空</u>时的重力倍数</b>（跳跃 / 下落全程）：0.08 × 0.8 = <b>0.064</b> 格/tick²，
+	 * 比原版还轻 —— 空中飘一点、滞空更长（空翻能按住的 tick 更多）。
+	 * {@link #JUMP_POWER_BY_SPEED_LUT} 就是按这个重力反解的；1.0 = 原版（0.08）。
+	 */
+	private static final double AIR_GRAVITY_MULTIPLIER = 0.8D;
 
 	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（撑杖冲刺的峰值也封顶在这里）。 */
 	private static final double MAX_SPEED = 0.85D;
 
 	/**
-	 * <b>双板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − 0.12) × 0.98}）下
+	 * <b>双板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − 0.064) × 0.98}，
+	 * 0.064 ＝ 原版 0.08 × 腾空倍数 {@link #AIR_GRAVITY_MULTIPLIER} 0.8）下
 	 * 正好落在 <b>2.00</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
 	 * <b>只是表的上限依据</b>：代码不拿它反推力度（表才是唯一事实源），改上限要整张表重算。
 	 */
@@ -129,7 +137,7 @@ public final class SkisControl {
 	 * s ＝ 水平速度 / {@link #MAX_SPEED}），两点之间由 {@link SkiAir.Tuning#jumpPower} <b>线性插值</b>。
 	 *
 	 * <p>表来自<b>对数曲线</b> {@code h(s) = 0.36 + (2.0 − 0.36) × ln(1 + 9s) / ln(10)}（h = 跳高，格）
-	 * 在离散 tick 物理下反解力度（双板重力更沉 0.12 格/tick²，所以同一档力度略高于单板）：
+	 * 在离散 tick 物理下反解力度（重力用<b>腾空</b>的 0.064；起跳点略高于单板，所以同一档力度略高）：
 	 * <b>前半段涨得快、越往后越平、末段增量趋于 0</b> —— 20% 速度已经拿到 54% 的高度，
 	 * 满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 2.00 格。
 	 *
@@ -137,7 +145,7 @@ public final class SkisControl {
 	 * 与单板各一份：调这里不动单板。
 	 */
 	private static final double[] JUMP_POWER_BY_SPEED_LUT = {
-			0.241D, 0.390D, 0.461D, 0.509D, 0.541D, 0.568D, 0.590D, 0.610D, 0.627D, 0.640D, 0.651D
+			0.186D, 0.298D, 0.352D, 0.387D, 0.413D, 0.432D, 0.448D, 0.463D, 0.475D, 0.485D, 0.494D
 	};
 	static {
 		// 表长必须＝采样点数（插值步长 = 1 / (SAMPLES − 1) = 0.1）：长度写错在这里立刻炸，别带到游戏里
@@ -316,9 +324,14 @@ public final class SkisControl {
 		return MOMENTUM_DECAY;
 	}
 
-	/** 双板：<b>穿板时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #GRAVITY_MULTIPLIER}）。 */
+	/** 双板：<b>穿板贴地时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #GRAVITY_MULTIPLIER}）。 */
 	public static double gravityMultiplier() {
 		return GRAVITY_MULTIPLIER;
+	}
+
+	/** 双板：<b>穿板腾空时的重力倍数</b>（原版 0.08 格/tick² × 这个值；见 {@link #AIR_GRAVITY_MULTIPLIER}）。 */
+	public static double airGravityMultiplier() {
+		return AIR_GRAVITY_MULTIPLIER;
 	}
 
 	/** 双板：按 S 刹车时每 tick 保留的比例（见 {@link #BRAKE_DECAY}）。 */
