@@ -61,7 +61,7 @@
 | S | **后倾**：同样整个人 + 板一起向后仰 `TILT_DEGREES`，相机位置跟着后移，视线不变 |
 | **carve（切雪转弯）：W/S 只转向、不加力** | **前提是压刃**：必须按着 W 或 S，**光按 A/D 只是纯横移**。触发后身体朝向每 tick 转 `TURN_RATE_DEGREES`（**1.2**°/tick ＝ 24°/s：转满 180° 需 150 tick ＝ 7.5 s），**速度的方向跟着转同样的角度**（`rotateVelocity`，大小不变；整 tick 结束时再由下面的 `alignCarveHeading` 按身体朝向直接重写）—— 朝向转多少速度方向转多少，带惯性的路线慢慢弯过去，全程**不补任何推力**（W/S 只改方向）。**转向期间的摩擦比直行更小**：用 `CARVE_MOMENTUM_DECAY` 0.999 托住速度（1 秒 −2%），而且此时按反向侧压是**换刃转向**、不再按刹车处理（`SnowboardControl.isCarving`）。**转向期间速度不衰减（`guardCarveSpeed`）**：`SkiGlide` 在动量结算之后对单板调一次 `SnowboardControl.guardCarveSpeed`，每 tick 算下限 `入场速度 × CARVE_MOMENTUM_DECAY^持续 tick`，没撞到方块（`horizontalCollision` 为假）且当前水平速度低于它就缩放回去（方向不变、y 不动、`hurtMarked = true`），退出 carve 时清表 —— **只做下限、不封顶**（下坡加速自己涨上去的不会被拉回），撞墙那一 tick 不补，但下一个自由 tick 就回到这条曲线上。**速度方向由身体朝向推导（`alignCarveHeading`）**：转向期间速度方向不再靠每 tick 转 `delta` 累加 —— 那样同一 tick 里回落加速（沿身体左右轴加一份）与动量托底会把方向拽回去，速度方向越滑越落后于身体朝向，而且 W 与 S 拽偏方向相反（W 落后、S 超前）。入弯那一 tick 记下 `CARVE_HEADING`（入弯速度方向角，`atan2(z, x)` 弧度）与 `CARVE_YAW0`（入弯 bodyYaw），之后每 tick 由 `alignCarveHeading` 把水平速度方向**直接写成** 「`CARVE_HEADING` + `wrapDegrees(bodyYaw现在 − CARVE_YAW0)`」（大小与 y 都不动，变化 > 1e-4 才写并 `hurtMarked = true`），退出 carve 清表。**调用点是整 tick 最后一个写速度的地方**（`SkiGlide.register` 里 `guardCarveSpeed` 之后，只在单板分支），所以同 tick 内别的写者造成的偏角不会累下去：身体转多少、速度方向就转多少。<br>转向方向：按 A/D 时由侧压决定，没按 A/D 时只要滑速 ≥ `CARVE_MIN_SPEED` 就前倾/后倾各走一边；**后倾（S）＝后刃**，转向与前倾相反。腾空也能转 |
 | 视角范围 | 头只能相对身体朝向左右各 `VIEW_LIMIT_DEGREES`（135°），合计 270 —— 只剩背后 90° 是禁区。**限位只有一处权威状态**：`client/SkiViewSmoothing` 的 `headOffset`（视角相对身体朝向的偏角）。鼠标每帧转视角时（`SkiHeadLimitMixin` 拦 `Entity#turn` 的 HEAD/TAIL）只把这一帧转过的角度记进 `headOffset` 并夹一次、撤掉越界那点；每帧再由 `CameraViewSmoothingMixin`（`Camera#alignWithEntity` 的 HEAD）用「按 `partialTick` 插值后的身体朝向 + `headOffset`」写一次 yaw。没顶到限位时视角留在世界坐标里不动（只听鼠标），顶到之后头随身体平滑拖走；**往回转立刻响应，没有死区** |
-| 空格 | **先起跳** —— 原版跳跃（2026-10-15 起 `makeJump` 不再被取消；单板以前是禁止跳的），短按 / 长按都先跳。起跳力度**随滑行速度放大**；滑得快时**连续按住超过 5 tick 才在空中后空翻**（前 5 tick 只数不转），松手定格、中途松手要重新数满 5 tick，落地角度不对会摔（见「跳跃与后空翻」） |
+| 空格 | **先起跳，而且起跳由本模组接管**（原版 `jumpFromGround` 在穿板时被 `mixin/LivingEntityJumpMixin` 在 HEAD 处 cancel，改由客户端唯一入口 `SkiAir.tryJump` 发一次，不再依赖原版 `onGround` 分支）。贴地立即跳；离地 `COYOTE_TICKS`（6 tick）逗留窗内也跳；离地 ≤ `JUMP_GROUND_RANGE`（1.0 格）且 `vy ≤ 0` 也跳；按下沿有 `JUMP_BUFFER_TICKS`（5 tick）输入缓冲，起跳后 `JUMP_COOLDOWN_TICKS`（10 tick）内不重复起跳 —— 按住空格＝落地即再跳。起跳力度**随滑行速度放大**；滑得快时**连续按住超过 5 tick 才在空中后空翻**（前 5 tick 只数不转），松手定格、中途松手要重新数满 5 tick，落地角度不对会摔（见「跳跃与后空翻」） |
 | 鼠标（头 / 视角） | 可以转，但相对身体朝向限在 ±`VIEW_LIMIT_DEGREES`（见上一行的单一限位实现） |
 | 身体朝向 | **不跟着视角转** —— 锁定在穿上板那一刻；客户端每 tick 写回 `yBodyRot`（渲染读的是 render state 的 `bodyRot`）。**`yBodyRotO` 不再写** —— 原版 `baseTick` 每 tick 把它记成「上一 tick 的 yBodyRot」，留着它身体转动才是插值过去的（一起写成新值等于把插值掐掉，第三人称每 tick 跳 2°） |
 | 滑行物理 | **只保留下落加速**：每降 1 格 +`FALL_GAIN_PER_BLOCK` 0.15（基数比双板 0.08 大；每 0.5 格结算一次）。方向按 **单板只有左右**：把当前移动方向**投影到身体横轴**，只取左右分量（绝不给“往前”的加速），没左右分量又不按 A/D 就不加。空中也照样给。不做雪面推进、动量也不捕获玩家自己走出来的速度 —— 否则平地走路 / 站坡上都会“莫名往前” |
@@ -76,11 +76,11 @@
 
 ### 跳跃与后空翻 `SkiAir.java`（状态机共用，数值两块板各一套）
 
-穿板时空格仍然是**原版跳跃**（不新开按键、也不拦 `makeJump`；按住空格＝落地即再跳＝连跳）：
+穿板时空格**由本模组接管起跳**（原版 `LivingEntity#jumpFromGround()` 在穿板时被 `mixin/LivingEntityJumpMixin` 在 HEAD 处 `ci.cancel()`，起跳只走客户端唯一入口 `SkiAir.tryJump`；按住空格＝落地即再跳＝连跳）：
 
-- **起跳力度随水平滑行速度按对数形曲线升高**：`s = min(水平速度 / MAX_SPEED, 1)`（`MAX_SPEED` 就是该板的速度上限 0.55 / 0.85），力度 = 该板的 **11 点速度→起法力查找表** `JUMP_POWER_BY_SPEED_LUT`（s = 0.0 / 0.1 / … / 1.0 共 11 点，两点之间**线性插值**，取值在 `SkiAir.Tuning#jumpPower`）。表由**对数曲线** `h(s) = h₀ + (2.0 − h₀) × ln(1 + 9s) / ln(10)`（h = 跳高、h₀ = 0.34 单板 / 0.36 双板）在离散 tick 物理下（**重力用腾空的 `AIR_GRAVITY_MULTIPLIER` 0.064**，不是贴地的 1.3 / 1.5）反解而来 —— **前半段涨得快、后面趋平、末段增量趋近 0**，满速恰好卡在跳高上限 `JUMP_MAX_HEIGHT` **2.0 格**。**旧的两个线性常量 `JUMP_BASE_POWER` / `JUMP_SPEED_POWER_GAIN` 已删除**（同一个旋钮别再记在两行）。注入点是原版 `LivingEntity#getJumpPower()`（`jumpFromGround` 里唯一一次取值，common mixin `LivingEntityJumpPowerMixin`），**没穿板 / 生物一律原版值**。
-- **离地不到一格也能再跳（补跳）**：穿板、**不在 `onGround`**、脚底到下方地面 ≤ `JUMP_GROUND_RANGE`（**1.0 格**，向下 1.0 格的**碰撞射线**量、不看 `blockPosition`）、`vy ≤ 0`、且按住空格时，客户端本地那条 tick 路径会**再给一次起跳速度**（力度就是该板 `JUMP_POWER_BY_SPEED_LUT` 按当前水平速度的取值，与地面起跳同一个方法）。只写 `deltaMovement.y` ＋ `hurtMarked`（不 `setPos`）；**空翻角度 / 连续按住计数 / 失控计时一个都不动** —— 所以按住空格连点并不能靠补跳重置角度、逃过摔倒判定。只在客户端做：服务端读不到「有没有按住空格」。
-- **空格永远先起跳，后空翻要按住够久才转**：空格一直是**原版跳跃**（短按、长按都先起跳，5 tick 内松手就是**纯跳跃、一点不转**）。真正离地起跳（`onGround` 由真变假且 `vy > 0` —— 走下坡 / 掉悬崖不算起跳）时，起跳水平速度 ≥ `FLIP_MIN_SPEED` 且没在失控里，才**进入可翻转状态**；**起跳本身不自动开翻**（角度保持 0）。进入之后，从离地第一 tick 开始数「**连续按住跳跃**」的 tick：**连续按住满 `FLIP_HOLD_DELAY_TICKS`（5）tick 起**才每 tick 加 `FLIP_DEGREES_PER_TICK`（**单板 18°＝20 tick 一圈 1.00 s，双板 12°＝30 tick 一圈 1.50 s；两板不同速**）；**中途一松开，这个计数立刻归零**（角度继续定格在那一偏角，不清零），再次按住要**重新数满 5 tick** 才接着转。**不在 360° 封顶**（可以按住转多圈），内部按 360 取模保存（[0,360)）避免数值膨胀。速度不够＝普通小跳、按住再久也不转。
+- **起跳力度随水平滑行速度按对数形曲线升高**：`s = min(水平速度 / MAX_SPEED, 1)`（`MAX_SPEED` 就是该板的速度上限 0.55 / 0.85），力度 = 该板的 **11 点速度→起法力查找表** `JUMP_POWER_BY_SPEED_LUT`（s = 0.0 / 0.1 / … / 1.0 共 11 点，两点之间**线性插值**，取值在 `SkiAir.Tuning#jumpPower`）。表由**对数曲线** `h(s) = h₀ + (2.0 − h₀) × ln(1 + 9s) / ln(10)`（h = 跳高、h₀ = 0.34 单板 / 0.36 双板）在离散 tick 物理下（**重力用腾空的 `AIR_GRAVITY_MULTIPLIER` 0.064**，不是贴地的 1.3 / 1.5）反解而来 —— **前半段涨得快、后面趋平、末段增量趋近 0**，满速恰好卡在跳高上限 `JUMP_MAX_HEIGHT` **2.0 格**。**旧的两个线性常量 `JUMP_BASE_POWER` / `JUMP_SPEED_POWER_GAIN` 已删除**（同一个旋钮别再记在两行）。注入点是原版 `LivingEntity#getJumpPower()`（`jumpFromGround` 里唯一一次取值，common mixin `LivingEntityJumpPowerMixin`），**没穿板 / 生物一律原版值**；**穿板时这条路已被 `LivingEntityJumpMixin` 取消**，力度改由 `SkiAir.tryJump` 直接向同一张表取值。
+- **起跳由本模组接管（单一入口 `SkiAir.tryJump`）**：为什么必须接管 —— 原版起跳在 `LivingEntity#aiStep` 里，条件是「`this.jumping`（`LocalPlayer#tick` 由 `input.keyPresses.jump()` 写入）**且（`onGround()` 或在水里）**」。滑行时 `onGround` 在上坡 / 起伏 / 贴面走但没严格落地时经常是假，按空格就没反应；另外原版 `jumpFromGround()` 自己也会 `setDeltaMovement(x, max(power, vy), z)`，和补跳抢同一份 y。现在原版那条路在 `LivingEntity#jumpFromGround()` 的 HEAD 处被 `ci.cancel()`（`mixin/LivingEntityJumpMixin`），起跳只在客户端 `SkiAir.tryJump` 发一次。三条触发条件**任一成立**即起跳：① `onGround`；② 离地未满 `COYOTE_TICKS`（**6 tick**）的逗留窗（土狼时间，`onGround` 在坡上抖动时不会漏按）；③ 离地但 `vy ≤ 0` 且脚底到下方地面 ≤ `JUMP_GROUND_RANGE`（**1.0 格**，向下 1.0 格的**碰撞射线**量、不看 `blockPosition`）。**输入缓冲**：按下沿充值 `JUMP_BUFFER_TICKS`（**5 tick**），提前一点按下、条件成立那一 tick 自动发出。**防连发**：起跳后 `JUMP_COOLDOWN_TICKS`（**10 tick**）内不再因「按住」重复起跳，落地后由贴地条件自然放行（按住空格＝落地即再跳）。写入方式只有一种：`deltaMovement` 的 y ＝ 起力、水平不变 ＋ `hurtMarked = true`，**不 `setPos`**。**起跳成功 ＝ 空翻状态机的新一轮**：`holdTicks` 归零（「按住满 5 tick 才转」从这次起跳重新数），可翻状态按现有规则重算（水平速度 ≥ `FLIP_MIN_SPEED` 且没在失控里）。只在客户端做：服务端读不到「有没有按住空格」，也不重复施加。
+- **空格永远先起跳，后空翻要按住够久才转**：空格先起跳（起跳走 `SkiAir.tryJump`，短按、长按都先起跳，5 tick 内松手就是**纯跳跃、一点不转**）。真正离地起跳（`onGround` 由真变假且 `vy > 0` —— 走下坡 / 掉悬崖不算起跳）时，起跳水平速度 ≥ `FLIP_MIN_SPEED` 且没在失控里，才**进入可翻转状态**；**起跳本身不自动开翻**（角度保持 0）。进入之后，从离地第一 tick 开始数「**连续按住跳跃**」的 tick：**连续按住满 `FLIP_HOLD_DELAY_TICKS`（5）tick 起**才每 tick 加 `FLIP_DEGREES_PER_TICK`（**两板同值 15°＝24 tick 一圈 1.20 s**）；**中途一松开，这个计数立刻归零**（角度继续定格在那一偏角，不清零），再次按住要**重新数满 5 tick** 才接着转；**每次起跳成功也把计数归零**（新一轮从这次起跳重新数）。**不在 360° 封顶**（可以按住转多圈），内部按 360 取模保存（[0,360)）避免数值膨胀。速度不够＝普通小跳、按住再久也不转。
 - **落地判定按「与直立的最小角距」**：a ＝ 最终角度对 360 取模后映射到 (−180°, 180°]，`|a| ≤ FLIP_LANDING_TOLERANCE_DEGREES`（**±25°**）＝ **干净落地**（角度归零、速度不掉、无惩罚）—— **多翻了几圈只要停在直立附近也算净落**；否则＝**摔倒**：水平速度 ×`CRASH_SPEED_MULTIPLIER`、进入 `CRASH_STUN_TICKS` 的失控 —— 失控期间两块板的**转向 / 压刃 / carve / 追视角**在各自入口一律跳过（`SnowboardControl.isCarving`、`SkisControl.turnBody / turnTowardView / shouldAlignOnGround`），且**不能再次起跳空翻**。`CRASH_DAMAGE_MAX > 0` 时服务端按「与直立偏差 / 180 × 它」`hurtServer` 扣血（**默认 0＝关闭**）。
 - 状态机只有一份（`SkiAir`，每玩家状态用 `util/IdMap` 存：角度、上一 tick 角度、在空中、在翻、**连续按住计数**、失控计时）。**空翻角度与「有没有按住空格」只有客户端知道**（`LocalPlayer#input.keyPresses.jump()`，服务端读不到这个输入），所以**角度累积与观感都在客户端本地跑**（`SkiAir.tickClient`，只对本机玩家）；落地那一 tick（净落与摔倒**都**发）客户端发一个 C2S 包 `SkiFlip.Payload`（通道 `skis:flip_landing`，只传一个 float ＝ 最终角度；`PayloadTypeRegistry.serverboundPlay()` + `ServerPlayNetworking.registerGlobalReceiver` 都注册在**主源码集**里、双端共用同一张编解码表）把角度交给服务端。服务端 `SkiAir.tickServer` **只递减失控计时**（不再算角度），收到包后 `SkiAir.applyLanding` 用**同一个 `isCleanLanding`** 判定并施罚：水平速度 ×`CRASH_SPEED_MULTIPLIER` + `hurtMarked`，**只走 `deltaMovement`，不 `setPos`**；客户端本地同时按同一判定进失控（画观 / 输入门与服务器一致，降速仍只在服务端）。包里的角度有合法性校验：**非有限值 / 负值 / 超过 `MAX_NET_ANGLE_DEGREES`（3600°＝10 圈）直接丢弃**，不结算。
 - 观感：渲染时**整个人 + 板**绕自身左右轴**向后**翻（`EntityTiltMixin` 的 poseStack 旋转，绕**腰部高度** 1.0 格、按 `partialTick` 插值）；落地那一帧状态机已把角度归零，所以插值两端都是 0、不留残余角度。**相机不跟着转**，第一人称不处理。
@@ -90,10 +90,13 @@
 | `JUMP_MAX_HEIGHT`（单板） | 2.0 格 | **跳高上限**：满速（s = 1.0）起跳在**腾空重力 0.064**（`AIR_GRAVITY_MULTIPLIER` 0.8 × 原版 0.08）的离散物理下正好 2.00 格。下面那张表就是按它反解的；代码**不拿它反推力度**（表是唯一事实源），改上限要整张表重算 |
 | `JUMP_CURVE_SAMPLES`（单板） | 11 点 | 速度→起法力查找表的长度（s = 0.0 / 0.1 / … / 1.0，插值步长 0.1）。静态块校验 `LUT.length == 它`，写错长度启动即抛 |
 | `JUMP_POWER_BY_SPEED_LUT`（单板） | 11 点：0.179 / 0.295 / 0.350 / 0.385 / 0.412 / 0.431 / 0.448 / 0.462 / 0.475 / 0.485 / 0.494 | **速度 → 起跳力度**（格/tick），下标 = s × 10，两点之间线性插值。由对数曲线 `h(s) = 0.34 + (2.0 − 0.34) × ln(1 + 9s) / ln(10)` 在**腾空重力 0.064** 下反解（旧 `JUMP_BASE_POWER` 0.22 / `JUMP_SPEED_POWER_GAIN` 0.83 已删；旧表按 0.104 反解，0.219 → 0.611） |
-| `JUMP_GROUND_RANGE`（单板） | 1.0 格 | **离地补跳门槛**：腾空、脚底到下方地面 ≤ **1.0 格**（向下 1.0 格的**碰撞射线**，`ClipContext.Block.COLLIDER`）、`vy ≤ 0`、且按住空格 → 再给一次起跳速度（力度＝同一张 `JUMP_POWER_BY_SPEED_LUT`，不另写公式）。只写 `deltaMovement.y` ＋ `hurtMarked`，**不碰角度 / `holdTicks` / 失控计时**；0 ＝ 关掉 |
+| `JUMP_GROUND_RANGE`（单板） | 1.0 格 | **贴地小跳门槛**：离地时脚底到下方地面 ≤ **1.0 格**（向下 1.0 格的**碰撞射线**，`ClipContext.Block.COLLIDER`）、`vy ≤ 0`、且「想跳」→ 起跳（力度＝同一张 `JUMP_POWER_BY_SPEED_LUT`，不另写公式）。写入只走 `tryJump`：`deltaMovement.y` ＋ `hurtMarked`；0 ＝ 关掉 |
+| `COYOTE_TICKS`（单板） | 6 tick | **离地逗留窗**（土狼时间）：离开地面后 6 tick（0.3 s）内按空格仍算「刚离地」，照样起跳 —— 滑行时 `onGround` 在坡上 / 起伏上会抖，这个窗口兜住「按了却不跳」 |
+| `JUMP_BUFFER_TICKS`（单板） | 5 tick | **输入缓冲**：按下空格（按下沿）后 5 tick（0.25 s）内只要起跳条件成立就自动发出，不用重新按 |
+| `JUMP_COOLDOWN_TICKS`（单板） | 10 tick | **起跳冷却（防连发）**：一次起跳后 10 tick 内不再因「按住空格」重复起跳；落地后由 `onGround` / `vy ≤ 0` 条件自然放行（按住空格＝落地即再跳） |
 | `FLIP_MIN_SPEED`（单板） | 0.20 格/tick | 起跳水平速度低于它就不进入可翻转状态（0.20 ≈ 单板上限 0.55 的 36%） |
 | `FLIP_HOLD_DELAY_TICKS`（单板） | 5 tick | **起跳后要连续按住空格满多少 tick 才开始翻**（5 tick ＝ 0.25 s）。空格永远先起跳；短按（< 5 tick）＝ **纯跳跃、一点都不转**；连续按住满 5 tick 起才每 tick 加 `FLIP_DEGREES_PER_TICK`；中途一松开计数**归零**（角度继续定格），再按住要重新数满 |
-| `FLIP_DEGREES_PER_TICK`（单板） | 18.0 度/tick | **按住空格**时每 tick 转多少（18 × 20 = 360°，一圈正好 **1.00 s**；比双板快，**两板不同值**） |
+| `FLIP_DEGREES_PER_TICK`（单板） | 15.0 度/tick | **按住空格**时每 tick 转多少（15 × 24 = 360°，一圈正好 **1.20 s**；**与双板同值**，各一个常量） |
 | `FLIP_LANDING_TOLERANCE_DEGREES`（单板） | 25 度 | 落地时与直立（0° / 360° / 720°…）的角距在 **±25°** 内算净落，否则摔倒（多圈也只比最近的一圈） |
 | `CRASH_SPEED_MULTIPLIER`（单板） | 0.35 | 摔倒时水平速度保留的比例（掉 65%） |
 | `CRASH_STUN_TICKS`（单板） | 20 tick | 摔倒后失控多久（1 s）：转向 / 压刃 / carve / 追视角跳过、不能再起跳空翻 |
@@ -104,16 +107,19 @@
 | `JUMP_MAX_HEIGHT`（双板） | 2.0 格 | **跳高上限**：满速（s = 1.0）在**腾空重力 0.064** 下正好 2.00 格。同单板：只作依据，代码不反推 |
 | `JUMP_CURVE_SAMPLES`（双板） | 11 点 | 查找表长度（步长 0.1），静态块校验 |
 | `JUMP_POWER_BY_SPEED_LUT`（双板） | 11 点：0.186 / 0.298 / 0.352 / 0.387 / 0.413 / 0.432 / 0.448 / 0.463 / 0.475 / 0.485 / 0.494 | 同单板，由 `h(s) = 0.36 + (2.0 − 0.36) × ln(1 + 9s) / ln(10)` 在**腾空重力 0.064** 下反解（起跳点略高于单板，所以同一档力度略高；旧表按 0.12 反解 0.241 → 0.651） |
-| `JUMP_GROUND_RANGE`（双板） | 1.0 格 | **离地补跳门槛**：腾空、脚底到下方地面 ≤ **1.0 格**（向下 1.0 格的碰撞射线）、`vy ≤ 0`、按住空格 → 再给一次起跳速度（力度＝同一张 `JUMP_POWER_BY_SPEED_LUT`）。只写 `deltaMovement.y` ＋ `hurtMarked`，**不碰角度 / `holdTicks` / 失控计时**；与单板同值、各一个常量；0 ＝ 关掉 |
+| `JUMP_GROUND_RANGE`（双板） | 1.0 格 | **贴地小跳门槛**：离地时脚底到下方地面 ≤ **1.0 格**（向下 1.0 格的碰撞射线）、`vy ≤ 0`、且「想跳」→ 起跳（力度＝同一张 `JUMP_POWER_BY_SPEED_LUT`）。写入只走 `tryJump`：`deltaMovement.y` ＋ `hurtMarked`；与单板同值、各一个常量；0 ＝ 关掉 |
+| `COYOTE_TICKS`（双板） | 6 tick | **离地逗留窗**（土狼时间）：离地后 6 tick 内按空格仍算「刚离地」可起跳；与单板同值、各一个常量 |
+| `JUMP_BUFFER_TICKS`（双板） | 5 tick | **输入缓冲**：按下空格后 5 tick 内条件成立就自动发出起跳；与单板同值、各一个常量 |
+| `JUMP_COOLDOWN_TICKS`（双板） | 10 tick | **起跳冷却（防连发）**：起跳后 10 tick 内不因「按住」重复起跳；与单板同值、各一个常量 |
 | `FLIP_MIN_SPEED`（双板） | 0.25 格/tick | 起跳水平速度低于它就不进入可翻转状态（0.25 ≈ 双板上限 0.85 的 29%） |
 | `FLIP_HOLD_DELAY_TICKS`（双板） | 5 tick | **起跳后要连续按住空格满多少 tick 才开始翻**（5 tick ＝ 0.25 s）。与单板同值、各一个常量：短按＝纯跳跃，满 5 tick 才转，中途松手计数归零 |
-| `FLIP_DEGREES_PER_TICK`（双板） | 12.0 度/tick | **按住空格**时每 tick 转多少（12 × 30 = 360°，一圈正好 **1.50 s**）；**与单板 18.0°/tick（1.00 s）不同值**，各一个常量：改一块不动另一块 |
+| `FLIP_DEGREES_PER_TICK`（双板） | 15.0 度/tick | **按住空格**时每 tick 转多少（15 × 24 = 360°，一圈正好 **1.20 s**）；**与单板同值**，各一个常量：改一块不动另一块 |
 | `FLIP_LANDING_TOLERANCE_DEGREES`（双板） | 25 度 | 与单板同值、各一个常量（±25°） |
 | `CRASH_SPEED_MULTIPLIER`（双板） | 0.35 | 与单板同值、各一个常量 |
 | `CRASH_STUN_TICKS`（双板） | 20 tick | 与单板同值、各一个常量 |
 | `CRASH_DAMAGE_MAX`（双板） | 0.0 | 与单板同值、各一个常量（默认关闭） |
 
-**两块板的差异就四处**：静止/满速两端的起法力（单板 0.179 → 0.494、双板 0.186 → 0.494，各自一张表）、能否开翻的门槛速度（0.20 / 0.25，占各自上限 36% / 29%）、**按住空格时的转速**（单板 18.0°/tick ＝ 20 tick 一圈 1.00 s，双板 12.0°/tick ＝ 30 tick 一圈 1.50 s），以及表的起跳点 h₀（0.34 / 0.36）；**两张表现在都按同一个腾空重力 0.064 反解**（`AIR_GRAVITY_MULTIPLIER` 0.8 × 原版 0.08），贴地的 1.3 / 1.5 不参与跳高。**「按住满 5 tick 才开翻」这个前置延迟 `FLIP_HOLD_DELAY_TICKS` 两板同值**，净落容差、惩罚与失控时长两边同值但各自一份常量，改一块不会带走另一块。
+**两块板的差异就三处**：静止/满速两端的起法力（单板 0.179 → 0.494、双板 0.186 → 0.494，各自一张表）、能否开翻的门槛速度（0.20 / 0.25，占各自上限 36% / 29%），以及表的起跳点 h₀（0.34 / 0.36）；**两张表现在都按同一个腾空重力 0.064 反解**（`AIR_GRAVITY_MULTIPLIER` 0.8 × 原版 0.08），贴地的 1.3 / 1.5 不参与跳高。**按住空格时的转速两板同值：`FLIP_DEGREES_PER_TICK` 15.0°/tick ＝ 24 tick 一圈 1.20 s**（各一个常量，改一块不会带走另一块）。**「按住满 5 tick 才开翻」这个前置延迟 `FLIP_HOLD_DELAY_TICKS` 两板同值**，`COYOTE_TICKS` / `JUMP_BUFFER_TICKS` / `JUMP_COOLDOWN_TICKS` 也同值（6 / 5 / 10），净落容差、惩罚与失控时长两边同值但各自一份常量，改一块不会带走另一块。
 
 **这套数值的后果**（离散模拟：起跳 `vy = power`，每 tick 先位移、再 `vy = (vy − g) × 0.98`，**g ＝ 腾空重力 0.064** —— 起跳后一直离地，读的是 `AIR_GRAVITY_MULTIPLIER`，不是贴地的 0.104 / 0.12）。
 
@@ -128,7 +134,7 @@
 
 （注：20% 速度已拿到 54% 的高度，这就是用户要的对数曲线形状；满速就卡在 2.00 格 ＝ `JUMP_MAX_HEIGHT`。腾空重力从 0.104 / 0.12 换到 0.064 后**曲线形状不变**，只是整张表按新 g 重新反解，满速仍是 2.00 格。）
 
-**滞空只决定「最多能按住转多久」**（按住转速 `FLIP_DEGREES_PER_TICK`：单板 18°/tick → 20 tick ＝ 1.00 s 一圈；双板 12°/tick → 30 tick ＝ 1.50 s 一圈；另外**前 5 个连续按住的 tick 只计数不转**，见 `FLIP_HOLD_DELAY_TICKS`）：满速起跳的待机滞空（同一套离散物理，g ＝ 0.064；「坡 α°」＝ 沿 α° 坡往下起跳、落点算在同一坡面上）：
+**滞空只决定「最多能按住转多久」**（按住转速 `FLIP_DEGREES_PER_TICK`：两板同值 15°/tick → 24 tick ＝ 1.20 s 一圈；另外**前 5 个连续按住的 tick 只计数不转**，见 `FLIP_HOLD_DELAY_TICKS`）：满速起跳的待机滞空（同一套离散物理，g ＝ 0.064；「坡 α°」＝ 沿 α° 坡往下起跳、落点算在同一坡面上）：
 
 | 地形 | 单板满速 p = 0.494 | 双板满速 p = 0.494 |
 |---|---|---|
@@ -142,10 +148,10 @@
 
 → 转多少完全看**按住多久**，上表给的是「最多能按住转多久」；而且**前 4 个按住的 tick 只数不转**（`FLIP_HOLD_DELAY_TICKS` 5 的那一 tick 起才开始加角度），所以可转角度的 tick ＝ 滞空 tick − 4，已转角度 ＝ 转速 × 可转 tick：
 
-- **平地 16 tick**：单板可转 12 tick ＝ 216°、双板 12 tick ＝ 144°，离一圈很远，按住到底也是摔倒（与直立差 ≫ ±25°）。平地光靠空翻转不满一圈 —— 这是「想翻就别在平地上翻」的设计口径。
-- **单板 20° 坡（23 tick）**：可转 19 tick ＝ 342°，与直立差 18° ≤ 25° —— 按住到底松手就是净落。
-- **单板 30° 坡（28 tick）**：可转 24 tick ＝ 432°，**第 24 tick（360°）松手净落**；**45° 坡 37 tick、可转 33 tick ＝ 594°**，第 23 / 24 tick 松手（342° / 360°）净落，再按住就沿 378° → 594° 一路偏下去，落到 720° 附近它在 37 tick 内够不到，所以 25 tick 之后任何时刻松手都是摔。
-- **双板**（12°/tick，一圈要 30 个可转 tick，即滞空 ≥ 34 tick）：**30° 坡 35 tick** 刚好够 —— 第 32–35 tick 松手都在 ±25° 内；**45° 坡 52 tick** 余量最大，第 34 tick（360°）松手净落；10° / 20° 坡（22 / 27 tick）转不过一圈，只能摔。
+- **平地 16 tick**：两板可转 12 tick ＝ 180°，离一圈很远，按住到底也是摔倒（与直立差 ≫ ±25°）。平地光靠空翻转不满一圈 —— 这是「想翻就别在平地上翻」的设计口径。
+- **单板 20° 坡（23 tick）**：可转 19 tick ＝ 285°，差 75° > 25° —— 仍是摔。
+- **单板 30° 坡（28 tick）**：可转 24 tick ＝ **360°（正好一圈）**，第 24 个可转 tick 松手净落；再按住就沿 375° → 一路偏下去。**45° 坡 37 tick、可转 33 tick ＝ 495°**：第 24 tick（360°）松手净落，往后就偏出去。
+- **双板**（同样 15°/tick，一圈要 24 个可转 tick，即滞空 ≥ 28 tick）：**20° 坡 27 tick** 可转 23 tick ＝ 345°，差 15° ≤ 25° —— 按住到底松手就是净落；**30° 坡 35 tick** 可转 31 tick，第 24 tick（360°）松手净落；**45° 坡 52 tick** 可转 48 tick ＝ **720°（两圈整）**，按住到底松手正好净落；10° 坡（22 tick）转不过一圈，只能摔。
 - 75° 那种极端陡坡的单板 162 tick 已进「能转好几圈」的区间，不再当卖点写秒数；双板 75° 与两板 80° **未测**。
 
 晚了几 tick 就反而摔，所以「松手时机 ＋ 够陡的坡」就是这套机制的操作核心。缓坡想净落只能把 `FLIP_DEGREES_PER_TICK` 调快（按住更少 tick 就凑满一圈）或把 `FLIP_HOLD_DELAY_TICKS` 调小（少吃掉几个 tick）。

@@ -31,9 +31,11 @@ import net.minecraft.world.phys.Vec3;
  *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
  *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、进入 {@code CRASH_STUN_TICKS} 的失控。
  *       多翻了几圈只要停在直立附近也算净落。</li>
- *   <li><b>离地补跳</b>（{@link #tryAirJump}）：不在 {@code onGround}、脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}
- *       （1.0 格，向下碰撞射线）、{@code vy ≤ 0}、按住空格 → 再给一次起跳速度（力度仍取 {@link Tuning#jumpPower}）。
- *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked}，<b>不碰角度 / holdTicks / 失控计时</b>。</li>
+ *   <li><b>起跳（唯一入口，{@link #tryJump}）</b>：本模组接管 —— 原版 {@code jumpFromGround()} 在穿板时被取消
+ *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
+ *       （6 tick）内仍可跳；否则 {@code vy ≤ 0} 且脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}（1.0 格）也跳。
+ *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发。
+ *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked}，不 setPos；起跳成功把空翻的 {@code holdTicks} 归零。</li>
  * </ol>
  *
  * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
@@ -74,6 +76,12 @@ public final class SkiAir {
 		private final double jumpMaxHeight;
 		/** 离地补跳的高度门槛（格）：腾空时脚底到下方地面 ≤ 它就还能再起跳一次；0 ＝ 关掉。 */
 		private final double jumpGroundRange;
+		/** 离开地面后多少 tick 内按空格仍算「刚离地」可起跳（土狼时间 / coyote time）。 */
+		private final int coyoteTicks;
+		/** 按下空格后多少 tick 内只要条件满足就自动发出（输入缓冲）。 */
+		private final int jumpBufferTicks;
+		/** 一次起跳后多少 tick 内不再因为「按住」重复起跳（防连发）。 */
+		private final int jumpCooldownTicks;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
 		private final double maxSpeed;
 		/** 起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。 */
@@ -91,7 +99,8 @@ public final class SkiAir {
 		/** 摔倒扣血上限（0 = 关闭）。 */
 		private final double crashDamageMax;
 
-		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double jumpGroundRange, double maxSpeed,
+		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double jumpGroundRange,
+				int coyoteTicks, int jumpBufferTicks, int jumpCooldownTicks, double maxSpeed,
 				double flipMinSpeed,
 				double flipDegreesPerTick, int flipHoldDelayTicks, double flipLandingToleranceDegrees,
 				double crashSpeedMultiplier, int crashStunTicks, double crashDamageMax) {
@@ -101,6 +110,9 @@ public final class SkiAir {
 			this.powerBySpeedLut = powerBySpeedLut.clone();   // 拷一份：外部那张表以后被改也不影响已建的 Tuning
 			this.jumpMaxHeight = jumpMaxHeight;
 			this.jumpGroundRange = jumpGroundRange;
+			this.coyoteTicks = coyoteTicks;
+			this.jumpBufferTicks = jumpBufferTicks;
+			this.jumpCooldownTicks = jumpCooldownTicks;
 			this.maxSpeed = maxSpeed;
 			this.flipMinSpeed = flipMinSpeed;
 			this.flipDegreesPerTick = flipDegreesPerTick;
@@ -138,6 +150,26 @@ public final class SkiAir {
 		/** 离地补跳的高度门槛（格）：脚底到下方地面 ≤ 它 ＋ {@code vy ≤ 0} ＋ 按住空格 ＝ 再起跳一次。 */
 		public double jumpGroundRange() {
 			return jumpGroundRange;
+		}
+
+		/** 离地后多少 tick 内按空格仍算「刚离地」（土狼时间）。 */
+		public int coyoteTicks() {
+			return coyoteTicks;
+		}
+
+		/** 按下空格后多少 tick 内条件满足就自动发出（输入缓冲）。 */
+		public int jumpBufferTicks() {
+			return jumpBufferTicks;
+		}
+
+		/** 一次起跳后多少 tick 内不再因「按住」重复起跳。 */
+		public int jumpCooldownTicks() {
+			return jumpCooldownTicks;
+		}
+
+		/** 起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。 */
+		public double flipMinSpeed() {
+			return flipMinSpeed;
 		}
 
 		/** 按住跳跃时每 tick 转多少度。 */
@@ -185,6 +217,14 @@ public final class SkiAir {
 		private int holdTicks;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
+		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}。 */
+		private int coyoteTicks;
+		/** 输入缓冲：按下空格后还剩多少 tick 内条件满足就自动发出。 */
+		private int jumpBufferTicks;
+		/** 起跳冷却：上次起跳后还剩多少 tick 不再因「按住」重复起跳。 */
+		private int jumpCooldownTicks;
+		/** 上一 tick 是否按住跳跃键（按下沿检测：缓冲只在「按下」那一刻充值）。 */
+		private boolean prevHoldingJump;
 	}
 
 	/** 实体 id → 空中状态。 */
@@ -225,35 +265,86 @@ public final class SkiAir {
 	}
 
 	/**
-	 * <b>离地补跳</b>（只在客户端本地玩家那条 tick 路径里调 —— 服务端读不到「有没有按住空格」）：
-	 * 穿板、<b>不在</b> {@code onGround}、脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}
-	 * （向下那 {@code range} 格的<b>碰撞射线</b>，{@link ClipContext.Block#COLLIDER}，不拿 {@code blockPosition} 猜）、
-	 * 竖直速度 {@code vy ≤ 0}、且按住空格 —— 再拿到一次起跳速度。
+	 * <b>起跳 —— 本模组接管的唯一入口</b>（只在客户端本地玩家那条 tick 路径里调：服务端读不到「有没有按住空格」）。
 	 *
-	 * <p>力度<b>就是地面起跳那一份</b>：{@link Tuning#jumpPower(double)}（同一张 11 点表、同一个插值），
-	 * 不另写第二份公式。写入方式与地面跳跃一致：只改 {@code deltaMovement.y} ＋ {@code hurtMarked}，<b>不 setPos</b>。
+	 * <p><b>为什么接管</b>：原版起跳写在 {@code LivingEntity#aiStep} 里，条件是 {@code this.jumping}
+	 * <b>且（{@code onGround()} 或在水里）</b> —— 穿板滑行时 {@code onGround} 经常为假（上坡 / 起伏 /
+	 * 贴面走但不严格落地），于是「按空格没反应」。现在原版那条路在 {@code LivingEntity#jumpFromGround()}
+	 * 的 HEAD 处被取消（{@code mixin/LivingEntityJumpMixin}，穿板时 {@code ci.cancel()}），
+	 * 起跳只从这里发一次，不会和原版各写一遍 {@code deltaMovement.y}。
 	 *
-	 * <p><b>不碰空翻状态</b>：角度（{@code angle} / {@code prevAngle}）、连续按住计数（{@code holdTicks}）、
-	 * 失控计时（{@code stunTicks}）一个字段都不写 —— 否则按住空格连点就能靠补跳把角度 / 计数清零、逃过摔倒判定。
-	 * 状态机 {@link #tickClient} 照常往下数，补跳只是给它一个向上的速度。
+	 * <p><b>触发条件</b>（先要「想跳」＝按住空格，或按下那一次还在缓冲窗内）：
+	 * <ol>
+	 *   <li>{@code onGround} → 立即起跳；</li>
+	 *   <li>不在 {@code onGround}，但离地还没超过 {@code COYOTE_TICKS}（6 tick「逗留窗」）→ 仍算刚离地；</li>
+	 *   <li>不在 {@code onGround}，{@code vy ≤ 0} 且脚底到下方地面 ≤ {@code JUMP_GROUND_RANGE}（1.0 格，
+	 *       向下那 1.0 格的<b>碰撞射线</b>）→ 贴地小跳 / 过台阶后立刻再跳（原来的「离地补跳」并进这里，只此一份）。</li>
+	 * </ol>
+	 *
+	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
+	 * 自动发出。<b>防连发</b>：起跳后 {@code JUMP_COOLDOWN_TICKS}（10 tick）内不再因「按住」重复起跳；
+	 * 落地后由 {@code onGround} / {@code vy ≤ 0} 条件自然放行，所以「按住空格＝落地即再跳」照旧。
+	 *
+	 * <p>力度<b>只</b>从该板 {@link Tuning#jumpPower(double)}（11 点表 + 线性插值）取，不另写公式；
+	 * 只写 {@code deltaMovement}（y ＝ 起力、水平不变）＋ {@code hurtMarked}，<b>不 setPos</b>。
+	 *
+	 * <p><b>起跳成功 ＝ 空翻状态机的「新一轮」</b>：{@code holdTicks} 归零（「按住满 5 tick 才转」从这次起跳
+	 * 重新数），可翻状态按现有规则重算（水平速度 ≥ {@code FLIP_MIN_SPEED} 且没在失控里）。
+	 *
+	 * @return 这一 tick 是否真的起跳了
 	 */
-	public static void tryAirJump(Player player, Tuning tuning, boolean holdingJump) {
-		if (player == null || tuning == null || !holdingJump) {
-			return;
+	public static boolean tryJump(Player player, Tuning tuning, boolean holdingJump, boolean onGround) {
+		if (player == null || tuning == null) {
+			return false;
 		}
-		if (player.onGround()) {
-			return;                          // 贴地起跳归原版 jumpFromGround 管，这里不抢
+		AirState state = state(player);
+		// 计时先走：冷却 / 缓冲 / 逗留窗都是「每 tick 掉一格」的计数
+		if (state.jumpCooldownTicks > 0) {
+			state.jumpCooldownTicks--;
 		}
-		if (player.getDeltaMovement().y > 0.0D) {
-			return;                          // 只在开始下落 / 平抛之后补，上升段不动（不会变成二段跳）
+		if (state.jumpBufferTicks > 0) {
+			state.jumpBufferTicks--;
 		}
-		double range = tuning.jumpGroundRange();
-		if (range <= 0.0D || groundDistance(player, range) > range) {
-			return;                          // 离地超过门槛：这次不算「贴地」小跳
+		if (holdingJump && !state.prevHoldingJump) {
+			state.jumpBufferTicks = tuning.jumpBufferTicks();   // 按下沿：充值输入缓冲
+		}
+		state.prevHoldingJump = holdingJump;
+		if (onGround) {
+			state.coyoteTicks = tuning.coyoteTicks();           // 贴地：逗留窗充满
+		} else if (state.coyoteTicks > 0) {
+			state.coyoteTicks--;
+		}
+		if (!holdingJump && state.jumpBufferTicks <= 0) {
+			return false;                                       // 没按住、也没有待发的缓冲
+		}
+		if (state.jumpCooldownTicks > 0) {
+			return false;                                       // 刚起跳过：防连发
+		}
+		if (!canJump(player, tuning, onGround, state)) {
+			return false;
 		}
 		Vec3 motion = player.getDeltaMovement();
 		player.setDeltaMovement(motion.x, tuning.jumpPower(motion.horizontalDistance()), motion.z);
-		player.hurtMarked = true;            // 把这份速度同步出去（不 setPos）
+		player.hurtMarked = true;                               // 把这份速度同步出去（不 setPos）
+		state.jumpBufferTicks = 0;
+		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
+		state.coyoteTicks = 0;
+		state.holdTicks = 0;                                    // 新一轮空翻：连续按住从头数
+		state.flipping = state.stunTicks <= 0
+				&& player.getDeltaMovement().horizontalDistance() >= tuning.flipMinSpeed();
+		return true;
+	}
+
+	/** 这一 tick「脚在哪儿」是否满足起跳：贴地 / 逗留窗 / 贴地小跳，三条之一。 */
+	private static boolean canJump(Player player, Tuning tuning, boolean onGround, AirState state) {
+		if (onGround || state.coyoteTicks > 0) {
+			return true;
+		}
+		if (player.getDeltaMovement().y > 0.0D) {
+			return false;                                       // 上升段不补（不会变成空中二段跳）
+		}
+		double range = tuning.jumpGroundRange();
+		return range > 0.0D && groundDistance(player, range) <= range;
 	}
 
 	/** 脚底到下方地面的距离（格）：向下 {@code range} 格的碰撞射线；探不到东西返回 {@link Double#MAX_VALUE}。 */

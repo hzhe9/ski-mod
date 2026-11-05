@@ -3,6 +3,7 @@
 	"package": "io.github.wf.skis.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
+		"LivingEntityJumpMixin",
 		"LivingEntityJumpPowerMixin"
 	],
 	"injectors": {

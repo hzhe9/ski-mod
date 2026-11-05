@@ -160,16 +160,22 @@ public final class SkisControl {
 	 * 1.0 ＝ 离地不到一格（过台阶、贴地小跳的余量）仍可再跳；0 ＝ 关掉。
 	 */
 	private static final double JUMP_GROUND_RANGE = 1.0D;
+	/** <b>双板：离地后的逗留窗</b>（土狼时间，tick）：离地后 <b>6 tick</b> 内按空格仍算「刚离地」可起跳。 */
+	private static final int COYOTE_TICKS = 6;
+	/** <b>双板：输入缓冲</b>（tick）：按下空格后 <b>5 tick</b> 内条件成立就自动发出起跳。 */
+	private static final int JUMP_BUFFER_TICKS = 5;
+	/** <b>双板：起跳冷却</b>（tick）：起跳后 <b>10 tick</b> 内不再因「按住」重复起跳。 */
+	private static final int JUMP_COOLDOWN_TICKS = 10;
 	/** <b>双板</b>：起跳水平速度低于它就不进入可翻转状态（0.25 ≈ 双板上限 0.85 的 29%）。 */
 	private static final double FLIP_MIN_SPEED = 0.25D;
 	/**
-	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>12.0</b>°/tick ＝ 240°/s，一圈 360° 要 <b>30 tick</b> ＝ <b>1.50 s</b>）。
+	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>15.0</b>°/tick ＝ 300°/s，一圈 360° 要 <b>24 tick</b> ＝ <b>1.20 s</b>）。
 	 *
 	 * <p>空中的起跳本身<b>不自动开翻</b>：必须先连续按住满 {@link #FLIP_HOLD_DELAY_TICKS} tick 才开始转，松手立刻定格
 	 * （模型停在那偏角），落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。角度不封顶，可以按住转多圈。
-	 * 双板比单板慢一圈（单板 <b>18.0</b>°/tick ＝ 20 tick ＝ 1.0 s）—— 各一个常量、改一块不动另一块。
+	 * <b>与单板同值（两板都是 15.0°/tick ＝ 24 tick ＝ 1.20 s）</b>，各一个常量、改一块不动另一块。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 12.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 15.0D;
 	/**
 	 * <b>双板</b>：起跳后要<b>连续按住空格</b>满多少 tick 才开始累加角度（<b>5</b> tick ＝ 0.25 s）。
 	 *
@@ -195,7 +201,8 @@ public final class SkisControl {
 
 	/** 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
-			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, JUMP_GROUND_RANGE, MAX_SPEED,
+			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, JUMP_GROUND_RANGE,
+			COYOTE_TICKS, JUMP_BUFFER_TICKS, JUMP_COOLDOWN_TICKS, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
