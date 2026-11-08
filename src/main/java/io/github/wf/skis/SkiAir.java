@@ -230,8 +230,22 @@ public final class SkiAir {
 		private boolean prevHoldingJump;
 	}
 
-	/** 实体 id → 空中状态。 */
-	private static final IdMap<AirState> STATES = new IdMap<>();
+	/**
+	 * 客户端那张表（{@code level().isClientSide()} 为真）：角度、按住计数、渲染插值都在这一份。
+	 */
+	private static final IdMap<AirState> CLIENT_STATES = new IdMap<>();
+
+	/**
+	 * 服务端那张表：失控计时、起跳冷却 / 缓冲 / 逗留窗在服务端实体上的一份。
+	 *
+	 * <p><b>为什么按端分开</b>：单机（集成服务端与客户端同一个 JVM）里 {@code LocalPlayer} 与
+	 * {@code ServerPlayer} <b>共用同一个 entity id</b>，而 {@code tryJump} 每 tick 被调两次
+	 * （客户端 {@code aiStep} HEAD 一次、服务端 {@code START_SERVER_TICK} 一次）。共用一张表会让
+	 * 冷却 / 缓冲 / 逗留窗每 tick 递减两次（10 tick 实际只有 5 tick），而且先调用的那端起跳把冷布置成
+	 * 10 之后，同一 tick 后调用的那端会被 {@code jumpCooldownTicks > 0} 直接拦下 —— 服务端不起跳，
+	 * 它发出去的 {@code ClientboundSetEntityMotionPacket} 仍带着下落速度，把客户端的冲量抹掉。
+	 */
+	private static final IdMap<AirState> SERVER_STATES = new IdMap<>();
 
 	private SkiAir() {
 	}
@@ -530,7 +544,7 @@ public final class SkiAir {
 	 * 否则模型会在那一帧倒着转回去。
 	 */
 	public static float angleDegrees(int entityId, float partialTick) {
-		AirState state = STATES.get(entityId);
+		AirState state = CLIENT_STATES.get(entityId);   // 纯渲染：只读客户端那张表
 		if (state == null) {
 			return 0.0F;
 		}
@@ -541,23 +555,41 @@ public final class SkiAir {
 		return Mth.lerp(partialTick, (float) prev, (float) state.angle);
 	}
 
-	/** 这个实体现在是不是在摔倒的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。 */
+	/**
+	 * 这个实体现在是不是在摔倒的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。
+	 *
+	 * <p>两张表<b>任一</b> {@code stunTicks > 0} 即为 true：调用方（{@code SnowboardControl#isCarving}、
+	 * {@code SkisControl} 的转向入口）两端都会调，而单机下两端共用同一 entity id ——
+	 * 「任一端失控」就是原来的语义。
+	 */
 	public static boolean isStunned(int entityId) {
-		AirState state = STATES.get(entityId);
-		return state != null && state.stunTicks > 0;
+		AirState client = CLIENT_STATES.get(entityId);
+		if (client != null && client.stunTicks > 0) {
+			return true;
+		}
+		AirState server = SERVER_STATES.get(entityId);
+		return server != null && server.stunTicks > 0;
 	}
 
-	/** 脱板 / 离开世界：整份状态丢掉（失控计时也一起清）。 */
+	/** 脱板 / 离开世界：整份状态丢掉（两张表都清，失控计时也一起清）。 */
 	public static void forget(int entityId) {
-		STATES.remove(entityId);
+		CLIENT_STATES.remove(entityId);
+		SERVER_STATES.remove(entityId);
 	}
 
+	/**
+	 * 取这个玩家<b>本端</b>的那份空中状态（{@code level().isClientSide()} 选表）。
+	 *
+	 * <p>单机下 {@code LocalPlayer} 与 {@code ServerPlayer} 共用同一个 entity id，所以<b>不能</b>
+	 * 只按 id 查——那样两端会写同一份状态（计时器每 tick 递减两次、后调用的那端被冷却拦下）。
+	 */
 	private static AirState state(Player player) {
+		IdMap<AirState> states = player.level().isClientSide() ? CLIENT_STATES : SERVER_STATES;
 		int entityId = player.getId();
-		AirState state = STATES.get(entityId);
+		AirState state = states.get(entityId);
 		if (state == null) {
 			state = new AirState();
-			STATES.put(entityId, state);
+			states.put(entityId, state);
 		}
 		return state;
 	}
