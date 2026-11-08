@@ -35,7 +35,10 @@ import net.minecraft.world.phys.Vec3;
  *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
  *       （6 tick）内仍可跳；否则 {@code vy ≤ 0} 且脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}（1.0 格）也跳。
  *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发。
- *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked}，不 setPos；起跳成功把空翻的 {@code holdTicks} 归零。</li>
+ *       两端各调一次、<b>同一 tick 内、实体 tick 之前</b>（客户端 {@code LocalPlayer#aiStep} 的 HEAD、
+ *       服务端 {@code START_SERVER_TICK}），这样服务端的 {@code ClientboundSetEntityMotionPacket} 带的就是起跳速度，
+ *       不会把客户端写下的冲量整份覆盖掉。
+ *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked} ＋ {@code needsSync}，不 setPos；起跳成功把空翻的 {@code holdTicks} 归零。</li>
  * </ol>
  *
  * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
@@ -265,7 +268,15 @@ public final class SkiAir {
 	}
 
 	/**
-	 * <b>起跳 —— 本模组接管的唯一入口</b>（只在客户端本地玩家那条 tick 路径里调：服务端读不到「有没有按住空格」）。
+	 * <b>起跳 —— 本模组接管的唯一入口</b>。两端各调一次，都放在<b>实体 tick 之前</b>：
+	 * 客户端 {@code mixin.client/LocalPlayerJumpMixin}（{@code LocalPlayer#aiStep} 的 HEAD，早于 {@code travel()}）、
+	 * 服务端 {@code SkiGlide.register} 的 {@code START_SERVER_TICK}（读 {@code getLastClientInput().jump()}）。
+	 *
+	 * <p><b>为什么两端都要</b>：原版是「这一 tick 写速度 → 这一 tick 立刻位移」；服务端 {@code hurtMarked} 会经
+	 * {@code ServerEntity#sendChanges} 把自己的整份速度发给玩家本人，客户端 {@code Entity#lerpMotion} 是<b>整份覆盖</b>
+	 * {@code deltaMovement}。只要服务端这一 tick 没跳（滑行代码几乎每 tick 都 hurtMarked），包里带的就是下落速度，
+	 * 客户端写的起跳冲量下一 tick 开始前就被抹掉 —— 「穿板按空格没反应」。
+	 * 客户端放在 {@code aiStep} 的 HEAD 而不是 {@code END_CLIENT_TICK}：后者玩家已经 tick / 位移完，冲量要晚一 tick。
 	 *
 	 * <p><b>为什么接管</b>：原版起跳写在 {@code LivingEntity#aiStep} 里，条件是 {@code this.jumping}
 	 * <b>且（{@code onGround()} 或在水里）</b> —— 穿板滑行时 {@code onGround} 经常为假（上坡 / 起伏 /
@@ -286,7 +297,7 @@ public final class SkiAir {
 	 * 落地后由 {@code onGround} / {@code vy ≤ 0} 条件自然放行，所以「按住空格＝落地即再跳」照旧。
 	 *
 	 * <p>力度<b>只</b>从该板 {@link Tuning#jumpPower(double)}（11 点表 + 线性插值）取，不另写公式；
-	 * 只写 {@code deltaMovement}（y ＝ 起力、水平不变）＋ {@code hurtMarked}，<b>不 setPos</b>。
+	 * 只写 {@code deltaMovement}（y ＝ 起力、水平不变）＋ {@code hurtMarked} ＋ {@code needsSync}，<b>不 setPos</b>。
 	 *
 	 * <p><b>起跳成功 ＝ 空翻状态机的「新一轮」</b>：{@code holdTicks} 归零（「按住满 5 tick 才转」从这次起跳
 	 * 重新数），可翻状态按现有规则重算（水平速度 ≥ {@code FLIP_MIN_SPEED} 且没在失控里）。
@@ -326,6 +337,7 @@ public final class SkiAir {
 		Vec3 motion = player.getDeltaMovement();
 		player.setDeltaMovement(motion.x, tuning.jumpPower(motion.horizontalDistance()), motion.z);
 		player.hurtMarked = true;                               // 把这份速度同步出去（不 setPos）
+		player.needsSync = true;                                // 原版 jumpFromGround 也这么写：本 tick 末重算碰撞/同步
 		state.jumpBufferTicks = 0;
 		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
 		state.coyoteTicks = 0;

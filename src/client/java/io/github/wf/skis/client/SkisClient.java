@@ -70,10 +70,10 @@ public class SkisClient implements ClientModInitializer {
 					boolean holdingJump = keys != null && keys.jump();
 					SkiAir.tickClient(player, SkiAir.tuning(player), holdingJump,
 							(angle, clean) -> ClientPlayNetworking.send(new SkiFlip.Payload((float) angle)));
-					// 起跳（唯一入口）：本模组接管 —— 原版 jumpFromGround 穿板时已被 mixin 取消，
-					// 这里按「贴地 / 离地 6 tick 逗留窗 / vy ≤ 0 且离地 ≤ 1.0 格」三条之一发一次起跳，
-					// 带 5 tick 输入缓冲与 10 tick 防连发。只写 deltaMovement.y + hurtMarked，不 setPos。
-					SkiAir.tryJump(player, SkiAir.tuning(player), holdingJump, player.onGround());
+					// 起跳**不在这里**：END_CLIENT_TICK 时玩家已经 tick / 位移完，冲量要晚一 tick 才生效，
+					// 而服务端的 SetEntityMotion 包常在下一 tick 开始前把 deltaMovement 整份覆盖掉（穿板按空格"没反应"）。
+					// 起跳挪到实体 tick 内、travel 之前：client mixin LocalPlayerJumpMixin（LocalPlayer#aiStep 的 HEAD）。
+					// 这里只留空翻角度 / 落地判定 / 落地发包这一套。
 				}
 				boolean board = SnowboardControl.isSnowboard(player);
 				float yaw;

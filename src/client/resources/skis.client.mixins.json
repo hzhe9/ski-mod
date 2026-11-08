@@ -12,7 +12,8 @@
 		"EntityTiltMixin",
 		"CameraTiltMixin",
 		"CameraViewSmoothingMixin",
-		"SkiHeadLimitMixin"
+		"SkiHeadLimitMixin",
+		"LocalPlayerJumpMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

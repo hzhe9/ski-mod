@@ -17,7 +17,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <b>且（{@code onGround()} 或在水里）</b>」—— 穿板滑行时 {@code onGround} 在上坡 / 起伏 / 贴面走
  * 但没严格落地时经常为假，于是「按空格没反应」。
  *
- * <p>现在起跳只由客户端 {@link SkiAir#tryJump} 发一次（贴地 / 逗留窗 / 贴地小跳三条之一），
+ * <p>现在起跳只由 {@link SkiAir#tryJump} 发（贴地 / 逗留窗 / 贴地小跳三条之一），两端各一次、都放在
+ * 实体 tick 之前（客户端 {@code LocalPlayerJumpMixin} 注入 {@code LocalPlayer#aiStep} 的 HEAD，
+ * 服务端 {@code SkiGlide} 的 {@code START_SERVER_TICK}），
  * 原版这条路径被这里 cancel 掉，<b>同一个 tick 不会有两处各写一次 {@code deltaMovement.y}</b>
  * （原版 {@code jumpFromGround} 写的是 {@code Math.max(power, vy)}）。
  *
@@ -25,7 +27,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * （玩家输入、生物 AI、坐骑跳），一处 cancel 就够，且不会漏掉别的调用点。没穿板时原样放行。
  *
  * <p>common mixin（{@code skis.mixins.json}，两端都加载）：客户端与服务端看到的是同一份起跳条件，
- * 不会出现「客户端跳了、服务端没跳」的半边。服务端本来也不读按键，因此这里不引入任何包。
+ * 不会出现「客户端跳了、服务端没跳」的半边。服务端用 {@code ServerPlayer#getLastClientInput()}
+ * （上一份同步上来的输入）判断「想跳」，不引入任何自定义包。
  */
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityJumpMixin {
@@ -37,6 +40,6 @@ public abstract class LivingEntityJumpMixin {
 		if (SkiAir.tuning(player) == null) {
 			return;   // 没穿本模组的板：原版起跳
 		}
-		ci.cancel();  // 穿板：起跳只走 SkiAir.tryJump（客户端唯一入口）
+		ci.cancel();  // 穿板：起跳只走 SkiAir.tryJump（两端各自的实体 tick 之前）
 	}
 }

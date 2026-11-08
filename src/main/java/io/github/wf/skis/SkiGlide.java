@@ -73,6 +73,23 @@ public final class SkiGlide {
 	}
 
 	public static void register() {
+		// ——— 起跳：必须在实体 tick 之前 ———
+		// 原版是「这一 tick 写速度（jumpFromGround）→ 这一 tick 立刻位移（travel）」。服务端一旦 hurtMarked，
+		// ServerEntity#sendChanges 就把整个 Entity 打包成 ClientboundSetEntityMotionPacket 发给玩家本人，
+		// 客户端 Entity#lerpMotion 是**整份覆盖** deltaMovement。滑行时下面那些写速度的分支几乎每 tick 都
+		// hurtMarked，所以只要服务端这一 tick 自己没跳，包里带的就是「下落速度」，会把客户端在实体 tick 里
+		// 写的起跳冲量抹掉（穿板按空格"没反应"）。放在 START_SERVER_TICK：服务端在同一 tick 的最前面起跳，
+		// 它发出去的包带的就是起跳速度。
+		ServerTickEvents.START_SERVER_TICK.register(server -> {
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				if (!isSkiing(player)) {
+					continue;   // 没穿板 / 创造飞行 / 载具上：原版跳跃（或不跳）不管
+				}
+				// 服务端读不到「本 tick 有没有按住空格」，只能用客户端同步上来的上一份输入
+				Input input = player.getLastClientInput();
+				SkiAir.tryJump(player, SkiAir.tuning(player), input != null && input.jump(), player.onGround());
+			}
+		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 				if (!isSkiing(player)) {
