@@ -18,7 +18,7 @@ import net.minecraft.world.phys.Vec3;
  * <ol>
  *   <li><b>起跳力度</b>（{@link #jumpPower(Player)}）：按该板的 <b>11 点速度→起法力查找表</b>
  *       （{@code JUMP_POWER_BY_SPEED_LUT}，s ＝ 水平速度 / {@code MAX_SPEED} 为下标、两点之间线性插值）取值 ——
- *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 2.0 格（{@code JUMP_MAX_HEIGHT}）。
+ *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 1.5 格（{@code JUMP_MAX_HEIGHT}）。
  *       只在「穿着本模组的板」时返回值，没穿板（或不是玩家）返回 −1，原版跳跃原样不动。
  *       注入点是原版 {@code LivingEntity#getJumpPower()}（{@code jumpFromGround} 里唯一一次取值）。</li>
  *   <li><b>后空翻（按住够久才转）</b>：离地起跳（离地且 {@code vy > 0}）时起跳水平速度 ≥ {@code FLIP_MIN_SPEED}
@@ -129,7 +129,7 @@ public final class SkiAir {
 		/**
 		 * 起跳力度：把 s ＝ min(水平速度 / {@link #maxSpeed}, 1) 映射到 {@link #powerBySpeedLut} 的下标
 		 * （0 … n−1），<b>两点之间线性插值</b>。表本身是对数形曲线（前段涨得快、后段趋平），
-		 * 所以这里只做「按表取值」，不再有任何线性公式。满速返回表的最后一点（＝跳高上限 2.0 格）。
+		 * 所以这里只做「按表取值」，不再有任何线性公式。满速返回表的最后一点（＝跳高上限 1.5 格）。
 		 */
 		public double jumpPower(double horizontalSpeed) {
 			double normalized = maxSpeed <= 0.0D

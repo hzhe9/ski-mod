@@ -108,44 +108,49 @@ public final class SkisControl {
 	 * <b>穿双板、<u>贴地</u>时的重力倍数</b>：把原版 {@code Attributes.GRAVITY}（0.08 格/tick²）乘上这个值，
 	 * <b>只在 {@code onGround()} 时生效</b>（滑行贴地、落地压雪）。腾空时改用 {@link #AIR_GRAVITY_MULTIPLIER}。
 	 * 1.0 = 原版；1.3 = 0.104 格/tick²；<b>1.5 = 0.12 格/tick²</b>。
-	 * 值越大贴地下落越干脆；跳高<b>不吃这个值</b>（空中按 {@link #AIR_GRAVITY_MULTIPLIER} 0.064 反解，
-	 * 见 {@link #JUMP_POWER_BY_SPEED_LUT}、{@link #JUMP_MAX_HEIGHT}）。
+	 * 值越大贴地下落越干脆；跳高主体<b>不吃这个值</b>（空中按 {@link #AIR_GRAVITY_MULTIPLIER} 0.072 反解，
+	 * 只有起跳首 tick 仍读贴地档 0.120 —— 见 {@link #JUMP_MAX_HEIGHT}、{@link #JUMP_POWER_BY_SPEED_LUT}）。
 	 */
 	private static final double GRAVITY_MULTIPLIER = 1.5D;
 
 	/**
-	 * <b>穿双板、<u>腾空</u>时的重力倍数</b>（跳跃 / 下落全程）：0.08 × 0.8 = <b>0.064</b> 格/tick²，
-	 * 比原版还轻 —— 空中飘一点、滞空更长（空翻能按住的 tick 更多）。
-	 * {@link #JUMP_POWER_BY_SPEED_LUT} 就是按这个重力反解的；1.0 = 原版（0.08）。
+	 * <b>穿双板、<u>腾空</u>时的重力倍数</b>（跳跃 / 下落全程）：0.08 × 0.9 = <b>0.072</b> 格/tick²，
+	 * 比原版轻一点 —— 空中飘一点、滞空更长（空翻能按住的 tick 更多）。
+	 * {@link #JUMP_POWER_BY_SPEED_LUT} 就是按这个重力反解的（起跳首 tick 例外，仍是贴地档 0.120）；
+	 * 1.0 = 原版（0.08）。终端速度（{@code 49 × g}）3.92 → <b>3.53</b> 格/tick。
 	 */
-	private static final double AIR_GRAVITY_MULTIPLIER = 0.8D;
+	private static final double AIR_GRAVITY_MULTIPLIER = 0.9D;
 
 	/** 双板速度上限（格/tick）：0.85 格/tick ＝ 61.2 格/秒 ≈ 61 km/h（撑杖冲刺的峰值也封顶在这里）。 */
 	private static final double MAX_SPEED = 0.85D;
 
 	/**
-	 * <b>双板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − 0.064) × 0.98}，
-	 * 0.064 ＝ 原版 0.08 × 腾空倍数 {@link #AIR_GRAVITY_MULTIPLIER} 0.8）下
-	 * 正好落在 <b>2.00</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
+	 * <b>双板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − g) × 0.98}）下
+	 * 正好落在 <b>1.50</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
+	 *
+	 * <p>这里的 g 分两段：<b>首 tick 用贴地档 0.120</b>（0.08 × {@link #GRAVITY_MULTIPLIER} 1.5）——
+	 * 跳跃写在同一 tick 的实体 tick 内，而 {@code SkiGlide.applyGravity} 上一 tick 末尾按 {@code onGround()}
+	 * 设的还是贴地档；<b>第二 tick 起</b>才换腾空档 <b>0.072</b>（0.08 × {@link #AIR_GRAVITY_MULTIPLIER} 0.9）。
 	 * <b>只是表的上限依据</b>：代码不拿它反推力度（表才是唯一事实源），改上限要整张表重算。
 	 */
-	private static final double JUMP_MAX_HEIGHT = 2.0D;
+	private static final double JUMP_MAX_HEIGHT = 1.5D;
 	/** <b>双板</b>：速度→起法力查找表的点数（s = 0.0 / 0.1 / … / 1.0 共 11 点，步长 0.1）。 */
 	private static final int JUMP_CURVE_SAMPLES = 11;
 	/**
 	 * <b>双板：速度 → 起跳力度</b>（格/tick）的 11 点查找表，下标 = s × 10（s = 0.0 / 0.1 / … / 1.0，
 	 * s ＝ 水平速度 / {@link #MAX_SPEED}），两点之间由 {@link SkiAir.Tuning#jumpPower} <b>线性插值</b>。
 	 *
-	 * <p>表来自<b>对数曲线</b> {@code h(s) = 0.36 + (2.0 − 0.36) × ln(1 + 9s) / ln(10)}（h = 跳高，格）
-	 * 在离散 tick 物理下反解力度（重力用<b>腾空</b>的 0.064；起跳点略高于单板，所以同一档力度略高）：
-	 * <b>前半段涨得快、越往后越平、末段增量趋于 0</b> —— 20% 速度已经拿到 54% 的高度，
-	 * 满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 2.00 格。
+	 * <p>表来自<b>对数曲线</b> {@code h(s) = 0.36 + (1.5 − 0.36) × ln(1 + 9s) / ln(10)}（h = 跳高，格）
+	 * 在离散 tick 物理下反解力度（<b>首 tick 贴地档 0.120、第二 tick 起腾空 0.072</b>；
+	 * 起跳点略高于单板，所以同一档力度略高）：
+	 * <b>前半段涨得快、越往后越平、末段增量趋于 0</b> —— 20% 速度已经拿到 58% 的高度，
+	 * 满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 1.50 格。
 	 *
-	 * <p>对应跳高（格）：0.36 / 0.82 / 1.09 / 1.29 / 1.45 / 1.57 / 1.68 / 1.78 / 1.86 / 1.93 / 2.00。
+	 * <p>对应跳高（格）：0.36 / 0.68 / 0.87 / 1.01 / 1.12 / 1.20 / 1.28 / 1.34 / 1.40 / 1.45 / 1.50。
 	 * 与单板各一份：调这里不动单板。
 	 */
 	private static final double[] JUMP_POWER_BY_SPEED_LUT = {
-			0.186D, 0.298D, 0.352D, 0.387D, 0.413D, 0.432D, 0.448D, 0.463D, 0.475D, 0.485D, 0.494D
+			0.226D, 0.318D, 0.363D, 0.392D, 0.414D, 0.431D, 0.444D, 0.456D, 0.466D, 0.475D, 0.483D
 	};
 	static {
 		// 表长必须＝采样点数（插值步长 = 1 / (SAMPLES − 1) = 0.1）：长度写错在这里立刻炸，别带到游戏里
