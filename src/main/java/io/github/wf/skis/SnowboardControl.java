@@ -168,22 +168,22 @@ public final class SnowboardControl {
 	 * 一圈 360° 要 <b>15 tick</b> ＝ <b>0.75 s</b>）。
 	 *
 	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
-	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（2）
-	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 2 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
+	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
+	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 4 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
 	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
 	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
 	 * <b>与双板同值（两板都是 24.0°/tick ＝ 15 tick ＝ 0.75 s）</b>，各一个常量、改一块不动另一块。
 	 */
 	private static final double FLIP_DEGREES_PER_TICK = 24.0D;
 	/**
-	 * <b>单板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>2</b> tick ＝ 0.1 s）。
+	 * <b>单板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>4</b> tick ＝ 0.2 s）。
 	 *
-	 * <p>判据是 {@code holdTicks > 它}（<b>严格大于</b>）：按住的前 2 个 tick 角度恒为 <b>0</b> ——
+	 * <p>判据是 {@code holdTicks > 它}（<b>严格大于</b>）：按住的前 4 个 tick 角度恒为 <b>0</b> ——
 	 * 这就是「静止段」（模型定住不动，之后才起翻）。计数从<b>按下那一刻</b>起算、<b>只由松手归零</b>
 	 * （落地 / 起跳成功 / 失控都不清），所以站着按住很久再起跳＝一离地就接着转。
-	 * 短按（≤ 2 tick）＝ 纯跳跃、一点不转。
+	 * 短按（≤ 4 tick）＝ 纯跳跃、一点不转。
 	 */
-	private static final int FLIP_HOLD_DELAY_TICKS = 2;
+	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
 	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±25°）＝干净落地；
 	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
@@ -207,8 +207,8 @@ public final class SnowboardControl {
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
 	/**
-	 * 单板：每下落 1 格加多少水平速度（只取左右分量、体感弱，所以比双板大）。
-	 * 0.11 → 0.13 → 0.15（两次各加 0.02）：只取左右分量、体感本来就弱，所以基数一直比双板大。
+	 * 单板：每下落 1 格加多少水平速度（方向沿当前水平速度，不跟随身体朝向 —— 只加大小、不掰方向）。
+	 * 0.11 → 0.13 → 0.15（两次各加 0.02）：单板基数一直比双板大，单次给的体感才够。
 	 */
 	private static final double FALL_GAIN_PER_BLOCK = 0.15D;
 	/** 单板：单 tick 下落加速上限。 */
@@ -535,7 +535,7 @@ public final class SnowboardControl {
 	 * 「入弯时的速度方向角 + 身体累计转角」，大小与 y 都不动。
 	 *
 	 * <p>为什么不是「每 tick 转 delta」：同一个 tick 里还有别的写者会把速度方向拽回去 ——
-	 * 回落加速沿<b>身体左右轴</b>（{@code SkiGlide.descentDirection}，对单板就是体轴）加一份、
+	 * 回落加速沿<b>当前水平速度方向</b>加一份（{@code SkiGlide.descentDirection}，单板不再投影到体轴）、
 	 * 动量托底又按当前方向重写一遍。速度方向每 tick 只跟着转一部分，累计下来永远落在身体朝向后面，
 	 * 而且 W / S 两条路拽偏的方向相反（W 时速度转得比身体慢、S 时比身体快）—— 症状就是
 	 * 「模型已经转了 180°，速度才转了 150°，W 和 S 的差距还不一样」。
@@ -680,7 +680,7 @@ public final class SnowboardControl {
 		return (input.left() ? 1.0D : 0.0D) - (input.right() ? 1.0D : 0.0D);
 	}
 
-	/** 沿<b>锁定的身体朝向</b>的左 / 右方向（sign 见 {@link #sideSign}）—— 下落加速跟左右走时用。 */
+	/** 沿<b>锁定的身体朝向</b>的左 / 右方向（sign 见 {@link #sideSign}）—— 单板<b>几乎没有速度</b>时下落加速才按它给。 */
 	public static Vec3 sideLocked(int entityId, float fallbackYaw, double sign) {
 		float rad = bodyYaw(entityId, fallbackYaw) * Mth.DEG_TO_RAD;
 		return new Vec3(Mth.cos(rad) * sign, 0.0D, Mth.sin(rad) * sign);

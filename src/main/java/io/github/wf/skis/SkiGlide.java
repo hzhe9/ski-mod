@@ -25,14 +25,16 @@ import net.minecraft.world.level.block.state.BlockState;
  *   <li><b>滑行惯性（低摩擦）</b>：原版玩家在地面每 tick 会掉掉约 45% 的水平速度（10 tick 就基本停住），
  *       所以这里自己维护一份“动量”，按 {@link #MOMENTUM_DECAY}（默认每 tick 保留 98.5%）慢慢衰减，
  *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
- *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算）；
+ *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算），<b>方向永远沿当前水平速度</b>
+ *       （单板也一样：不投影到身体横轴、不跟随身体朝向，空中转身后不会把速度拽向新朝向）；</li>
  *   <li><b>重力加重</b>：穿着板时把原版重力（{@code Attributes.GRAVITY}）改成该板倍数的值 ——
  *       真的改重力，不是每 tick 补一份向下的速度（全程生效：上升段也一起变沉，跳得更矮、落得更快）；</li>
  *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。
  * </ul>
  *
  * <p><b>单板只保留“下落加速”这一条</b>：低摩擦动量不捕获玩家自己走出来的速度、也不做雪面推进，
- * 免得平地走路 / 站坡上都会"莫名往前"。下落加速也只在真的有横向移动（速度或按着 A / D）时才给，方向沿那一侧。
+ * 免得平地走路 / 站坡上都会"莫名往前"。下落加速的方向<b>只沿当前水平速度</b>（不投影、不跟随身体朝向）；
+ * 只有几乎没速度时才按 A / D 的侧向，否则不给。
  * W / S 只改姿态（前倾 / 后倾）与相机，<b>不给任何推进</b>。
  *
  * <p>不需要药水效果。
@@ -402,15 +404,12 @@ public final class SkiGlide {
 	}
 
 	/**
-	 * 下落加速的方向（单板与双板同一套优先级）：
-	 * 有横向速度 → 沿当前移动方向；按着 A / D → 沿那一侧；都没有 → 沿身体前方。
-	 * 保证“只要在往下掉就总有方向可加”，不然一停下来就完全不加速。
-	 */
-	/**
 	 * 下落加速的方向。
 	 *
-	 * <p><b>单板只有左右</b>（它是一维的横向运动）：把当前移动方向<b>投影到身体横轴</b>上，只取左右分量 ——
-	 * 绝不给“往前”的加速；几乎没有左右分量时不加（宁可不动，也不要莫名往前）。
+	 * <p><b>单板：只沿当前水平速度方向</b>（{@code horizontal.normalize()}）—— <b>不投影到身体横轴、不跟随身体朝向</b>，
+	 * 所以空中转完身，这份加速只会把已有速度往长了加，不会把速度方向拽到新朝向。
+	 * 只有几乎没速度（{@code ≤ MIN_MOTION_SQR}）时才按 A / D 的侧向给（{@link SnowboardControl#sideSign}），
+	 * 没速度也没按 A / D → 不给（返回 {@code null}）。
 	 *
 	 * <p>双板照旧：有横向速度就沿当前移动方向，否则按按键 / 视线定方向。
 	 */
@@ -419,13 +418,11 @@ public final class SkiGlide {
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 
 		if (SnowboardControl.isSnowboard(player)) {
-			Vec3 axis = SnowboardControl.sideLocked(player.getId(), player.getYRot(), 1.0D);   // 身体左侧单位向量
-			double along = horizontal.lengthSqr() < 1.0E-6D ? 0.0D : horizontal.normalize().dot(axis);
-			if (Math.abs(along) >= 0.02D) {
-				return along > 0.0D ? axis : axis.scale(-1.0D);   // 正在往左 / 往右滑
+			if (horizontal.lengthSqr() > MIN_MOTION_SQR) {
+				return horizontal.normalize();        // 沿当前速度方向：不投影到身体横轴、不跟随朝向
 			}
 			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			return side == 0.0D ? null : axis.scale(side);        // 没滑但按着 A / D 也算有左右
+			return side == 0.0D ? null : SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
 		}
 
 		if (horizontal.lengthSqr() > MIN_MOTION_SQR) {
