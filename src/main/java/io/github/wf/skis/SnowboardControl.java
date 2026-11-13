@@ -159,27 +159,31 @@ public final class SnowboardControl {
 	/** <b>单板：起跳冷却</b>（tick）：一次起跳后 <b>10 tick</b> 内不再因「按住空格」重复起跳（落地后由贴地条件自然放行）。 */
 	private static final int JUMP_COOLDOWN_TICKS = 10;
 	/**
-	 * <b>单板</b>：起跳水平速度低于它就不进入可翻转状态（只是普通小跳）。0.20 ≈ 单板上限 0.55 的 36% ——
-	 * 慢滑时的空格仍然只是「小跳一下」，滑起来才翻得动。
+	 * <b>单板</b>：空中<b>每 tick 实时判</b>的水平速度门槛（格/tick）：低于它这一 tick 就不转角（只是普通小跳）。
+	 * <b>0.12 ≈ 单板上限 0.55 的 22%</b> —— 慢滑按空格仍然只是「小跳一下」，稍一起速就翻得动。
 	 */
-	private static final double FLIP_MIN_SPEED = 0.20D;
+	private static final double FLIP_MIN_SPEED = 0.12D;
 	/**
-	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>15.0</b>°/tick ＝ 300°/s，
-	 * 一圈 360° 要 <b>24 tick</b> ＝ <b>1.20 s</b>）。
+	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>24.0</b>°/tick ＝ 480°/s，
+	 * 一圈 360° 要 <b>15 tick</b> ＝ <b>0.75 s</b>）。
 	 *
-	 * <p>空中的起跳本身<b>不自动开翻</b>：必须先连续按住满 {@link #FLIP_HOLD_DELAY_TICKS} tick 才开始转，松手立刻定格
-	 * （模型停在那偏角），落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。角度不封顶，可以按住转多圈。
-	 * <b>与双板同值（两板都是 15.0°/tick ＝ 24 tick ＝ 1.20 s）</b>，各一个常量、改一块不动另一块。
+	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
+	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（2）
+	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 2 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
+	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
+	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
+	 * <b>与双板同值（两板都是 24.0°/tick ＝ 15 tick ＝ 0.75 s）</b>，各一个常量、改一块不动另一块。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 15.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 24.0D;
 	/**
-	 * <b>单板</b>：起跳后要<b>连续按住空格</b>满多少 tick 才开始累加角度（<b>5</b> tick ＝ 0.25 s）。
+	 * <b>单板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>2</b> tick ＝ 0.1 s）。
 	 *
-	 * <p>空格<b>永远先起跳</b>（原版跳跃那一行没改）：这条只决定「起跳之后按住多久才进入后空翻」。
-	 * 短按（&lt; 5 tick）＝ 纯跳跃、一点不转；连续按住满 5 tick 起才每 tick 加 {@link #FLIP_DEGREES_PER_TICK}。
-	 * 中途一松开，计数<b>归零</b>（角度继续定格），再按住要重新数满 5 tick 才接着转。
+	 * <p>判据是 {@code holdTicks > 它}（<b>严格大于</b>）：按住的前 2 个 tick 角度恒为 <b>0</b> ——
+	 * 这就是「静止段」（模型定住不动，之后才起翻）。计数从<b>按下那一刻</b>起算、<b>只由松手归零</b>
+	 * （落地 / 起跳成功 / 失控都不清），所以站着按住很久再起跳＝一离地就接着转。
+	 * 短按（≤ 2 tick）＝ 纯跳跃、一点不转。
 	 */
-	private static final int FLIP_HOLD_DELAY_TICKS = 5;
+	private static final int FLIP_HOLD_DELAY_TICKS = 2;
 	/**
 	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±25°）＝干净落地；
 	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
