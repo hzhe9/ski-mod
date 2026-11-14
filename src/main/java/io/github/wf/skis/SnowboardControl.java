@@ -164,17 +164,17 @@ public final class SnowboardControl {
 	 */
 	private static final double FLIP_MIN_SPEED = 0.12D;
 	/**
-	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>24.0</b>°/tick ＝ 480°/s，
-	 * 一圈 360° 要 <b>15 tick</b> ＝ <b>0.75 s</b>）。
+	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>16.0</b>°/tick ＝ 320°/s，
+	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）。
 	 *
 	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
 	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
 	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 4 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
 	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
 	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
-	 * <b>与双板同值（两板都是 24.0°/tick ＝ 15 tick ＝ 0.75 s）</b>，各一个常量、改一块不动另一块。
+	 * <b>与双板同值（两板都是 16.0°/tick ＝ 22.5 tick ＝ 1.125 s）</b>，各一个常量、改一块不动另一块。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 24.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 16.0D;
 	/**
 	 * <b>单板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>4</b> tick ＝ 0.2 s）。
 	 *

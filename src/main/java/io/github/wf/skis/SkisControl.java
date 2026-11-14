@@ -30,7 +30,8 @@ import net.minecraft.world.phys.Vec3;
  * 真的被 {@link #turnBody} / {@link #turnTowardView} 转过，整 tick 末尾就把水平速度方向<b>直接写成</b>
  * 「入弯方向角 + 身体累计转角」—— 模型转多少、速度方向就转多少。上面那条 {@code alignVelocity} 是 9°/tick 的
  * <b>限幅趋近</b>，空中 / 按 S 时干脆不跑，所以只靠它速度会落后于身体；末尾这一道锁定把偏角钉在「入弯时的
- * 身体−速度偏角」上，不再逐 tick 拉大。<b>与单板的 {@code SnowboardControl#alignCarveHeading}
+ * 身体−速度偏角」上，不再逐 tick 拉大。<b>只在地面上生效</b>：空中身体照旧能转，但速度方向由惯性保持、
+ * 一点都不改（不然下落加速会沿转身后的新朝向叠加）。<b>与单板的 {@code SnowboardControl#alignCarveHeading}
  * 完全独立</b>（各一套表、各一个方法，互相不借用）。
  *
  * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
@@ -177,17 +178,17 @@ public final class SkisControl {
 	 */
 	private static final double FLIP_MIN_SPEED = 0.15D;
 	/**
-	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>24.0</b>°/tick ＝ 480°/s，
-	 * 一圈 360° 要 <b>15 tick</b> ＝ <b>0.75 s</b>）。
+	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>16.0</b>°/tick ＝ 320°/s，
+	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）。
 	 *
 	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
 	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
 	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 4 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
 	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
 	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
-	 * <b>与单板同值（两板都是 24.0°/tick ＝ 15 tick ＝ 0.75 s）</b>，各一个常量、改一块不动另一块。
+	 * <b>与单板同值（两板都是 16.0°/tick ＝ 22.5 tick ＝ 1.125 s）</b>，各一个常量、改一块不动另一块。
 	 */
-	private static final double FLIP_DEGREES_PER_TICK = 24.0D;
+	private static final double FLIP_DEGREES_PER_TICK = 16.0D;
 	/**
 	 * <b>双板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>4</b> tick ＝ 0.2 s）。
 	 *
@@ -442,6 +443,11 @@ public final class SkisControl {
 	 * <b>最后一个</b>写速度的位置调用）：把水平速度方向<b>直接写成</b>
 	 * 「{@link #TURN_HEADING 入弯时的速度方向角} + 身体累计转角」，大小与 {@code y} 都不动。
 	 *
+	 * <p><b>贴地才重写速度方向</b>：{@code !player.onGround()} 时本方法<b>直接返回</b>，只转身体 / 视角，
+	 * 速度方向由惯性保持（空中转身不掰速度 —— 否则下落加速会沿新朝向叠加，人物在空中一转身，落点就跟着偏）；
+	 * 空中这一 tick 连同 {@link #TURN_HEADING} / {@link #TURN_YAW0} 两份入弯记录一起清掉，
+	 * 免得落地那一 tick 把空中累计的转角一次性算进速度方向、猛地一扭。
+	 *
 	 * <p>为什么要这一道：{@link #alignVelocity} 是 9°/tick 的限幅趋近，而且只在「贴地 + 没按 S」时跑
 	 * （{@link #shouldAlignOnGround}），空中 / 刹车时速度方向<b>一点都不转</b>；{@code SkiControl.steer}
 	 * 那条 0.2 的 lerp 又是另一套节奏。于是同一段转里模型转了 180°、速度才转 150°，两条路各按各的速率走。
@@ -469,6 +475,16 @@ public final class SkisControl {
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double speed = horizontal.length();
+
+		if (!player.onGround()) {
+			// 空中：只转身体与视角，速度方向不动。两份入弯记录一起清 —— 否则空中转完再落地，
+			// 会在落地那一 tick 把空中累计的转角一次性算进速度方向，速度猛地一扭。
+			// 下落加速（trackDescent）是沿当前速度方向叠加的，速度方向若跟着身体走，
+			// 下落加速就会沿「新朝向」叠加 —— 这就是「空中转身改了速度方向」的观感来源。
+			TURN_HEADING.remove(entityId);
+			TURN_YAW0.remove(entityId);
+			return;
+		}
 
 		float yawNow = bodyYaw(entityId, player.getYRot());
 		Float lastYaw = TURN_LAST_YAW.put(entityId, yawNow);   // 记下本 tick 结束时的朝向，供下一 tick 比对

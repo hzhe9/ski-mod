@@ -25,7 +25,7 @@ import net.minecraft.world.phys.Vec3;
  *       只在<b>松手</b>（{@code holdingJump == false}）那一 tick 归零 —— 落地、起跳成功、失控<b>都不清</b>，
  *       所以「在地面上就按住、起跳后继续按住」是同一段连续计数（一离地就接着转）。
  *       空中<b>每 tick 实时判</b>（不再有「离地第一 tick 拍快照」的一次性阀门）：{@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
- *       且没在失控里、水平速度 ≥ {@code FLIP_MIN_SPEED} ＝ 这一 tick 转 {@code FLIP_DEGREES_PER_TICK}（24°）。
+ *       且没在失控里、水平速度 ≥ {@code FLIP_MIN_SPEED} ＝ 这一 tick 转 {@code FLIP_DEGREES_PER_TICK}（16°）。
  *       因为用的是 {@code >}，按住的<b>前 4 个 tick 角度恒为 0</b> —— 这就是模型静止段（短按＝纯跳跃，一点都不转）；
  *       <b>松手立刻定格</b>（角度与模型都停在那偏角），但计数归零，再按住要重新数满 4 tick。
  *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
@@ -398,8 +398,8 @@ public final class SkiAir {
 	 * ③ <b>按住计数</b> —— {@code holdingJump} 为真就 {@code holdTicks++}，为假（松手）<b>才归零</b>；
 	 * ④ 贴地：有落地边沿就做判定并回调（{@link LandingListener}），然后直接返回 ——
 	 * <b>这里不清 {@code holdTicks}</b>，所以地面按住的 tick 会带进空中；
-	 * ⑤ 空中：<b>每 tick 实时判</b> {@code holdTicks > flipHoldDelayTicks}（2）＋ 没失控 ＋ 水平速度 ≥ 门槛，
-	 * 满足才加 {@code flipDegreesPerTick}（24°）。前 4 个按住的 tick 角度恒 0 ＝模型静止段；
+	 * ⑤ 空中：<b>每 tick 实时判</b> {@code holdTicks > flipHoldDelayTicks}（4）＋ 没失控 ＋ 水平速度 ≥ 门槛，
+	 * 满足才加 {@code flipDegreesPerTick}（16°）。前 4 个按住的 tick 角度恒 0 ＝模型静止段；
 	 * 短按＝纯跳跃；松手定格但计数归零，再按住要重新数满 4 tick。
 	 *
 	 * @param holdingJump 本 tick 是否按住跳跃键（{@code LocalPlayer#input.keyPresses.jump()}）
