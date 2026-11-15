@@ -70,6 +70,15 @@ import net.minecraft.world.phys.Vec3;
  * 双板 {@code SkisControl.airTuning()}），本类只按 {@link SnowboardControl#isSnowboard} 选一份。
  */
 public final class SkiAir {
+	/**
+	 * <b>临时诊断开关</b> —— 只为定位「平地起跳空翻、落地不被判定为落地」用：
+	 * 为真时在落地判定的各个环节打 {@code [skis/LAND]} 日志（行首带端标记 {@code C}／{@code S}）。
+	 *
+	 * <p>它<b>不改变任何判定</b>，只读状态、只写日志；除本常量外没有新增字段。
+	 * 定位完成后<b>把本常量与所有 {@code DEBUG_LANDING} 分支一起删掉</b>。
+	 */
+	private static final boolean DEBUG_LANDING = true;
+
 	/** 一整圈。角度按它取模保存（多圈只体现在落地判定上）。 */
 	public static final double FULL_TURN_DEGREES = 360.0D;
 
@@ -458,6 +467,20 @@ public final class SkiAir {
 		if (onGround) {
 			// 真落地 = 上一次不贴地、且这一趟连续腾空够长（≥ LANDING_LOCK_MIN_AIR_TICKS），与下面「这一趟起过跳/开过翻」分开判
 			boolean realLanding = !state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS;
+			if (DEBUG_LANDING && onGround != state.wasOnGround) {
+				// 临时诊断：贴地方向的 onGround 跳变（腾空→贴地）。jumpedThisAir / flipStarted 读的是
+				// 清标记之前的值（landClient 还没跑），正是落地沿看到的那一份。
+				SkisMod.LOGGER.info(
+						"[skis/LAND] {} onGround->{} airTicks={} jumpedThisAir={} flipStarted={} angle={} y={} vy={} realLanding={}",
+						player.level().isClientSide() ? "C" : "S", onGround, state.airTicks,
+						state.jumpedThisAir, state.flipStarted, String.format("%.1f", state.angle),
+						String.format("%.2f", player.getY()),
+						String.format("%.3f", player.getDeltaMovement().y), realLanding);
+			}
+			if (DEBUG_LANDING && realLanding && !(state.jumpedThisAir || state.flipStarted)) {
+				SkisMod.LOGGER.info("[skis/LAND] {} realLanding 但这一趟没有起跳也没有开翻：不罚",
+						player.level().isClientSide() ? "C" : "S");
+			}
 			if (realLanding && (state.jumpedThisAir || state.flipStarted)) {
 				// 落地沿：这一趟腾空里起过跳（jumpedThisAir）或开过翻（flipStarted）才重新起算起跳冷却。
 				// 只是从坡上滑落 / 走下台阶 / 掉到地上、全程没起跳也没翻的，落地不罚（否则按不出跳）。
@@ -474,6 +497,15 @@ public final class SkiAir {
 		} else {
 			// 腾空：累加（饱和到 LANDING_LOCK_MIN_AIR_TICKS 就够，不必无限涨）
 			state.airTicks = Math.min(state.airTicks + 1, LANDING_LOCK_MIN_AIR_TICKS);
+			if (DEBUG_LANDING && onGround != state.wasOnGround) {
+				// 临时诊断：起跳方向的 onGround 跳变（贴地→腾空）。realLanding 只可能在贴地方向成立，这里恒 false。
+				SkisMod.LOGGER.info(
+						"[skis/LAND] {} onGround->{} airTicks={} jumpedThisAir={} flipStarted={} angle={} y={} vy={} realLanding=false",
+						player.level().isClientSide() ? "C" : "S", onGround, state.airTicks,
+						state.jumpedThisAir, state.flipStarted, String.format("%.1f", state.angle),
+						String.format("%.2f", player.getY()),
+						String.format("%.3f", player.getDeltaMovement().y));
+			}
 		}
 		state.wasOnGround = onGround;
 		if (state.stunTicks > 0) {
@@ -500,6 +532,15 @@ public final class SkiAir {
 		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
 		state.coyoteTicks = 0;
 		state.jumpedThisAir = true;                             // 这一趟腾空里真的起过跳（落地沿据此才禁跳）
+		if (DEBUG_LANDING) {
+			// 临时诊断：起跳成功那一刻的姿态（groundBelow ＝ 脚底到下方地面的距离，探不到就记 MAX）。
+			SkisMod.LOGGER.info("[skis/LAND] {} jump! y={} vy={} holdTicks={} onGround={} groundBelow={}",
+					player.level().isClientSide() ? "C" : "S", String.format("%.2f", player.getY()),
+					String.format("%.3f", player.getDeltaMovement().y), state.holdTicks, onGround,
+					tuning.jumpGroundRange() > 0.0D
+							? String.format("%.3f", groundDistance(player, tuning.jumpGroundRange()))
+							: "-");
+		}
 		return true;
 	}
 
@@ -559,6 +600,12 @@ public final class SkiAir {
 
 		if (player.onGround()) {                                    // ④ 落地：只做边沿判定，不动 holdTicks
 			if (state.airborne) {
+				if (DEBUG_LANDING) {
+					// 临时诊断：落地 tick 的入口（state.airborne 为真＝上一 tick 还在空中，这一 tick 第一次贴地）
+					SkisMod.LOGGER.info("[skis/LAND] {} tickClient land: airborne={} angle={} y={}",
+							player.level().isClientSide() ? "C" : "S", state.airborne,
+							String.format("%.1f", state.angle), String.format("%.2f", player.getY()));
+				}
 				landClient(state, tuning, listener);
 			}
 			state.airborne = false;
@@ -637,6 +684,11 @@ public final class SkiAir {
 	private static void landClient(AirState state, Tuning tuning, LandingListener listener) {
 		double angle = state.angle;
 		boolean clean = isCleanLanding(angle, tuning);
+		if (DEBUG_LANDING) {
+			// 临时诊断：落地结算的入口。landClient 只由 tickClient 调，所以端标记恒为 C。
+			SkisMod.LOGGER.info("[skis/LAND] C landClient angle={} clean={}",
+					String.format("%.1f", angle), clean);
+		}
 		// 落地那一帧回到 0°（渲染读 0，模型直立；插值区间两头一起归零，不会倒着转回去）
 		state.angle = 0.0D;
 		state.prevAngle = 0.0D;
