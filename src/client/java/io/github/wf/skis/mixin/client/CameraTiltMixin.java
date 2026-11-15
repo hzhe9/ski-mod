@@ -11,15 +11,19 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
 /**
- * 单板：前后倾斜时把<b>相机整块挂到倾斜后的头上</b> —— 位置和朝向都跟。
+ * 单板：前后倾斜时把<b>相机整块挂到倾斜后的头上</b> —— 只跟<b>位置</b>，不跟<b>朝向</b>。
  *
- * <p>不跟的后果很具体：头（眼睛）绕脚底前移了，相机还在竖直眼高那点 —— 第一人称一低头
+ * <p>不跟位置的后果很具体：头（眼睛）绕脚底前移了，相机还在竖直眼高那点 —— 第一人称一低头
  * 就看见自己的后背（First-person Model 会渲染身体，而身体已经倾了）。
+ *
+ * <p><b>朝向刻意不跟</b>：本 mixin 只 {@code @ModifyArg} 了 {@code setPosition} 的两个重载，
+ * <b>没有任何注入去改 {@code xRot}</b>。前倾时视线仍水平 —— 位置贴着倾斜后的头走、画面不跟着仰/俯，
+ * 玩家看到的是「人俯下去、视野还是正前方」（否则鼠标与视角之间就多了一层随倾角变化的偏转，很难受）。
  *
  * <p>⚠ {@code Camera#alignWithEntity} 里有<b>两个</b> setPosition 重载，走哪个取决于分支：
  * 普通（含第一人称/第三人称）走 {@code setPosition(double, double, double)}，
  * 骑矿车分支才走 {@code setPosition(Vec3)} —— 两个都要拦，不然最常见的路径完全没效果。
- * 位置 = 竖直眼高向量绕脚底转 θ（前移 眼高·sinθ、高度 眼高·cosθ）；朝向 = xRot 同加 θ。
+ * 位置 = 竖直眼高向量绕脚底转 θ（前移 眼高·sinθ、高度 眼高·cosθ）。
  */
 @Mixin(Camera.class)
 public abstract class CameraTiltMixin {

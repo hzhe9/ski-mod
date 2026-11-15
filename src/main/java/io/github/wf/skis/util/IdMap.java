@@ -61,10 +61,6 @@ public final class IdMap<T> {
 		entries.clear();
 	}
 
-	public int size() {
-		return entries.size();
-	}
-
 	private void trim() {
 		if (entries.size() > DEFAULT_CAPACITY) {
 			entries.clear();

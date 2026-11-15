@@ -102,11 +102,6 @@ public final class ModItems {
 		return stack;
 	}
 
-	/** 判断物品栈是不是我们的滑雪板（26.2 的 ItemStack 只剩 is(Predicate)，直接比物品实例）。 */
-	public static boolean isModernSki(ItemStack stack) {
-		return stack.getItem() == MODERN_SKI;
-	}
-
 	/** 脚上的滑雪装备：双板或单板——滑行物理、摆姿都按这个判定。 */
 	public static boolean isSkiFeet(ItemStack stack) {
 		return stack.getItem() == MODERN_SKI || stack.getItem() == SNOWBOARD;

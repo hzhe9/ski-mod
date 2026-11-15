@@ -3,19 +3,17 @@ package io.github.wf.skis;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
  * 滑行时的方向控制：读玩家的真实按键（服务端 {@code ServerPlayer.getLastClientInput()}），
- * 并判断“现在能不能换方向”。
+ * 把速度方向朝<b>身体前方</b>摆一点。
  *
- * <p>能不能换方向 = 踩在地上，或者脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格
- * （贴地滑行 / 刚起跳 / 快落地）；再高就锁死方向，沿当前方向继续滑。
- * <b>这套「离地也能转」的判定只服务单板</b>：双板在空中速度方向完全不转
- * （视角 / 身体随便转），落地后才按 {@link #STEER_RATE} 渐渐摆过去。
+ * <p><b>只服务双板，而且只在地面上</b>：单板是「人板一体」站定的，按键一律不给方向
+ * （它的转向全在 {@link SnowboardControl#applyCarve}）；双板在空中也只让视角 / 身体转，速度方向一点都不动
+ * （在空中改速度方向会把人「拽」着走）。所以判据就是一句 {@code player.onGround()} ——
+ * 曾经还有一条「脚底离地 ≤ 1 格也能转」的门，可两个分支都把它的结果丢掉了（单板分支直接返回 null、
+ * 双板分支在 {@code !onGround} 时返回 null），那套判定与它用的射线已删。
  *
  * <p>冲刺（SkiBoost）和滑行动量（SkiGlide）都用这里的转向，规则一致。
  *
@@ -29,13 +27,6 @@ import net.minecraft.world.phys.Vec3;
  * </ul>
  */
 public final class SkiControl {
-	/**
-	 * 离地不超过这个高度（格）才允许换方向。
-	 *
-	 * <p><b>现在只服务单板</b>（双板只在地面上转向，见 {@link #desiredDirection}）；
-	 * {@link #canSteer} 也还被单板的前倾推进用着，所以数值保留 1.0。
-	 */
-	private static final double STEER_MAX_HEIGHT = 1.0D;
 	/** 每 tick 把方向朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）。 */
 	private static final double STEER_RATE = 0.2D;
 
@@ -60,9 +51,10 @@ public final class SkiControl {
 		return current.lerp(desired, STEER_RATE).normalize();
 	}
 
-	/** 玩家按键在世界坐标下的水平方向；没按方向键、双板在空中、离地太高、拿不到输入都返回 null。 */
+	/** 玩家按键在世界坐标下的水平方向；没按方向键、单板、不在贴地、拿不到输入都返回 null。 */
 	public static Vec3 desiredDirection(ServerPlayer player) {
-		if (!canSteer(player)) {
+		// 双板：空中只让视角 / 身体转，速度方向不动；落地后才开始跟着转（在空中改速度方向会把人「拽」着走）。
+		if (!player.onGround()) {
 			return null;
 		}
 		Input input = player.getLastClientInput();
@@ -71,10 +63,6 @@ public final class SkiControl {
 		}
 		if (SnowboardControl.isSnowboard(player)) {
 			return null;   // 单板：人板一体站定，按键不参与方向
-		}
-		// 双板：空中只让视角 / 身体转，速度方向不动；落地后才开始跟着转（在空中改速度方向会把人「拽」着走）。
-		if (!player.onGround()) {
-			return null;
 		}
 		// 双板：W 前进 / S 刹车或后退（沿**身体前方**），A / D 只转身体
 		// （身体朝向由 SkisControl.BODY_YAW 持有，客户端与服务端每 tick 各转一步；**视角完全不跟**）。
@@ -98,22 +86,5 @@ public final class SkiControl {
 		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝身体前方转过去
 		float yaw = SkisControl.bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(yaw) * sign, 0.0D, Mth.cos(yaw) * sign);
-	}
-
-	/** 现在允许转向吗：踩在地上，或脚底离地不超过 {@link #STEER_MAX_HEIGHT} 格（<b>只服务单板</b>）。 */
-	public static boolean canSteer(ServerPlayer player) {
-		return player.onGround() || groundDistance(player) <= STEER_MAX_HEIGHT;
-	}
-
-	/** 脚底到下方地面的距离（格）；下面探不到东西就返回一个很大的值。 */
-	public static double groundDistance(ServerPlayer player) {
-		Vec3 from = player.position();
-		Vec3 to = from.add(0.0D, -(STEER_MAX_HEIGHT + 0.1D), 0.0D);
-		BlockHitResult hit = player.level().clip(new ClipContext(from, to,
-				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-		if (hit.getType() != HitResult.Type.BLOCK) {
-			return Double.MAX_VALUE;
-		}
-		return from.y - hit.getLocation().y;
 	}
 }

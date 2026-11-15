@@ -256,7 +256,7 @@ public final class SnowboardControl {
 	 * 1.0 = 原版（0.08）。终端速度（{@code 49 × g}）3.92 → <b>3.53</b> 格/tick。
 	 */
 	private static final double AIR_GRAVITY_MULTIPLIER = 0.9D;
-	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
+	/** 单板：动量每 tick 保留比例（与双板同值；转向另有 {@link #CARVE_MOMENTUM_DECAY} 1.0 的零损失档）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%），与双板同值
 	/**
 	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— <b>1.0 ＝ 转向零损失</b>。
@@ -278,9 +278,9 @@ public final class SnowboardControl {
 	/**
 	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
 	 *
-	 * <p>双板是 1.0（每满 1 格才给一次），单板用 0.5 —— 每降半格结算一次，单次给
-	 * {@link #FALL_GAIN_PER_BLOCK} × 0.5 = 0.055，下坡降没半格就有第一份加速（不用攒满一整格）。
-	 * 每格总量仍是 {@link #FALL_GAIN_PER_BLOCK} 0.11/格。
+	 * <p>双板同为 0.5 格一次（见 {@link SkiGlide#STEP_BLOCKS}）—— 每降半格结算一次，单次给
+	 * {@link #FALL_GAIN_PER_BLOCK} × 0.5 = 0.075，下坡降没半格就有第一份加速（不用攒满一整格）。
+	 * 每格总量仍是 {@link #FALL_GAIN_PER_BLOCK} 0.15/格。
 	 */
 	private static final double DESCENT_STEP_BLOCKS = 0.5D;
 	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
@@ -446,7 +446,7 @@ public final class SnowboardControl {
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
-	public static Vec3 front(int entityId, float yaw) {
+	public static Vec3 front(float yaw) {
 		float rad = yaw * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(rad), 0.0D, Mth.cos(rad));
 	}
@@ -458,7 +458,7 @@ public final class SnowboardControl {
 	 * 偏移会绕着玩家转圈（症状：转视野时相机甩到身体外面去）。身体朝上是锁死的，才是不动的那个基准。
 	 */
 	public static Vec3 frontLocked(int entityId, float fallbackYaw) {
-		return front(entityId, bodyYaw(entityId, fallbackYaw));
+		return front(bodyYaw(entityId, fallbackYaw));
 	}
 
 	public static float tiltDegrees() {

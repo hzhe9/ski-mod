@@ -3,8 +3,6 @@ package io.github.wf.skis.client;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SkiAir;
 import io.github.wf.skis.SkiFlip;
-import java.util.HashMap;
-import java.util.Map;
 
 import io.github.wf.skis.SkisControl;
 import io.github.wf.skis.SnowboardControl;
@@ -61,13 +59,14 @@ public class SkisClient implements ClientModInitializer {
 					// 落地 / 退出飞行后下一 tick 判据自然为真，各表从零重新起算。
 					SnowboardControl.forget(player.getId());
 					SkisControl.forgetBody(player.getId());
-					SkiAir.forget(player.getId());
+					// 空中状态 / 失控计时由上面两个 forget 内部的 SkiAir.forget 一起清，这里不再补第三遍
 					continue;
 				}
 				// 起跳力度 / 后空翻 / 落地：空翻角度与「有没有按住空格」只有本机知道（服务端读不到这个输入），
 				// 所以状态机只对本机玩家跑；落地那一 tick 把最终角度发给服务端（同一份判定在那边结算 + 降速）。
-				Input keys = player == self && self != null && self.input != null
-						? self.input.keyPresses : null;
+				// 26.2 里 self.input 与 keyPresses 都不会为 null（ClientInput 构造把 keyPresses 初始化成
+				// Input.EMPTY，LocalPlayer 构造总是 new ClientInput(...)）—— 所以这里只判「是不是本机」。
+				Input keys = player == self ? self.input.keyPresses : null;
 				if (player == self) {
 					boolean holdingJump = keys != null && keys.jump();
 					SkiAir.tickClient(player, SkiAir.tuning(player), holdingJump,

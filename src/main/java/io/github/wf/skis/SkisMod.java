@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li>{@link #onInitialize()} 里把各子系统挂上：滑行物理（{@link SkiGlide}）、撑杖冲刺（{@link SkiBoost}）、
  *       落地免伤（{@link SnowLanding}）、创造页（{@link ModCreativeTabs}）；</li>
- *   <li>保留旧调用面：{@code MOD_ID} / {@code LOGGER} / 三个物品常量 / 两个判定方法。
+ *   <li>保留旧调用面：{@code MOD_ID} / {@code LOGGER} / 三个物品常量 / {@link #isSkiFeet}。
  *       Mixin、渲染与模型类一共十几处直接读这些名字，转发一层比逐处改引用安全 ——
  *       物品定义本身在 {@link ModItems}（注册时机仍在类加载时，与拆分前一致）。</li>
  * </ol>
@@ -45,11 +45,6 @@ public class SkisMod implements ModInitializer {
 		ModCreativeTabs.register();
 
 		LOGGER.info("[skis] 现代滑雪板 / 滑雪单板（脚部装备）/ 滑雪杖（手持实体）已加载（右键冲刺变体）");
-	}
-
-	/** 判断物品栈是不是我们的滑雪板（转发到 {@link ModItems#isModernSki}）。 */
-	public static boolean isModernSki(ItemStack stack) {
-		return ModItems.isModernSki(stack);
 	}
 
 	/** 脚上的滑雪装备：双板或单板——滑行物理、摆姿都按这个判定（转发到 {@link ModItems#isSkiFeet}）。 */

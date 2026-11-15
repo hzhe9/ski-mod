@@ -15,7 +15,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>原版这个方法每 tick（{@code Entity#baseTick}）按「冲刺 + 在水里 / 水下」重算 {@code swimming}，游泳姿态、
  * 眼睛高度、贴水面的推进都跟着这个标记走。穿板时不让它被置上，落水就是「站在水里往下沉」，
- * <b>但按住空格照样能上浮</b>（基岩版的水物理 {@code travel} 里 {@code jumping} 就给向上速度，跟 swimming 标记无关）——
+ * <b>但按住空格照样能上浮</b>（原版水物理：{@code LivingEntity#aiStep} 里 {@code jumping} 为真就调
+ * {@code jumpInLiquid}，与 {@code swimming} 标记、与 {@code jumpFromGround} 都无关）——
  * 这里不额外加浮力、也不加溺亡机制。
  *
  * <p>先 {@code setSwimming(false)} 再 cancel：如果穿板那一刻已经在水里游着，标记得当场清掉，

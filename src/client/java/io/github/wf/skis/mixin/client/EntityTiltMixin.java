@@ -24,6 +24,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>绕的是局部 X 轴（玩家左右轴）＝前后倾；此处局部 +z 指向玩家背后，所以
  * <b>负角 = 前倾</b>（W），正角 = 后仰（S）。
+ *
+ * <p><b>插值粒度</b>：倾斜角读的是 {@code SnowboardControl.tiltValue(id)} —— 它由 {@code tickTilt}
+ * 按 tick 平滑推进，<b>帧间不做 {@code partialTick} 插值</b>（有意：倾斜本身是 15° 的慢变化，
+ * 每 tick 25% 的渐进已经够顺；空翻那条走 {@code SkiAir.angleDegrees(id, partialTick)} 才需要帧间插值，
+ * 因为 16°/tick 太快、不插值会看到台阶）。掉帧 / 暂停时两者的相位会差半个 tick，这是已知且可接受的。
  */
 @Mixin(LivingEntityRenderer.class)
 public abstract class EntityTiltMixin {

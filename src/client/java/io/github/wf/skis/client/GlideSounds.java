@@ -15,8 +15,10 @@ import net.minecraft.world.entity.player.Player;
  * （原版雪地脚步，就是雪面的“沙沙”声），<b>速度越快间隔越短、音量越大、音高越尖</b>
  * （{@link #SNOW_INTERVAL_BASE} → {@link #SNOW_INTERVAL_MIN} tick）。
  *
- * <p>触发条件与雪粒子同一条：穿着板、在雪 / 冰面上、脚底离地 {@link #GROUND_RANGE} 格以内、有速度。
- * 太慢不响（{@link #MIN_SPEED}）；不带板不响。判据本身在 {@link GlideAudioGate#isGliding}，
+ * <p>几何条件与雪粒子<b>同源</b>（穿板 + 在雪 / 冰面上 + 有速度 + 脚底离地多远），但<b>门槛各自一个常量</b>：
+ * 声音是 <b>1.0 格</b>（{@link #GROUND_RANGE}）/ <b>0.10</b> 格/tick（{@link #MIN_SPEED}），
+ * 雪粒子是 <b>1.5 格</b>（{@code SnowSpray.AIR_RANGE}）/ <b>0.06</b> —— 两套观感各按自己的调，
+ * 改一边不会动另一边，别当成「同一条判据」。判据本身在 {@link GlideAudioGate#isGliding}，
  * 与另外两条静音 mixin 共用（见 {@link GlideAudioGate}）。
  *
  * <p><b>没有风声</b>：风那层是一段循环音，滑行时一直占着一个声道、还会盖住切雪声的细节 —— 只保留切雪声这一条。
@@ -39,7 +41,7 @@ public final class GlideSounds {
 	private static final float SNOW_PITCH_PER_SPEED = 0.25F;
 	/** 低于这个速度（格/tick）不出声。 */
 	private static final double MIN_SPEED = 0.10D;
-	/** 脚底离地不超过这个高度（格）才算“在滑”——与雪粒子同一条判定。 */
+	/** 脚底离地不超过这个高度（格）才算“在滑”—— <b>声音自己的门槛</b>，雪粒子用 1.5 格（{@code SnowSpray.AIR_RANGE}），两者不联动。 */
 	private static final double GROUND_RANGE = 1.0D;
 
 	/** 实体 id → 距离下一声切雪还有几 tick。 */

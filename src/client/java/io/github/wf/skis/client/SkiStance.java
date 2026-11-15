@@ -44,7 +44,7 @@ public final class SkiStance {
 	 * <p>腿位与 {@code SnowboardModel} 的鞋位必须用同一个值；鞋直接建在模型根节点下（与腿同一坐标系），
 	 * 不放进转了 90° 的板组里 —— 否则鞋与腿朝向差 90°，看起来就是“脚歪了”。
 	 */
-	public static final float BOARD_LEG_SPREAD = 2.8F;   // = 双板的 legOffsetX()（1.9 + 0.9），两板腿部同宽
+	public static final float BOARD_LEG_SPREAD = BASE_LEG_X + LEG_SPREAD;   // = 双板的 legOffsetX()，两板腿部同宽
 
 	/**
 	 * 穿板站姿「微蹲」的三个角度旋钮之 —— <b>大腿绕靴口翻的角度</b>（弧度，负值＝膝往前顶、

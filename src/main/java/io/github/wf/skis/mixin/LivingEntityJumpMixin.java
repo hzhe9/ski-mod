@@ -23,8 +23,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 原版这条路径被这里 cancel 掉，<b>同一个 tick 不会有两处各写一次 {@code deltaMovement.y}</b>
  * （原版 {@code jumpFromGround} 写的是 {@code Math.max(power, vy)}）。
  *
- * <p>注入点选 {@code jumpFromGround} 而不是 {@code LocalPlayer} 里的某一行：它是<b>所有</b>起跳路径汇合的地方
- * （玩家输入、生物 AI、坐骑跳），一处 cancel 就够，且不会漏掉别的调用点。没穿板时原样放行。
+ * <p>注入点选 {@code jumpFromGround} 而不是 {@code LocalPlayer} 里的某一行：它是原版唯一写
+ * 「起跳力度 → {@code deltaMovement.y}」的地方，一处 cancel 就够。但<b>只拦玩家</b> ——
+ * 方法体第一句就是 {@code instanceof Player} 早退，<b>生物 AI / 坐骑的起跳本模组完全不管</b>
+ * （靴子槽只有玩家能穿，那两条路也不会带着板）。没穿板时原样放行。
  *
  * <p>common mixin（{@code skis.mixins.json}，两端都加载）：客户端与服务端看到的是同一份起跳条件，
  * 不会出现「客户端跳了、服务端没跳」的半边。服务端用 {@code ServerPlayer#getLastClientInput()}

@@ -40,13 +40,14 @@ import net.minecraft.world.entity.player.Player;
  * <p>记录表的清理策略（主用「靠时间自然过期」，因为它不需要清表就自带正确性）：① 比对只接受
  * {@code 0 ≤ now - last ≤ SNOW_GRACE_TICKS} 的时间戳，<b>所以退出 / 换维度时残留的旧 id 记录会自然失效</b>，
  * 不用靠清表保证正确性；② 顺手补三道：脱板当场 {@code remove}、断线 {@code remove}、
- * 超 {@link #MAX_ENTRIES} 整表 {@code clear()}（与 {@code SkiGlide} / {@code SkiBoost} 同一套写法）。
+ * 超 {@link #MAX_ENTRIES} 整表 {@code clear()}（与 {@code SkiBoost} 同一套写法；本类用的是裸
+ * {@code ConcurrentHashMap}，不走 {@link io.github.wf.skis.util.IdMap} 的自清）。
  */
 public final class SnowLanding {
 	/** 落地时距上次「真的踩在雪地上」多少 tick 内仍算雪地缓冲（60 tick = 3 秒）。 */
 	public static final int SNOW_GRACE_TICKS = 60;
 
-	/** 记录表上限；超了整表清空（同 {@code SkiGlide#MAX_ENTRIES} 的写法）。 */
+	/** 记录表上限；超了整表清空（与 {@code SkiBoost.MAX_ENTRIES} 同为 64，本类不走 {@link io.github.wf.skis.util.IdMap}）。 */
 	private static final int MAX_ENTRIES = 64;
 
 	/** 玩家 id → 最后一次「穿着板、站在地上、脚下是雪 / 冰」的游戏时间（tick）。 */

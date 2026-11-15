@@ -106,7 +106,8 @@ public abstract class HumanoidModelMixin {
 			placeLeg(self.leftLeg, SkiStance.legOffsetX());
 		}
 
-		// 手臂：只有拿着滑雪杖的那只手才抬起来摆（左手持杖抬左手、右手持杖抬右手；只穿板不抬）
+		// 手臂：拿滑雪杖的那只手播一次撑杖、另一只手按板块摆固定姿势（见下面 freeArmXrot / freeArmRoll：
+		// 双板没拿杖的手向前抬 14°，单板只向两侧抬 16°）
 		if (!state.isUsingItem) {
 			float armRot = ARM_REST;   // 默认：杖放低一点（不举到最高）
 			if (state instanceof AvatarRenderState avatar) {

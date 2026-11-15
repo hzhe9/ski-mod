@@ -6,85 +6,72 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * <b>起跳力度 / 按住空格的后空翻 / 落地判定</b>的共用状态机（不依赖任何客户端类）。
+ * <b>起跳 / 按住空格的后空翻 / 落地判定</b>的共用状态机（不依赖任何客户端类）。
  *
- * <p><b>三件事</b>：
- * <ol>
- *   <li><b>起跳力度</b>（{@link #jumpPower(Player)}）：按该板的 <b>11 点速度→起法力查找表</b>
- *       （{@code JUMP_POWER_BY_SPEED_LUT}，s ＝ 水平速度 / {@code MAX_SPEED} 为下标、两点之间线性插值）取值 ——
- *       曲线是<b>对数形</b>的（前面涨得快、后面趋平），满速正好顶到跳高上限 1.5 格（{@code JUMP_MAX_HEIGHT}）。
- *       只在「穿着本模组的板」时返回值，没穿板（或不是玩家）返回 −1，原版跳跃原样不动。
- *       注入点是原版 {@code LivingEntity#getJumpPower()}（{@code jumpFromGround} 里唯一一次取值）。</li>
- *   <li><b>后空翻（按住多久就转多少）</b>：{@code holdTicks} ＝ <b>从按下那一刻起的连续按住 tick 数</b>，
- *       只在<b>松手</b>（{@code holdingJump == false}）那一 tick 归零 —— 落地、起跳成功、失控<b>都不清</b>，
- *       所以「在地面上就按住、起跳后继续按住」是同一段连续计数（一离地就接着转）。
- *       空中<b>每 tick 实时判</b>（不再有「离地第一 tick 拍快照」的一次性阀门）：<b>（{@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
- *       或本段已开翻 {@code flipStarted}）</b>且没在失控里、水平速度 ≥ {@code FLIP_MIN_SPEED} ＝ 这一 tick 转
- *       {@code FLIP_DEGREES_PER_TICK}（16°）。因为从地面起跳那一下用的是 {@code >}，按住的<b>前 4 个 tick 角度恒为 0</b>
- *       —— 这就是模型静止段（短按＝纯跳跃，一点都不转）；<b>松手立刻定格</b>（角度与模型都停在那偏角），
- *       但<b>空中已经开翻过就不必重数</b>：再按住下一 tick 立刻续上（{@code flipStarted} 一旦置位就保持到落地），
- *       只有「从地面起跳」那一下要重新数满 4 tick。
- *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
- *   <li><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
- *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
- *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、向上的速度归零、进入 {@code CRASH_STUN_TICKS}
- *       的失控（<b>失控期间禁止起跳</b>：{@link #tryJump} 在 {@code stunTicks > 0} 时直接返回 false）。
- *       多翻了几圈只要停在直立附近也算净落。</li>
- *   <li><b>起跳（唯一入口，{@link #tryJump}）</b>：本模组接管 —— 原版 {@code jumpFromGround()} 在穿板时被取消
- *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发，条件<b>只有两条</b>：{@code onGround} 立即跳；
- *       离地 {@code COYOTE_TICKS}（6 tick）内仍可跳。**不再有「空中向下打射线、地面在 1 格内就补跳」那条** ——
- *       见 {@link #canJump} 的说明。
- *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发；
- *       这个冷却<b>在落地沿也重新起算，但只在这一趟腾空里真起过跳（{@code jumpedThisAir}）
- *       或真开过翻（{@code flipStarted}）时才算</b> —— 只是从坡上滑落 / 走下台阶 / 掉到地上的，
- *       落地不罚，所以<b>按住空格也不能在跳（或翻）之后落地即跳</b>；
- *       落地沿只认<b>真落地</b> —— 连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）才算，
- *       坡面 1–2 tick 的贴面抖动不刷冷却。
- *       两端各调一次、<b>同一 tick 内、实体 tick 之前</b>（客户端 {@code LocalPlayer#aiStep} 的 HEAD、
- *       服务端 {@code START_SERVER_TICK}），这样服务端的 {@code ClientboundSetEntityMotionPacket} 带的就是起跳速度，
- *       不会把客户端写下的冲量整份覆盖掉。
- *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked} ＋ {@code needsSync}，不 setPos；
- *       <b>空翻中不补跳</b>（{@code !onGround && holdTicks > FLIP_HOLD_DELAY_TICKS} 直接返回，
- *       免得补跳把已经开翻的那一下打断）；起跳成功<b>不再动</b> {@code holdTicks}。
- *       <b>摔倒失控中禁止起跳</b>：{@code state.stunTicks > 0} 时在计时推进之后、判条件之前直接返回 false ——
- *       客户端 {@code landClient} 与服务端 {@code applyLanding} 都会置这个计时，而 {@code tryJump} 两端各调一次，
- *       所以一处闸门就是双侧禁跳（按住空格的人不会在摔倒的下一 tick 又从 0 开翻）。</li>
- * </ol>
+ * <p><b>起跳由本模组接管</b>（唯一入口 {@link #tryJump}）：原版 {@code jumpFromGround()} 在穿板时被
+ * {@code mixin/LivingEntityJumpMixin} 取消，起跳只从这里发，触发条件<b>只有两条</b>。曾经还有第三条
+ * 「离地 ≤ 1 格就打向下射线补跳」，实机日志证实它在腾空下落时被服务端每 tick 命中、把人永远弹起
+ * （落地沿 / 落地判定全不触发），已删除 —— 见 {@code git log d5bee03}；同一次改动把空翻从
+ * 「离地第一 tick 拍快照」改成空中每 tick 实时判（{@code flipping} 字段已删）。
+ *
+ * <p><b>当前契约</b>：
+ * <table border="1">
+ *   <caption>起跳 / 空翻状态机</caption>
+ *   <tr><th>项</th><th>内容</th></tr>
+ *   <tr><td>触发条件（2 条）</td>
+ *       <td>{@code onGround} 立即跳；离地未满 <b>6 tick</b> 的逗留窗内跳</td></tr>
+ *   <tr><td>计时器（4 个）</td>
+ *       <td>逗留窗 6 / 输入缓冲 5 / 起跳冷却 10 / 摔倒失控 20（tick；两板同值，常量各自一份）</td></tr>
+ *   <tr><td>状态字段（6 个）</td>
+ *       <td>{@code angle} / {@code prevAngle}（渲染插值对）、{@code holdTicks}（连续按住）、
+ *       {@code flipStarted}（本段已开翻）、{@code jumpedThisAir}（本段起过跳）、
+ *       {@code airTicks}（连续腾空，饱和 3）</td></tr>
+ *   <tr><td>簿记（3 个）</td>
+ *       <td>{@code airborne}（落地边沿）、{@code prevHoldingJump}（按下沿）、
+ *       {@code wasOnGround}（默认 {@code true}，免得刚建表那一 tick 被当成落地）</td></tr>
+ * </table>
+ *
+ * <p><b>后空翻 ＝ 按住多久就转多少</b>：{@code holdTicks} 从按下那一刻起算、<b>只在松手时归零</b>
+ * （落地 / 起跳成功 / 失控都不清），所以地面按住的 tick 会带进空中。空中每 tick 实时判：按住超过
+ * 该板的 {@code FLIP_HOLD_DELAY_TICKS}（4）<b>或</b>本段已开翻（{@code flipStarted}），且没失控、
+ * 水平速度 ≥ 该板的 {@code FLIP_MIN_SPEED}，才加该板的 {@code FLIP_DEGREES_PER_TICK}（16°）。
+ * 从地面起跳那一下用的是 {@code >}，所以按住的前 4 个 tick 角度恒 0（模型静止段，短按＝纯跳跃）；
+ * 松手立刻定格（角度与模型都停在那偏角），但空中<b>已开翻过就不必重数</b> —— 再按住下一 tick 立刻续上
+ * （{@code flipStarted} 一旦置位就保持到落地）。角度不在 360° 封顶（可以多圈），内部按 360 取模保存
+ * （[0,360)，避免数值膨胀）。
+ *
+ * <p><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
+ * {@code |a| ≤ 该板的 FLIP_LANDING_TOLERANCE_DEGREES}（±35°）＝干净落地（角度归零、不掉速）；
+ * 否则＝摔倒：水平速度 ×该板的 {@code CRASH_SPEED_MULTIPLIER}、向上速度归零、进入该板的
+ * {@code CRASH_STUN_TICKS}（20）失控（<b>失控期间禁止起跳</b>）。多翻了几圈只要停在直立附近也算净落。
+ *
+ * <p><b>冷却与落地禁跳</b>：该板的 {@code JUMP_COOLDOWN_TICKS}（10）在起跳成功时置满；落地沿也重新起算，
+ * 但<b>只在这一趟腾空里起过跳（{@code jumpedThisAir}）或开过翻（{@code flipStarted}）时</b> ——
+ * 只是从坡上滑落 / 走下台阶 / 掉到地上的，落地不罚。落地沿只认<b>真落地</b>：连续腾空
+ * ≥ {@link #LANDING_LOCK_MIN_AIR_TICKS}（3）才算，坡面 1–2 tick 的贴面抖动不刷冷却。
+ * 写入方式只有一种：{@code deltaMovement.y} ＝ 起力、{@code hurtMarked} ＋ {@code needsSync}，<b>不 setPos</b>；
+ * <b>空翻中不补跳</b>（{@code !onGround && holdTicks > FLIP_HOLD_DELAY_TICKS} 直接返回）。
  *
  * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
  * <ul>
  *   <li><b>客户端</b> {@link #tickClient}：读本地跳跃键、推进角度、跑落地判定，落地时把<b>最终角度</b>
- *       通过 {@link SkiFlip} 的 C2S 包交给服务端；本地同时按判定结果进失控（画观 / 输入门与服务器一致）。</li>
+ *       通过 {@link SkiFlip} 的 C2S 包交给服务端；本地同时按判定结果进失控（观感 / 输入门与服务器一致）。</li>
  *   <li><b>服务端</b> {@link #tickServer}：只递减失控计时（角度不归它算）；收到包后走
  *       {@link #applyLanding} —— 降速 + {@code hurtMarked}，<b>不 setPos</b>。</li>
  *   <li><b>判定只有一份</b>：{@link #isCleanLanding}。客户端落地与 {@link #applyLanding} 都调它，
  *       两边不各写一套公式。</li>
+ *   <li>两端各调一次 {@link #tryJump}，都放在<b>实体 tick 之前</b>（客户端 {@code LocalPlayer#aiStep} 的 HEAD、
+ *       服务端 {@code START_SERVER_TICK}），这样服务端的 {@code ClientboundSetEntityMotionPacket}
+ *       带的就是起跳速度，不会把客户端写下的冲量整份覆盖掉。</li>
  * </ul>
  *
  * <p><b>数值不在这里</b>：两块板各一套 {@link Tuning}（单板 {@code SnowboardControl.airTuning()}、
  * 双板 {@code SkisControl.airTuning()}），本类只按 {@link SnowboardControl#isSnowboard} 选一份。
  */
 public final class SkiAir {
-	/**
-	 * <b>临时诊断开关</b> —— 只为定位「平地起跳空翻、落地不被判定为落地」用：
-	 * 为真时在落地判定的各个环节打 {@code [skis/LAND]} 日志（行首带端标记 {@code C}／{@code S}）。
-	 *
-	 * <p>它<b>不改变任何判定</b>，只读状态、只写日志；除本常量外没有新增字段。
-	 * 定位完成后<b>把本常量与所有 {@code DEBUG_LANDING} 分支一起删掉</b>。
-	 */
-	private static final boolean DEBUG_LANDING = true;
-
-	/**
-	 * <b>临时探针专用的射线长度</b>（格）：只给 {@code [skis/LAND] ... groundBelow=} 那一行量「脚底到下方地面」
-	 * 用，<b>不参与任何判定</b>。与 {@code DEBUG_LANDING} 同生共死 —— 探针删掉时一起删。
-	 */
-	private static final double PROBE_GROUND_RANGE = 1.0D;
 
 	/** 一整圈。角度按它取模保存（多圈只体现在落地判定上）。 */
 	public static final double FULL_TURN_DEGREES = 360.0D;
@@ -97,7 +84,7 @@ public final class SkiAir {
 	 * 否则坡上会反复刷起跳冷却，表现成「怎么按都跳不起来」）。
 	 *
 	 * <p><b>为什么取 3</b>：一次真实的跳跃 / 空翻腾空远长于 3 tick —— 起跳力 0.2–0.5 格/tick、
-	 * 重力 0.08–0.09 格/tick²，满速跳也就 1.5 格 ≈ 十几 tick；而贴面滑行时 {@code onGround}
+	 * 重力：腾空档 0.072、起跳首 tick 读贴地档 0.104 / 0.12 格/tick²，满速跳也就 1.5 格 ≈ 十几 tick；而贴面滑行时 {@code onGround}
 	 * 的逐 tick 抖动通常是 1–2 tick。取 3 正好把「抖动」和「真腾空」分开，
 	 * 闸门只为防刷冷却，不会削弱正常落地后的处罚。
 	 *
@@ -126,6 +113,11 @@ public final class SkiAir {
 	 * 一块板的起跳 / 空翻数值。
 	 *
 	 * <p>做成对象而不是一串裸参数：状态机只有一份，数值由各自的板类在 {@code airTuning()} 里给。
+	 *
+	 * <p><b>注释里的常量名都不在本类</b>：{@code COYOTE_TICKS} / {@code JUMP_BUFFER_TICKS} /
+	 * {@code JUMP_COOLDOWN_TICKS} / {@code FLIP_HOLD_DELAY_TICKS} / {@code FLIP_MIN_SPEED} /
+	 * {@code CRASH_STUN_TICKS} 等在两块板各自一份 —— 双板在 {@code SkisControl}、单板在
+	 * {@code SnowboardControl}（都 private），本类只按构造参数保存它们的值，在这里 grep 找不到定义。
 	 */
 	public static final class Tuning {
 		/** 速度 → 起跳力度（格/tick）的查找表：下标 s = 0, 1/(n−1), …, 1（长度 11 ＝ 步长 0.1）。 */
@@ -143,7 +135,7 @@ public final class SkiAir {
 		 * 「真落地」＝连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）tick，坡面 1–2 tick 的贴面抖动不算。
 		 */
 		private final int jumpCooldownTicks;
-		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
+		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}，在 {@code SkisControl} / {@code SnowboardControl}）。 */
 		private final double maxSpeed;
 		/** 空中每 tick 判一次：水平速度低于它就不转角（只是普通小跳）。 */
 		private final double flipMinSpeed;
@@ -307,7 +299,7 @@ public final class SkiAir {
 		private boolean jumpedThisAir;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
-		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}。 */
+		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}（在 {@code SkisControl} / {@code SnowboardControl}）。 */
 		private int coyoteTicks;
 		/** 输入缓冲：按下空格后还剩多少 tick 内条件满足就自动发出。 */
 		private int jumpBufferTicks;
@@ -373,18 +365,6 @@ public final class SkiAir {
 	}
 
 	/**
-	 * <b>这一 tick 起跳该给多少力度</b>（注入原版 {@code getJumpPower()}）：
-	 * 没穿板返回 {@code -1}＝调用方原样交回原版值。
-	 */
-	public static float jumpPower(Player player) {
-		Tuning tuning = tuning(player);
-		if (tuning == null) {
-			return -1.0F;
-		}
-		return (float) tuning.jumpPower(player.getDeltaMovement().horizontalDistance());
-	}
-
-	/**
 	 * <b>起跳 —— 本模组接管的唯一入口</b>。两端各调一次，都放在<b>实体 tick 之前</b>：
 	 * 客户端 {@code mixin.client/LocalPlayerJumpMixin}（{@code LocalPlayer#aiStep} 的 HEAD，早于 {@code travel()}）、
 	 * 服务端 {@code SkiGlide.register} 的 {@code START_SERVER_TICK}（读 {@code getLastClientInput().jump()}）。
@@ -407,20 +387,12 @@ public final class SkiAir {
 	 *   <li>不在 {@code onGround}，但离地还没超过 {@code COYOTE_TICKS}（6 tick「逗留窗」）→ 仍算刚离地。</li>
 	 * </ol>
 	 *
-	 * <p><b>为什么没有「空中向下打射线」那一条</b>（曾经存在、已删除）：原第三条是「不在 {@code onGround}、
-	 * {@code vy ≤ 0}、且脚底到下方地面 ≤ 1.0 格就打射线补跳」。实机日志直接证伪：腾空下落时
-	 * {@code groundBelow} 落在 0.6–0.9 格（正是 1.0 格射线内），服务端每 tick 都判「可以跳」并把人再次弹起 ——
-	 * <pre>
-	 * S jump! y=1118.64 vy=0.460 holdTicks=0 onGround=false groundBelow=0.635
-	 * S jump! y=1116.62 vy=0.458 holdTicks=0 onGround=false groundBelow=0.621
-	 * S jump! y=1113.87 vy=0.456 holdTicks=0 onGround=false groundBelow=0.874
-	 * </pre>
-	 * {@code holdTicks} 为 0 就暴露了另一半问题：它<b>只在客户端 tick 里累加</b>，服务端永远是 0，
-	 * 所以 {@link #tryJump} 里「空翻中不补跳」那道门在服务端形同虚设 —— 服务端一路补跳，人一下落就被弹起、
-	 * <b>永远碰不到地</b>，于是落地沿 / 落地判定 / 禁跳 / 角度归零全都不发生（地面一旦掉出 1 格射线范围
-	 * 反而能真落上，用户看到的就是「相差一格以内就不判定」）。删掉这条之后下落就是下落，落地沿正常触发。
-	 * 它原本要兜的「坡面 {@code onGround} 抖动 → 按空格没反应」已由土狼窗覆盖：
-	 * {@code COYOTE_TICKS} ＝ 6 tick，实测贴面抖动最多 3 tick，6 tick 的门槛足够宽。
+	 * <p><b>为什么没有「空中向下打射线」那一条</b>（曾经存在、已删，见 {@code d5bee03}）：原第三条是
+	 * 「不在 {@code onGround}、{@code vy ≤ 0}、脚底到下方地面 ≤ 1.0 格就打射线补跳」。实机日志证实腾空下落时
+	 * 脚底离地本来就在 1 格内，服务端每 tick 都命中并把人再次弹起 —— 永远碰不到地，落地沿 / 落地判定 / 禁跳
+	 * 全不触发；而且服务端 {@code holdTicks} 恒为 0（只在客户端累加），「空翻中不补跳」那道门在服务端也形同虚设。
+	 * 它原本要兜的「坡面 {@code onGround} 抖动 → 按空格没反应」已由该板的 {@code COYOTE_TICKS}（6 tick，
+	 * {@code SkisControl} / {@code SnowboardControl} 各一份）覆盖：实测贴面抖动最多 3 tick。
 	 *
 	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
 	 * 自动发出。<b>防连发</b>：{@code JUMP_COOLDOWN_TICKS}（10 tick）在起跳成功时置满；<b>落地沿也重新起算，
@@ -484,20 +456,6 @@ public final class SkiAir {
 		if (onGround) {
 			// 真落地 = 上一次不贴地、且这一趟连续腾空够长（≥ LANDING_LOCK_MIN_AIR_TICKS），与下面「这一趟起过跳/开过翻」分开判
 			boolean realLanding = !state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS;
-			if (DEBUG_LANDING && onGround != state.wasOnGround) {
-				// 临时诊断：贴地方向的 onGround 跳变（腾空→贴地）。jumpedThisAir / flipStarted 读的是
-				// 清标记之前的值（landClient 还没跑），正是落地沿看到的那一份。
-				SkisMod.LOGGER.info(
-						"[skis/LAND] {} onGround->{} airTicks={} jumpedThisAir={} flipStarted={} angle={} y={} vy={} realLanding={}",
-						player.level().isClientSide() ? "C" : "S", onGround, state.airTicks,
-						state.jumpedThisAir, state.flipStarted, String.format("%.1f", state.angle),
-						String.format("%.2f", player.getY()),
-						String.format("%.3f", player.getDeltaMovement().y), realLanding);
-			}
-			if (DEBUG_LANDING && realLanding && !(state.jumpedThisAir || state.flipStarted)) {
-				SkisMod.LOGGER.info("[skis/LAND] {} realLanding 但这一趟没有起跳也没有开翻：不罚",
-						player.level().isClientSide() ? "C" : "S");
-			}
 			if (realLanding && (state.jumpedThisAir || state.flipStarted)) {
 				// 落地沿：这一趟腾空里起过跳（jumpedThisAir）或开过翻（flipStarted）才重新起算起跳冷却。
 				// 只是从坡上滑落 / 走下台阶 / 掉到地上、全程没起跳也没翻的，落地不罚（否则按不出跳）。
@@ -514,15 +472,6 @@ public final class SkiAir {
 		} else {
 			// 腾空：累加（饱和到 LANDING_LOCK_MIN_AIR_TICKS 就够，不必无限涨）
 			state.airTicks = Math.min(state.airTicks + 1, LANDING_LOCK_MIN_AIR_TICKS);
-			if (DEBUG_LANDING && onGround != state.wasOnGround) {
-				// 临时诊断：起跳方向的 onGround 跳变（贴地→腾空）。realLanding 只可能在贴地方向成立，这里恒 false。
-				SkisMod.LOGGER.info(
-						"[skis/LAND] {} onGround->{} airTicks={} jumpedThisAir={} flipStarted={} angle={} y={} vy={} realLanding=false",
-						player.level().isClientSide() ? "C" : "S", onGround, state.airTicks,
-						state.jumpedThisAir, state.flipStarted, String.format("%.1f", state.angle),
-						String.format("%.2f", player.getY()),
-						String.format("%.3f", player.getDeltaMovement().y));
-			}
 		}
 		state.wasOnGround = onGround;
 		if (state.stunTicks > 0) {
@@ -549,13 +498,6 @@ public final class SkiAir {
 		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
 		state.coyoteTicks = 0;
 		state.jumpedThisAir = true;                             // 这一趟腾空里真的起过跳（落地沿据此才禁跳）
-		if (DEBUG_LANDING) {
-			// 临时诊断：起跳成功那一刻的姿态（groundBelow ＝ 脚底到下方地面的距离，探不到就记 MAX）。
-			SkisMod.LOGGER.info("[skis/LAND] {} jump! y={} vy={} holdTicks={} onGround={} groundBelow={}",
-					player.level().isClientSide() ? "C" : "S", String.format("%.2f", player.getY()),
-					String.format("%.3f", player.getDeltaMovement().y), state.holdTicks, onGround,
-					String.format("%.3f", groundDistance(player, PROBE_GROUND_RANGE)));
-		}
 		return true;
 	}
 
@@ -568,23 +510,6 @@ public final class SkiAir {
 	 */
 	private static boolean canJump(boolean onGround, AirState state) {
 		return onGround || state.coyoteTicks > 0;
-	}
-
-	/**
-	 * 脚底到下方地面的距离（格）：向下 {@code range} 格的碰撞射线；探不到东西返回 {@link Double#MAX_VALUE}。
-	 *
-	 * <p><b>只剩临时探针在用</b>（{@code DEBUG_LANDING} 的 {@code groundBelow=} 日志），不再参与任何起跳判定；
-	 * 探针删掉时把它一起删。
-	 */
-	private static double groundDistance(Player player, double range) {
-		Vec3 from = player.position();
-		Vec3 to = from.add(0.0D, -range, 0.0D);
-		BlockHitResult hit = player.level().clip(new ClipContext(from, to,
-				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-		if (hit.getType() != HitResult.Type.BLOCK) {
-			return Double.MAX_VALUE;
-		}
-		return from.y - hit.getLocation().y;
 	}
 
 	/**
@@ -619,12 +544,6 @@ public final class SkiAir {
 
 		if (player.onGround()) {                                    // ④ 落地：只做边沿判定，不动 holdTicks
 			if (state.airborne) {
-				if (DEBUG_LANDING) {
-					// 临时诊断：落地 tick 的入口（state.airborne 为真＝上一 tick 还在空中，这一 tick 第一次贴地）
-					SkisMod.LOGGER.info("[skis/LAND] {} tickClient land: airborne={} angle={} y={}",
-							player.level().isClientSide() ? "C" : "S", state.airborne,
-							String.format("%.1f", state.angle), String.format("%.2f", player.getY()));
-				}
 				landClient(state, tuning, listener);
 			}
 			state.airborne = false;
@@ -703,11 +622,6 @@ public final class SkiAir {
 	private static void landClient(AirState state, Tuning tuning, LandingListener listener) {
 		double angle = state.angle;
 		boolean clean = isCleanLanding(angle, tuning);
-		if (DEBUG_LANDING) {
-			// 临时诊断：落地结算的入口。landClient 只由 tickClient 调，所以端标记恒为 C。
-			SkisMod.LOGGER.info("[skis/LAND] C landClient angle={} clean={}",
-					String.format("%.1f", angle), clean);
-		}
 		// 落地那一帧回到 0°（渲染读 0，模型直立；插值区间两头一起归零，不会倒着转回去）
 		state.angle = 0.0D;
 		state.prevAngle = 0.0D;

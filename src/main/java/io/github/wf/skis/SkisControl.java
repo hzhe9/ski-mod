@@ -220,8 +220,11 @@ public final class SkisControl {
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
 
-	/** 动量每 tick 保留比例 ＝ 有效摩擦力（0.985 ≈ 2 秒掉一半）。 */
-	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%）：两板同值，滑行手感的基线
+	/**
+	 * 动量每 tick 保留比例 ＝ 有效摩擦力：<b>0.998 ＝ 每 tick 保留 99.8%</b>（1 秒 −4%，半衰期 ≈ 17.3 s）；
+	 * 两板同值，滑行手感的基线。
+	 */
+	private static final double MOMENTUM_DECAY = 0.998D;
 
 	/**
 	 * <b>双板刹车</b>：按住 S（且还在往前滑）时，动量与速度每 tick 保留的比例。

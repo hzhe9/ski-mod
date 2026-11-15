@@ -511,10 +511,10 @@ public final class SnowSpray {
 			if (speed < MIN_SPEED) {
 				continue;   // 太慢（站着不动）：不持续扬雪
 			}
-			// 按键不对称（弯外侧 / 板端）只对**本地玩家**读真实输入 —— 与 SkisClient 同一条写法；
-			// 别人（以及本地输入拿不到时）一律 null → 两侧 / 两端保持对称，与旧行为一致。
-			Input keys = player == client.player && client.player != null && client.player.input != null
-					? client.player.input.keyPresses : null;
+			// 按键不对称（弯外侧 / 板端）只对**本地玩家**读真实输入 —— 与 SkisClient 同一条写法
+			// （26.2 的 input / keyPresses 永不为 null）；
+			// 别人（以及本地输入拿不到时）一律 null → 两侧 / 两端保持对称。
+			Input keys = player == client.player ? client.player.input.keyPresses : null;
 			spray(level, player, speed, turning, turnDelta, surface, keys);
 		}
 	}

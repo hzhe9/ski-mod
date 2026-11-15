@@ -27,10 +27,8 @@ public abstract class LocalPlayerJumpMixin {
 	@Inject(method = "aiStep", at = @At("HEAD"))
 	private void skis$jumpBeforeTravel(CallbackInfo ci) {
 		LocalPlayer self = (LocalPlayer) (Object) this;
-		// input 为 null（构造中间态 / 客户端还没接上输入）＝这一 tick 没按空格
-		boolean holdingJump = self.input != null
-				&& self.input.keyPresses != null
-				&& self.input.keyPresses.jump();
+		// 26.2 的 input / keyPresses 永不为 null（ClientInput 构造把 keyPresses 初始化成 Input.EMPTY）
+		boolean holdingJump = self.input.keyPresses.jump();
 		SkiAir.tryJump(self, SkiAir.tuning(self), holdingJump, self.onGround());
 	}
 }

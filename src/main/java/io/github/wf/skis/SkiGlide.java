@@ -23,7 +23,8 @@ import net.minecraft.world.level.block.state.BlockState;
  *
  * <ul>
  *   <li><b>滑行惯性（低摩擦）</b>：原版玩家在地面每 tick 会掉掉约 45% 的水平速度（10 tick 就基本停住），
- *       所以这里自己维护一份“动量”，按 {@link #MOMENTUM_DECAY}（默认每 tick 保留 98.5%）慢慢衰减，
+ *       所以这里自己维护一份“动量”，按该板的动量衰减（{@link SkisControl#momentumDecay()} /
+ *       {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）慢慢衰减，
  *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
  *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算），<b>方向永远沿当前水平速度</b>
  *       （单板也一样：不投影到身体横轴、不跟随身体朝向，空中转身后不会把速度拽向新朝向）；</li>
@@ -53,8 +54,8 @@ public final class SkiGlide {
 	/**
 	 * 每累计下落这么多格算一次，按次均匀给速度（**双板**；单板用 {@link SnowboardControl#descentStepBlocks()} 的 0.5）。
 	 *
-	 * <p>双板也按每 0.5 格结算：单次 = 0.12 × 0.5 = 0.06，
-	 * 每格总量仍是 0.12（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
+	 * <p>双板也按每 0.5 格结算：单次 = 0.1 × 0.5 = 0.05，
+	 * 每格总量仍是 0.1（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
 	 */
 	private static final double STEP_BLOCKS = 0.5D;
 	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
@@ -120,7 +121,7 @@ public final class SkiGlide {
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId());
 					SkisControl.forgetBody(player.getId());
-					SkiAir.forget(player.getId());  // 空中状态 / 失控计时
+					// 空中状态 / 失控计时由上面两个 forget 里的 SkiAir.forget 一起清（两者各调一次，这里不再补第三遍）
 					continue;
 				}
 				// 起跳力度 / 后空翻 / 落地：服务端只管失控计时 —— 角度只有客户端知道（按住空格），
@@ -221,7 +222,6 @@ public final class SkiGlide {
 		player.hurtMarked = true;   // 让客户端也吃到这份加速，不然会被客户端的移动预测抹掉
 	}
 
-	/** 把水平速度压到 {@link SkiControl#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
 	/**
 	 * 设置台阶高度。26.2 里它不是 {@code setMaxUpStep}，而是属性 {@link Attributes#STEP_HEIGHT}
 	 * （原版玩家默认 0.6 格）。
@@ -241,7 +241,8 @@ public final class SkiGlide {
 	 * <p><b>贴地 / 腾空两档</b>，每 tick 按 {@code player.onGround()} 二选一：
 	 * 贴地（滑行、落地压雪）用 {@code GRAVITY_MULTIPLIER}（单 1.3 / 双 1.5，下落干脆、不发飘），
 	 * 腾空（跳跃 / 坠落）用 {@code AIR_GRAVITY_MULTIPLIER}（两板 0.9 ＝ 原版 0.072，飘一点、滞空长一点）。
-	 * <b>这是全类唯一一处写 GRAVITY 属性的地方</b>，每 tick 只在末尾写一次 —— 不要另加第二个写点
+	 * <b>写 GRAVITY 属性的地方全类只有两处</b>：{@code applyGravity}（每 tick 只在末尾写一次）与
+	 * {@link #resetGravity}（脱板还原）—— 不要另加第三个写点
 	 * （本工程踩过「两处各 clamp 一次」的坑）。
 	 *
 	 * <p>原版重力在穿板时太轻（贴地下落像飘在空里），所以贴地取「比平时更快」这一档；
@@ -257,7 +258,7 @@ public final class SkiGlide {
 		}
 		boolean board = SnowboardControl.isSnowboard(player);
 		boolean grounded = player.onGround();
-		// 贴地 → 该板的 GRAVITY_MULTIPLIER；腾空 → 该板的 AIR_GRAVITY_MULTIPLIER（两板 0.8）
+		// 贴地 → 该板的 GRAVITY_MULTIPLIER；腾空 → 该板的 AIR_GRAVITY_MULTIPLIER（两板 0.9）
 		double multiplier = grounded
 				? (board ? SnowboardControl.gravityMultiplier() : SkisControl.gravityMultiplier())
 				: (board ? SnowboardControl.airGravityMultiplier() : SkisControl.airGravityMultiplier());
@@ -294,6 +295,7 @@ public final class SkiGlide {
 		}
 	}
 
+	/** 把水平速度压到 {@link SkiControl#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
 	private static void clampToMaxSpeed(ServerPlayer player) {
 		// 上限按板取（单板 / 双板各自一个值）
 		Vec3 motion = player.getDeltaMovement();
@@ -306,7 +308,8 @@ public final class SkiGlide {
 	}
 
 	/**
-	 * 低摩擦滑行：维护一份动量，每 tick 按 {@link #MOMENTUM_DECAY} 缓慢衰减，并保证玩家水平速度不低于它。
+	 * 低摩擦滑行：维护一份动量，每 tick 按该板的动量衰减（{@link SkisControl#momentumDecay()} /
+	 * {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）缓慢衰减，并保证玩家水平速度不低于它。
 	 * 玩家自己（走路/冲刺/右键冲刺）比动量快时完全不插手。
 	 */
 	private static void applyMomentum(ServerPlayer player) {
@@ -473,7 +476,7 @@ public final class SkiGlide {
 		return steerDirection(player);
 	}
 
-	/** 加速方向：在滑行方向的基础上，按玩家按键转向（离地太高则锁死方向）；单板可能返回 null＝不给加速。 */
+	/** 加速方向：在滑行方向的基础上按玩家按键转向（两块板在空中都锁死方向）；单板可能返回 null＝不给加速。 */
 	private static Vec3 steerDirection(ServerPlayer player) {
 		Vec3 travel = travelDirection(player);
 		return travel == null ? null : SkiControl.steer(travel, player);
