@@ -40,7 +40,9 @@ import net.minecraft.world.phys.Vec3;
  *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
  *       （6 tick）内仍可跳；否则 {@code vy ≤ 0} 且脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}（1.0 格）也跳。
  *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发；
- *       这个冷却<b>在每次落地沿也重新起算</b>（不论干净落地还是摔倒、不论有没有翻），所以<b>按住空格也不能落地即跳</b>。
+ *       这个冷却<b>在每次落地沿也重新起算</b>（不论干净落地还是摔倒、不论有没有翻），所以<b>按住空格也不能落地即跳</b>；
+ *       落地沿只认<b>真落地</b> —— 连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）才算，
+ *       坡面 1–2 tick 的贴面抖动不刷冷却。
  *       两端各调一次、<b>同一 tick 内、实体 tick 之前</b>（客户端 {@code LocalPlayer#aiStep} 的 HEAD、
  *       服务端 {@code START_SERVER_TICK}），这样服务端的 {@code ClientboundSetEntityMotionPacket} 带的就是起跳速度，
  *       不会把客户端写下的冲量整份覆盖掉。
@@ -71,6 +73,19 @@ public final class SkiAir {
 
 	/** 客户端交上来的角度上限（度，＝10 圈）：超过直接当非法包丢掉。 */
 	public static final double MAX_NET_ANGLE_DEGREES = 3600.0D;
+
+	/**
+	 * 落地沿要算「真落地」至少得连续腾空多少 tick（1–2 tick 的贴面抖动不算落地，
+	 * 否则坡上会反复刷起跳冷却，表现成「怎么按都跳不起来」）。
+	 *
+	 * <p><b>为什么取 3</b>：一次真实的跳跃 / 空翻腾空远长于 3 tick —— 起跳力 0.2–0.5 格/tick、
+	 * 重力 0.08–0.09 格/tick²，满速跳也就 1.5 格 ≈ 十几 tick；而贴面滑行时 {@code onGround}
+	 * 的逐 tick 抖动通常是 1–2 tick。取 3 正好把「抖动」和「真腾空」分开，
+	 * 闸门只为防刷冷却，不会削弱正常落地后的处罚。
+	 *
+	 * <p>不放进 {@link Tuning}：它不是手感旋钮，两块板共用同一个判据。
+	 */
+	private static final int LANDING_LOCK_MIN_AIR_TICKS = 3;
 
 	/**
 	 * 空翻的旋转轴高度（格，<b>从脚底往上</b>）：<b>绕腰翻，不是绕脚底</b>。
@@ -106,8 +121,9 @@ public final class SkiAir {
 		/** 按下空格后多少 tick 内只要条件满足就自动发出（输入缓冲）。 */
 		private final int jumpBufferTicks;
 		/**
-		 * 起跳后多少 tick 内不再因为「按住」重复起跳（防连发）；<b>每次落地沿也按它重新起算</b>
+		 * 起跳后多少 tick 内不再因为「按住」重复起跳（防连发）；<b>每次真落地也按它重新起算</b>
 		 * —— 所以落地后这么久内跳不起来（不论干净落地还是摔倒）。
+		 * 「真落地」＝连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）tick，坡面 1–2 tick 的贴面抖动不刷。
 		 */
 		private final int jumpCooldownTicks;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
@@ -193,7 +209,7 @@ public final class SkiAir {
 			return jumpBufferTicks;
 		}
 
-		/** 起跳后（以及<b>每次落地沿</b>后）多少 tick 内不再因「按住」重复起跳。 */
+		/** 起跳后（以及<b>每次真落地</b>后）多少 tick 内不再因「按住」重复起跳（抖动不算落地）。 */
 		public int jumpCooldownTicks() {
 			return jumpCooldownTicks;
 		}
@@ -270,6 +286,15 @@ public final class SkiAir {
 		private int jumpBufferTicks;
 		/** 起跳冷却：上次起跳后还剩多少 tick 不再因「按住」重复起跳。 */
 		private int jumpCooldownTicks;
+		/**
+		 * 本次腾空<b>已经连续多少 tick {@code onGround == false}</b>（贴地那 tick 归零，腾空时累加，
+		 * 饱和到 {@code LANDING_LOCK_MIN_AIR_TICKS}（3））。
+		 *
+		 * <p>唯一用途是给落地沿做<b>防抖</b>：滑行时 {@code onGround} 在上坡 / 起伏 / 贴面走但没严格落地时
+		 * 经常为假、逐 tick 抖动，纯 {@code onGround && !wasOnGround} 的边沿会在坡上每抖一次就刷满
+		 * {@code JUMP_COOLDOWN_TICKS}，表现成「怎么按都跳不起来」。只有连续腾空 ≥ 3 tick 的落地才算真落地。
+		 */
+		private int airTicks;
 		/** 上一 tick 是否按住跳跃键（按下沿检测：缓冲只在「按下」那一刻充值）。 */
 		private boolean prevHoldingJump;
 		/**
@@ -359,8 +384,16 @@ public final class SkiAir {
 	 *
 	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
 	 * 自动发出。<b>防连发 / 落地禁跳</b>：{@code JUMP_COOLDOWN_TICKS}（10 tick）两处重新起算 ——
-	 * 起跳成功时置满；<b>每次落地沿</b>（{@code onGround} 由假变真，见 {@code AirState#wasOnGround}）时
+	 * 起跳成功时置满；<b>每次真落地</b>（{@code onGround} 由假变真，见 {@code AirState#wasOnGround}）时
 	 * 也 {@code max()} 到满值。所以<b>按住空格也不能落地即跳</b>，要等冷却走完（摔倒另叠 {@code CRASH_STUN_TICKS} 失控）。
+	 *
+	 * <p><b>落地沿只认真腾空（防抖）</b>：滑行时 {@code onGround} 在上坡 / 起伏 / 贴面走但没严格落地时
+	 * 经常为假、还会逐 tick 抖动 —— 纯「{@code onGround && !wasOnGround}」的边沿会在坡上每抖一次就把
+	 * {@code JUMP_COOLDOWN_TICKS} 刷满，表现成「怎么按都跳不起来」。所以状态里另记
+	 * {@code AirState#airTicks}（本次连续腾空了多少 tick，贴地归零、腾空累加并饱和），
+	 * <b>只有连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）才算一次落地</b>；1–2 tick 的贴面抖动
+	 * 不算落地、<b>不刷冷却</b>。取 3 的理由：真跳跃 / 空翻的腾空远长于 3 tick（十几 tick 起），
+	 * 而贴面抖动通常只有 1–2 tick —— 闸门只为防刷，正常落地后的处罚一点没变。
 	 * 落地沿的判定只读各自这一端的 {@code onGround}，两端每 tick 各调一次 {@code tryJump}，
 	 * 因此双方自然得到同一个落地沿、不需要额外发包。
 	 *
@@ -394,11 +427,17 @@ public final class SkiAir {
 		} else if (state.coyoteTicks > 0) {
 			state.coyoteTicks--;
 		}
-		if (onGround && !state.wasOnGround) {
-			// 落地沿：每一次落地都重新起算起跳冷却（不论干净落地还是摔倒、不论这次腾空有没有翻）。
-			// tryJump 两端（客户端 aiStep HEAD / 服务端 START_SERVER_TICK）每 tick 各调一次，
-			// 两边读的都是自己的 onGround，所以双方得到同一个落地沿、不需要额外发包。
-			state.jumpCooldownTicks = Math.max(state.jumpCooldownTicks, tuning.jumpCooldownTicks());
+		if (onGround) {
+			if (!state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS) {
+				// 落地沿：每一次<b>真落地</b>都重新起算起跳冷却（不论干净落地还是摔倒、不论这次腾空有没有翻）。
+				// tryJump 两端（客户端 aiStep HEAD / 服务端 START_SERVER_TICK）每 tick 各调一次，
+				// 两边读的都是自己的 onGround，所以双方得到同一个落地沿、不需要额外发包。
+				state.jumpCooldownTicks = Math.max(state.jumpCooldownTicks, tuning.jumpCooldownTicks());
+			}
+			state.airTicks = 0;                             // 贴地：腾空计数清零（下一次离地从 0 数）
+		} else {
+			// 腾空：累加（饱和到 LANDING_LOCK_MIN_AIR_TICKS 就够，不必无限涨）
+			state.airTicks = Math.min(state.airTicks + 1, LANDING_LOCK_MIN_AIR_TICKS);
 		}
 		state.wasOnGround = onGround;
 		if (state.stunTicks > 0) {
