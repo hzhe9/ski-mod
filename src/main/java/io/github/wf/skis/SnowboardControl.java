@@ -194,10 +194,17 @@ public final class SnowboardControl {
 	/** <b>单板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
 	private static final int CRASH_STUN_TICKS = 20;
 	/**
-	 * <b>单板</b>：摔倒扣血的上限（0 = 关闭，默认）。{@code > 0} 时服务端按
+	 * <b>单板</b>：摔倒扣血的上限（4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心）。{@code > 0} 时服务端按
 	 * 「与直立偏差 / 180 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
+	 *
+	 * <p><b>为什么要用 {@code damageSources().generic()} 而不是 {@code fall()}</b>：本模组的
+	 * {@code SnowLanding} 挂在 Fabric {@code ServerLivingEntityEvents.ALLOW_DAMAGE}（＝{@code LivingEntity#hurtServer}）上，
+	 * 对 {@code DamageTypeTags.IS_FALL} 的伤害返回 {@code false} 直接取消（雪 / 冰面上、或 60 tick 内踩过雪）——
+	 * 摔落类型的「摔倒扣血」在雪地上会被整份吃掉。{@code minecraft:generic} 不在 {@code is_fall} tag 里，
+	 * 所以拦不到；同时它在 {@code bypasses_armor} tag 里，护甲不会把 4.0 点折掉，扣的就是标称值。
+	 * 只走 {@code hurtServer} + 现有偏移公式，不动 {@code deltaMovement} 以外的任何东西（不 setPos）。
 	 */
-	private static final double CRASH_DAMAGE_MAX = 0.0D;
+	private static final double CRASH_DAMAGE_MAX = 4.0D;
 
 	/** 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(

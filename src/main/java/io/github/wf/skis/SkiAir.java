@@ -504,8 +504,13 @@ public final class SkiAir {
 
 	/**
 	 * <b>服务端落地结算</b>（{@link SkiFlip} 的包处理器调这里）：用同一份 {@link #isCleanLanding} 判定；
-	 * 净落什么都不做；摔倒则水平速度 ×{@code CRASH_SPEED_MULTIPLIER} + {@code hurtMarked} 并进失控。
-	 * <b>只走 deltaMovement + hurtMarked，不 setPos</b>。
+	 * 净落什么都不做；摔倒则水平速度 ×{@code CRASH_SPEED_MULTIPLIER} + {@code hurtMarked} 并进失控，
+	 * 且 {@code CRASH_DAMAGE_MAX > 0} 时按「与直立偏差 / 180」比例扣血。
+	 * <b>只走 deltaMovement + hurtMarked + hurtServer，不 setPos</b>。
+	 *
+	 * <p>扣血用的伤害类型是 {@code damageSources().generic()}，不是 {@code fall()} ——
+	 * 本模组的 {@code SnowLanding} 在 {@code hurtServer} 的 ALLOW_DAMAGE 上会取消所有
+	 * {@code DamageTypeTags.IS_FALL} 的伤害（雪 / 冰面落地免伤），用 fall 等于雪地摔倒不掉血。
 	 *
 	 * @return 是否净落
 	 */
@@ -525,7 +530,11 @@ public final class SkiAir {
 		player.hurtMarked = true;   // 让客户端跟着服务端速度走（不 setPos）
 		if (tuning.crashDamageMax() > 0.0D) {
 			double missing = Math.abs(uprightOffsetDegrees(angleDegrees)) / 180.0D;
-			player.hurtServer(player.level(), player.damageSources().fall(),
+			// 伤害类型必须是 generic（不能是 fall）：SnowLanding 在 hurtServer 的 ALLOW_DAMAGE 上
+			// 对 DamageTypeTags.IS_FALL 一律取消（雪 / 冰面、或 60 tick 内踩过雪）—— 用 fall 的话
+			// 雪地上的摔倒一点血都不掉。generic 不在 is_fall 里（拦不到），又在 bypasses_armor 里
+			// （护甲不折这 4 点），所以扣的就是标称值。
+			player.hurtServer(player.level(), player.damageSources().generic(),
 					(float) (missing * tuning.crashDamageMax()));
 		}
 		return false;

@@ -81,7 +81,7 @@
 - **起跳力度随水平滑行速度按对数形曲线升高**：`s = min(水平速度 / MAX_SPEED, 1)`（`MAX_SPEED` 就是该板的速度上限 0.55 / 0.85），力度 = 该板的 **11 点速度→起法力查找表** `JUMP_POWER_BY_SPEED_LUT`（s = 0.0 / 0.1 / … / 1.0 共 11 点，两点之间**线性插值**，取值在 `SkiAir.Tuning#jumpPower`）。表由**对数曲线** `h(s) = h₀ + (1.5 − h₀) × ln(1 + 9s) / ln(10)`（h = 跳高、h₀ = 0.34 单板 / 0.36 双板）在离散 tick 物理下（**第二 tick 起用腾空的 `AIR_GRAVITY_MULTIPLIER` 0.072**；**首 tick 仍是贴地档** 0.104 / 0.120 —— 跳跃写在同一 tick 的实体 tick 内，上一 tick 末尾 `SkiGlide.applyGravity` 按 `onGround()` 设的还是贴地档）反解而来 —— **前半段涨得快、后面趋平、末段增量趋近 0**，满速恰好卡在跳高上限 `JUMP_MAX_HEIGHT` **1.5 格**。**旧的两个线性常量 `JUMP_BASE_POWER` / `JUMP_SPEED_POWER_GAIN` 已删除**（同一个旋钮别再记在两行）。注入点是原版 `LivingEntity#getJumpPower()`（`jumpFromGround` 里唯一一次取值，common mixin `LivingEntityJumpPowerMixin`），**没穿板 / 生物一律原版值**；**穿板时这条路已被 `LivingEntityJumpMixin` 取消**，力度改由 `SkiAir.tryJump` 直接向同一张表取值。
 - **起跳由本模组接管（单一入口 `SkiAir.tryJump`）**：为什么必须接管 —— 原版起跳在 `LivingEntity#aiStep` 里，条件是「`this.jumping`（`LocalPlayer#tick` 由 `input.keyPresses.jump()` 写入）**且（`onGround()` 或在水里）**」。滑行时 `onGround` 在上坡 / 起伏 / 贴面走但没严格落地时经常是假，按空格就没反应；另外原版 `jumpFromGround()` 自己也会 `setDeltaMovement(x, max(power, vy), z)`，和补跳抢同一份 y。现在原版那条路在 `LivingEntity#jumpFromGround()` 的 HEAD 处被 `ci.cancel()`（`mixin/LivingEntityJumpMixin`），起跳只走 `SkiAir.tryJump`，**两端各一次、都放在实体 tick 之前**：客户端 `LocalPlayerJumpMixin` 注入 `LocalPlayer#aiStep` 的 HEAD（在 `super.aiStep()` / `travel()` 之前），服务端在 `START_SERVER_TICK` 用 `getLastClientInput().jump()` 起跳。**为什么服务端也要跳**：服务端只要 `hurtMarked` 就把整份速度经 `ClientboundSetEntityMotionPacket` 发给玩家本人，客户端 `Entity#lerpMotion` 是**整份覆盖** `deltaMovement`；滑行代码几乎每 tick 都 `hurtMarked`，服务端自己不跳就发的是下落速度，会把客户端写的冲量抹掉（原来挂在 `END_CLIENT_TICK` 时「穿板按空格完全没反应」就是这个）。三条触发条件**任一成立**即起跳：① `onGround`；② 离地未满 `COYOTE_TICKS`（**6 tick**）的逗留窗（土狼时间，`onGround` 在坡上抖动时不会漏按）；③ 离地但 `vy ≤ 0` 且脚底到下方地面 ≤ `JUMP_GROUND_RANGE`（**1.0 格**，向下 1.0 格的**碰撞射线**量、不看 `blockPosition`）。**输入缓冲**：按下沿充值 `JUMP_BUFFER_TICKS`（**5 tick**），提前一点按下、条件成立那一 tick 自动发出。**防连发**：起跳后 `JUMP_COOLDOWN_TICKS`（**10 tick**）内不再因「按住」重复起跳，落地后由贴地条件自然放行（按住空格＝落地即再跳）。写入方式只有一种：`deltaMovement` 的 y ＝ 起力、水平不变 ＋ `hurtMarked = true` ＋ `needsSync = true`（原版 `jumpFromGround` 同样两个标记），**不 `setPos`**。**起跳成功不再动 `holdTicks`**（计数从按下沿起算、只由松手归零），也**不再在起跳那一刻判定「能不能翻」**：能不能转是离地之后每 tick 实时算的。另外**空翻中不补跳**：`!onGround && holdTicks > FLIP_HOLD_DELAY_TICKS` 时 `tryJump` 直接返回 `false`（贴地起跳与「落地即再跳」不受影响）。**服务端读不到「这一 tick 有没有按住空格」**（`getLastClientInput()` 是上一份同步上来的输入），所以两端各自跑同一份 `tryJump`（**空中状态按端分开存：客户端 / 服务端各一张表**），不是同一状态机双写。**为什么要分表**：单机下两端共用同一 entity id，共用一张表会让计时器每 tick 递减两次（冷却 / 缓冲 / 逗留窗都只剩一半），且后调用的那端被先起跳那端写下的冷却拦下。
 - **按住多久就转多少（前 4 tick 是静止段）**：空格先起跳（起跳走 `SkiAir.tryJump`，短按、长按都先起跳）。`holdTicks` ＝ **从按下那一刻起的连续按住 tick 数**，**只由松手归零**（`landClient` 落地、`tryJump` 起跳成功、失控**都不再清**），所以在地面上按着的那几 tick 会一直数进空中。空中**每 tick 实时判**（不再有「离地第一 tick 拍快照」的一次性阀门 `flipping`，那个字段已删除）：`holdTicks > FLIP_HOLD_DELAY_TICKS`（**4**，严格大于）＋ 没在失控里 ＋ 水平速度 ≥ `FLIP_MIN_SPEED` ＝ 这一 tick 转 `FLIP_DEGREES_PER_TICK`（**两板同值 16°＝22.5 tick 一圈 1.125 s**）。因为判据是 `>`，**按住的前 4 个 tick 角度恒为 0** —— 这就是模型静止段；**短按（≤ 4 tick）＝纯跳跃、一点不转**；**松手立刻定格**（角度与模型停在那偏角）但计数归零，再按住要重新数满 4 tick。**不在 360° 封顶**（可以按住转多圈），内部按 360 取模保存（[0,360)）避免数值膨胀。速度不够＝普通小跳、按住再久也不转；门槛每 tick 都看，滑着加速过线就立刻开始转。
-- **落地判定按「与直立的最小角距」**：a ＝ 最终角度对 360 取模后映射到 (−180°, 180°]，`|a| ≤ FLIP_LANDING_TOLERANCE_DEGREES`（**±25°**）＝ **干净落地**（角度归零、速度不掉、无惩罚）—— **多翻了几圈只要停在直立附近也算净落**；否则＝**摔倒**：水平速度 ×`CRASH_SPEED_MULTIPLIER`、进入 `CRASH_STUN_TICKS` 的失控 —— 失控期间两块板的**转向 / 压刃 / carve / 追视角**在各自入口一律跳过（`SnowboardControl.isCarving`、`SkisControl.turnBody / turnTowardView / shouldAlignOnGround`），且**不能再次起跳空翻**。`CRASH_DAMAGE_MAX > 0` 时服务端按「与直立偏差 / 180 × 它」`hurtServer` 扣血（**默认 0＝关闭**）。
+- **落地判定按「与直立的最小角距」**：a ＝ 最终角度对 360 取模后映射到 (−180°, 180°]，`|a| ≤ FLIP_LANDING_TOLERANCE_DEGREES`（**±25°**）＝ **干净落地**（角度归零、速度不掉、无惩罚）—— **多翻了几圈只要停在直立附近也算净落**；否则＝**摔倒**：水平速度 ×`CRASH_SPEED_MULTIPLIER`、进入 `CRASH_STUN_TICKS` 的失控 —— 失控期间两块板的**转向 / 压刃 / carve / 追视角**在各自入口一律跳过（`SnowboardControl.isCarving`、`SkisControl.turnBody / turnTowardView / shouldAlignOnGround`），且**不能再次起跳空翻**。`CRASH_DAMAGE_MAX`（两板各一个，**现值 4.0**）> 0 时服务端按「与直立偏差 / 180 × 它」扣血：偏差 180° 扣 4 点（2 颗心）、90° 扣 2 点、±25° 边界约 0.56 点。伤害类型是 **`damageSources().generic()`，不是 `fall()`** —— `SnowLanding` 的雪地免伤只取消 `DamageTypeTags.IS_FALL`，用 fall 的话**雪地上摔倒一点血都不掉**；`generic` 不在 `is_fall` tag 里所以拦不住，而且它在 `bypasses_armor` tag 里（护甲不会把这 4 点折小）。
 - 状态机只有一份（`SkiAir`，每玩家状态用 `util/IdMap` 存：角度、上一 tick 角度、在空中、**连续按住计数**、失控计时；**「在翻」那个一次性字段 `flipping` 已删除** —— 能不能转是每 tick 实时算的）。**空翻角度与「有没有按住空格」只有客户端知道**（`LocalPlayer#input.keyPresses.jump()`，服务端读不到这个输入），所以**角度累积与观感都在客户端本地跑**（`SkiAir.tickClient`，只对本机玩家）；落地那一 tick（净落与摔倒**都**发）客户端发一个 C2S 包 `SkiFlip.Payload`（通道 `skis:flip_landing`，只传一个 float ＝ 最终角度；`PayloadTypeRegistry.serverboundPlay()` + `ServerPlayNetworking.registerGlobalReceiver` 都注册在**主源码集**里、双端共用同一张编解码表）把角度交给服务端。服务端 `SkiAir.tickServer` **只递减失控计时**（不再算角度），收到包后 `SkiAir.applyLanding` 用**同一个 `isCleanLanding`** 判定并施罚：水平速度 ×`CRASH_SPEED_MULTIPLIER` + `hurtMarked`，**只走 `deltaMovement`，不 `setPos`**；客户端本地同时按同一判定进失控（画观 / 输入门与服务器一致，降速仍只在服务端）。包里的角度有合法性校验：**非有限值 / 负值 / 超过 `MAX_NET_ANGLE_DEGREES`（3600°＝10 圈）直接丢弃**，不结算。
 - 观感：渲染时**整个人 + 板**绕自身左右轴**向后**翻（`EntityTiltMixin` 的 poseStack 旋转，绕**腰部高度** 1.0 格、按 `partialTick` 插值）；落地那一帧状态机已把角度归零，所以插值两端都是 0、不留残余角度。**相机不跟着转**，第一人称不处理。
 
@@ -100,7 +100,7 @@
 | `FLIP_LANDING_TOLERANCE_DEGREES`（单板） | 25 度 | 落地时与直立（0° / 360° / 720°…）的角距在 **±25°** 内算净落，否则摔倒（多圈也只比最近的一圈） |
 | `CRASH_SPEED_MULTIPLIER`（单板） | 0.35 | 摔倒时水平速度保留的比例（掉 65%） |
 | `CRASH_STUN_TICKS`（单板） | 20 tick | 摔倒后失控多久（1 s）：转向 / 压刃 / carve / 追视角跳过、不能再起跳空翻 |
-| `CRASH_DAMAGE_MAX`（单板） | 0.0 | 摔倒扣血上限（0＝关闭；>0 时服务端按「与直立偏差 / 180」比例扣） |
+| `CRASH_DAMAGE_MAX`（单板） | 4.0 | 摔倒扣血上限（**4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心**；0 ＝ 关闭）。服务端按「与直立偏差 / 180 × 它」比例扣，伤害类型是 **`damageSources().generic()`**（不是 `fall()`）：本模组 `SnowLanding` 会取消所有 `IS_FALL` 的伤害，用 `fall` 等于**雪地上摔倒不掉血**；`generic` 不在 `is_fall` tag 里（拦不到）、又在 `bypasses_armor` tag 里（护甲不折这 4 点）—— 所以雪地 / 石头地都生效、扣的就是标称值 |
 
 | 常量（双板 `SkisControl`） | 当前值 | 作用 |
 |---|---|---|
@@ -117,7 +117,7 @@
 | `FLIP_LANDING_TOLERANCE_DEGREES`（双板） | 25 度 | 与单板同值、各一个常量（±25°） |
 | `CRASH_SPEED_MULTIPLIER`（双板） | 0.35 | 与单板同值、各一个常量 |
 | `CRASH_STUN_TICKS`（双板） | 20 tick | 与单板同值、各一个常量 |
-| `CRASH_DAMAGE_MAX`（双板） | 0.0 | 与单板同值、各一个常量（默认关闭） |
+| `CRASH_DAMAGE_MAX`（双板） | 4.0 | 与单板同值、各一个常量（**4.0 ＝ 偏差 180° 扣 2 颗心**）。伤害类型同样是 `damageSources().generic()`：**雪地不会把它吃掉**（`SnowLanding` 只取消 `IS_FALL`），`generic` 又在 `bypasses_armor` 里，护甲不折 |
 
 **两块板的差异就三处**：静止/满速两端的起法力（单板 0.208 → 0.470、双板 0.226 → 0.483，各自一张表）、能否开翻的门槛速度（**0.12 / 0.15**，占各自上限 **22% / 18%**），以及表的起跳点 h₀（0.34 / 0.36）；**两张表现在都按同一个腾空重力 0.072 反解**（`AIR_GRAVITY_MULTIPLIER` 0.9 × 原版 0.08），贴地的 1.3 / 1.5 只在起跳首 tick 参与（那时重力还没切到腾空档）。**按住空格时的转速两板同值：`FLIP_DEGREES_PER_TICK` 16.0°/tick ＝ 22.5 tick 一圈 1.125 s**（各一个常量，改一块不会带走另一块）。**「按住前 4 tick 只数不转」这个前置延迟 `FLIP_HOLD_DELAY_TICKS` 两板同值（4，判据 `>`）**，`COYOTE_TICKS` / `JUMP_BUFFER_TICKS` / `JUMP_COOLDOWN_TICKS` 也同值（6 / 5 / 10），净落容差、惩罚与失控时长两边同值但各自一份常量，改一块不会带走另一块。
 
@@ -242,6 +242,10 @@
 - **落地前 `SNOW_GRACE_TICKS` 60 tick（3 秒）内踩过雪地**：每服务器 tick（`END_SERVER_TICK`）遍历在线玩家，**穿板 + `onGround()` + 脚下是雪/冰** 才把 `level().getGameTime()` 记进 `LAST_SNOW_TICK`（玩家 id → tick）；比对时算 `0 ≤ now - last ≤ 60`。所以「雪坡冲下来、腾空两秒、砸在石头上」免伤，「在石头地上站够 3 秒再摔」照旧掉血。脱板 / 断线 `remove`，超 `MAX_ENTRIES` 整表清空；退出 / 换维度残留的旧记录靠时间戳自然过期，不会错免。
 
 非雪面且 60 tick 内没踩过雪照旧摔伤，别的伤害类型一律放行。命中时顺手 `resetFallDistance()`。
+
+> **摔倒扣血不受这条影响**：`SkiAir.applyLanding` 用的是 `damageSources().generic()`（不在 `IS_FALL` tag 里），
+> 所以空翻落地摔了以后，**雪地也照扣**（`CRASH_DAMAGE_MAX` 4.0，按偏差比例）。这条免伤只挡**坠落高度**造成的摔伤 ——
+> 板当缓冲，从坡上飞出去砸在雪里不掉血；但自己空翻没落正，是要付账的。
 
 | 常量 | 值 | 作用 |
 |---|---|---|
