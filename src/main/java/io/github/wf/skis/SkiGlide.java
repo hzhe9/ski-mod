@@ -59,8 +59,16 @@ public final class SkiGlide {
 	private static final double STEP_BLOCKS = 0.5D;
 	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
 	// 两边完全独立，调一个不会动到另一个。这里只留两板共用的“物理骨架”常量。
-	/** 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。 */
+	/**
+	 * 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。
+	 *
+	 * <p><b>只在连续撞墙 ≥ {@link #MOMENTUM_HIT_TICKS_BEFORE_DECAY} tick 时才生效</b>：坡面上一次
+	 * {@code horizontalCollision} 很常见（贴面滑、蹭台阶边），单 tick 就砍半会让整段弯回不来；
+	 * 真正「顶着墙」才该止损。
+	 */
 	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
+	/** 连续撞墙多少 tick 之后才按 {@link #MOMENTUM_DECAY_ON_HIT} 砍半（3 tick ＝ 0.15 s）。 */
+	private static final int MOMENTUM_HIT_TICKS_BEFORE_DECAY = 3;
 	/** 动量低于这个值就丢掉。 */
 	private static final double MOMENTUM_MIN = 0.02D;
 
@@ -70,6 +78,8 @@ public final class SkiGlide {
 	private static final IdMap<Double> DESCEND_ACCUM = new IdMap<>();
 	/** 玩家实体 id → 当前滑行动量（水平速度）。 */
 	private static final IdMap<Double> MOMENTUM = new IdMap<>();
+	/** 玩家实体 id → <b>连续撞墙的 tick 数</b>（撞一下 +1、不撞清零），见 {@link #MOMENTUM_DECAY_ON_HIT}。 */
+	private static final IdMap<Integer> HIT_TICKS = new IdMap<>();
 
 	private SkiGlide() {
 	}
@@ -289,6 +299,16 @@ public final class SkiGlide {
 		Vec3 motion = player.getDeltaMovement();
 		double speed = motion.horizontalDistance();
 
+		// 撞墙累计（两板共用这条物理骨架）：撞一下 +1、不撞清零。
+		// 单 tick 就砍半会把「坡面上蹭一下」当成撞墙 —— 起弯时速度被清零一半，整段弯再也回不来。
+		// 这里只数不砍，砍不砍看下面连续多少 tick。
+		int hitTicks = player.horizontalCollision ? HIT_TICKS.getOrDefault(id, 0) + 1 : 0;
+		if (hitTicks > 0) {
+			HIT_TICKS.put(id, hitTicks);
+		} else {
+			HIT_TICKS.remove(id);
+		}
+
 		double momentum = MOMENTUM.getOrDefault(id, 0.0D);
 		Input keys = player.getLastClientInput();
 		double decay;
@@ -349,7 +369,9 @@ public final class SkiGlide {
 			decay = SkisControl.momentumDecay();
 			// 没按 S（或已停下 / 在倒滑）时才走常规托底：动量原样托住速度。
 		}
-		momentum *= player.horizontalCollision ? MOMENTUM_DECAY_ON_HIT : decay;
+		// 撞墙减速只在**连续**顶住墙时才生效（≥ MOMENTUM_HIT_TICKS_BEFORE_DECAY tick）：
+		// 坡面上偶尔一次 horizontalCollision 不该被当成撞墙砍半，否则整段弯的速度回不来。
+		momentum *= hitTicks >= MOMENTUM_HIT_TICKS_BEFORE_DECAY ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, SkiControl.maxGlideSpeed(player));   // 速度上限（按板）
 
 		if (momentum < MOMENTUM_MIN) {
@@ -504,5 +526,6 @@ public final class SkiGlide {
 		LAST_Y.remove(id);
 		DESCEND_ACCUM.remove(id);
 		MOMENTUM.remove(id);
+		HIT_TICKS.remove(id);
 	}
 }
