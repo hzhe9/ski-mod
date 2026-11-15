@@ -24,10 +24,12 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>后空翻（按住多久就转多少）</b>：{@code holdTicks} ＝ <b>从按下那一刻起的连续按住 tick 数</b>，
  *       只在<b>松手</b>（{@code holdingJump == false}）那一 tick 归零 —— 落地、起跳成功、失控<b>都不清</b>，
  *       所以「在地面上就按住、起跳后继续按住」是同一段连续计数（一离地就接着转）。
- *       空中<b>每 tick 实时判</b>（不再有「离地第一 tick 拍快照」的一次性阀门）：{@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
- *       且没在失控里、水平速度 ≥ {@code FLIP_MIN_SPEED} ＝ 这一 tick 转 {@code FLIP_DEGREES_PER_TICK}（16°）。
- *       因为用的是 {@code >}，按住的<b>前 4 个 tick 角度恒为 0</b> —— 这就是模型静止段（短按＝纯跳跃，一点都不转）；
- *       <b>松手立刻定格</b>（角度与模型都停在那偏角），但计数归零，再按住要重新数满 4 tick。
+ *       空中<b>每 tick 实时判</b>（不再有「离地第一 tick 拍快照」的一次性阀门）：<b>（{@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
+ *       或本段已开翻 {@code flipStarted}）</b>且没在失控里、水平速度 ≥ {@code FLIP_MIN_SPEED} ＝ 这一 tick 转
+ *       {@code FLIP_DEGREES_PER_TICK}（16°）。因为从地面起跳那一下用的是 {@code >}，按住的<b>前 4 个 tick 角度恒为 0</b>
+ *       —— 这就是模型静止段（短按＝纯跳跃，一点都不转）；<b>松手立刻定格</b>（角度与模型都停在那偏角），
+ *       但<b>空中已经开翻过就不必重数</b>：再按住下一 tick 立刻续上（{@code flipStarted} 一旦置位就保持到落地），
+ *       只有「从地面起跳」那一下要重新数满 4 tick。
  *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
  *   <li><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
  *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
@@ -106,7 +108,10 @@ public final class SkiAir {
 		private final double flipMinSpeed;
 		/** 满足条件时每 tick 转多少度。 */
 		private final double flipDegreesPerTick;
-		/** 比它<b>严格更大</b>的连续按住 tick 数才开始累加角度（＝前这么多个 tick 角度恒 0，静止段）。 */
+		/**
+		 * 比它<b>严格更大</b>的连续按住 tick 数才开始累加角度（＝前这么多个 tick 角度恒 0，静止段）。
+		 * <b>只有从地面起跳那一下</b>受它约束；空中已经开翻后再按住（{@code flipStarted}）立刻续翻、不再等。
+		 */
 		private final int flipHoldDelayTicks;
 		/** 落地时与直立（0°/360°/720°…）的角距在这个范围内就算净落。 */
 		private final double flipLandingToleranceDegrees;
@@ -195,7 +200,10 @@ public final class SkiAir {
 			return flipDegreesPerTick;
 		}
 
-		/** 连续按住 tick 数<b>大于</b>它才转角（前这么多个 tick 角度恒 0）。 */
+		/**
+		 * 连续按住 tick 数<b>大于</b>它才转角（前这么多个 tick 角度恒 0）。
+		 * <b>只对从地面起跳那一下生效</b>；空中已开翻（{@code flipStarted}）之后松手再按立刻续上。
+		 */
 		public int flipHoldDelayTicks() {
 			return flipHoldDelayTicks;
 		}
@@ -234,6 +242,18 @@ public final class SkiAir {
 		 * 所以地面已按住的 tick 会带进空中 —— 按住多久就转多少。大于 {@code FLIP_HOLD_DELAY_TICKS} 才开始转角。
 		 */
 		private int holdTicks;
+		/**
+		 * <b>本段空翻是否已经真的转过角度</b>（= 自上次落地以来 {@code angle} 至少加过一次）。
+		 *
+		 * <p>它的唯一用途是让<b>空中续翻不等静止段</b>：{@code holdTicks} 松手就归零，若只看它，
+		 * 空中松手再按要重新数满 {@code FLIP_HOLD_DELAY_TICKS}；本字段一旦置位就保持到下次落地，
+		 * 于是「已经开翻过＝立刻续上」。
+		 *
+		 * <p><b>不能用「{@code angle != 0}」代替</b>：{@code angle} 是 [0,360) 取模的，
+		 * 刚好翻满一圈的那一 tick 会回到 ≈0 —— 用角度判会在那一 tick 退化回「要等静止段」，
+		 * 表现为转满一圈后按住不放也卡住。
+		 */
+		private boolean flipStarted;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
 		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}。 */
@@ -409,9 +429,10 @@ public final class SkiAir {
 	 * ③ <b>按住计数</b> —— {@code holdingJump} 为真就 {@code holdTicks++}，为假（松手）<b>才归零</b>；
 	 * ④ 贴地：有落地边沿就做判定并回调（{@link LandingListener}），然后直接返回 ——
 	 * <b>这里不清 {@code holdTicks}</b>，所以地面按住的 tick 会带进空中；
-	 * ⑤ 空中：<b>每 tick 实时判</b> {@code holdTicks > flipHoldDelayTicks}（4）＋ 没失控 ＋ 水平速度 ≥ 门槛，
-	 * 满足才加 {@code flipDegreesPerTick}（16°）。前 4 个按住的 tick 角度恒 0 ＝模型静止段；
-	 * 短按＝纯跳跃；松手定格但计数归零，再按住要重新数满 4 tick。
+	 * ⑤ 空中：<b>每 tick 实时判</b> {@code holdTicks > flipHoldDelayTicks}（4）<b>或本段已开翻</b>（{@code flipStarted}）
+	 * ＋ 没失控 ＋ 水平速度 ≥ 门槛，满足才加 {@code flipDegreesPerTick}（16°）并置 {@code flipStarted}。
+	 * <b>只有从地面起跳那一下</b>的前 4 个按住 tick 角度恒 0 ＝模型静止段；短按＝纯跳跃；
+	 * 空中松手定格后<b>再按立刻续上</b>（{@code holdTicks} 已归零，但 {@code flipStarted} 还在）。
 	 *
 	 * @param holdingJump 本 tick 是否按住跳跃键（{@code LocalPlayer#input.keyPresses.jump()}）
 	 * @param listener    落地回调（把最终角度交给服务端）；可为 {@code null}
@@ -441,10 +462,11 @@ public final class SkiAir {
 
 		state.airborne = true;                                      // ⑤ 空中：门槛每 tick 实时判
 		if (holdingJump
-				&& state.holdTicks > tuning.flipHoldDelayTicks()
+				&& (state.flipStarted || state.holdTicks > tuning.flipHoldDelayTicks())
 				&& state.stunTicks <= 0
 				&& player.getDeltaMovement().horizontalDistance() >= tuning.flipMinSpeed()) {
 			state.angle = normalizeAngle(state.angle + tuning.flipDegreesPerTick());
+			state.flipStarted = true;                               // 本段已开翻：之后续翻不再等静止段
 		}
 	}
 
@@ -504,6 +526,9 @@ public final class SkiAir {
 		// 落地那一帧回到 0°（渲染读 0，模型直立；插值区间两头一起归零，不会倒着转回去）
 		state.angle = 0.0D;
 		state.prevAngle = 0.0D;
+		// flipStarted 必须一起清：它表示「本段（这一次腾空）已经开翻过」，
+		// 落地后就是新的一段 —— 下一跳重新按地面规则数满静止段
+		state.flipStarted = false;
 		// holdTicks 不动：它只由松手归零（落地后还按着 ＝ 下一跳一离地就接着转）
 		if (listener != null) {
 			listener.landed(angle, clean);
