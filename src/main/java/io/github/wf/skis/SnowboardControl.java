@@ -22,6 +22,9 @@ import net.minecraft.world.phys.Vec3;
  *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
  *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 沿身体前方补前冲；
  *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反）。</li>
+ *   <li><b>速度方向自动回正</b>：只要还贴着地（离地 1.5 格内），水平速度方向每 tick 朝<b>板轴</b>
+ *       （身体左右轴，也就是单板真正的行进方向）掰 ≤6°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，
+ *       也没有「入弯基准」这种状态。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -33,8 +36,14 @@ public final class SnowboardControl {
 	private static final IdMap<Float> TILT_VALUE = new IdMap<>();
 	/** 实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
 	private static final IdMap<Integer> TILT_TARGET = new IdMap<>();
-	/** 实体 id → 头上一次被判定朝哪一侧（+1 身体右侧 / -1 左侧）；速度和按键都给不出方向时锁存它。 */
-	private static final IdMap<Integer> HEAD_SIDE = new IdMap<>();
+	/**
+	 * 实体 id → <b>上一次判定的行进侧</b>（<b>板轴符号</b>，与 {@link #sideLocked} 的 sign 同一套约定：
+	 * +1 = 身体左轴 / -1 = 右轴）。速度的板轴分量和 A / D 都给不出方向时锁存它。
+	 *
+	 * <p>头朝向（{@link #headSide}）与速度回正（{@link #alignCarveHeading}）共用这一份判定，
+	 * 所以「头往哪边扭」和「速度往哪边掰」永远是同一侧，不会互相矛盾。
+	 */
+	private static final IdMap<Integer> BOARD_SIDE = new IdMap<>();
 	/** 实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
 	private static final IdMap<Float> HEAD_OFFSET = new IdMap<>();
 	/**
@@ -44,18 +53,6 @@ public final class SnowboardControl {
 	private static final IdMap<Double> CARVE_SPEED = new IdMap<>();
 	/** 实体 id → 本次 carve <b>已经持续的 tick 数</b>（入口那一 tick 记 0），配 {@link #CARVE_SPEED} 算速度下限。 */
 	private static final IdMap<Integer> CARVE_TICKS = new IdMap<>();
-	/**
-	 * 实体 id → <b>入弯时的水平速度方向角</b>（弧度，{@code atan2(z, x)} 口径，见 {@link #alignCarveHeading}）。
-	 *
-	 * <p>转向期间速度方向<b>不再靠每 tick 增量维持</b>（那样会被回落加速 / 动量托底一路往回拽，
-	 * 累计滞后），而是每 tick 用它 + 身体累计转角<b>直接算出来</b>。退出 carve 就清掉。
-	 */
-	private static final IdMap<Double> CARVE_HEADING = new IdMap<>();
-	/**
-	 * 实体 id → <b>入弯时的身体朝向</b>（度，{@code BODY_YAW} 的那个 yaw）。
-	 * 期望速度方向 = {@link #CARVE_HEADING} + ({@code BODY_YAW 现在 − 它})，所以「身体转多少、速度就转多少」。
-	 */
-	private static final IdMap<Float> CARVE_YAW0 = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -107,12 +104,23 @@ public final class SnowboardControl {
 	 */
 	private static final double TURN_MAX_DEGREES_PER_TICK = 6.0D;
 	/**
-	 * <b>限幅回正</b>（{@link #alignCarveHeading}）每 tick 最多把速度方向掰回多少度。
+	 * <b>限幅回正</b>（{@link #alignCarveHeading}）每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
 	 *
 	 * <p><b>必须大于每 tick 最大身体转角</b>（满速 {@link #TURN_RADIUS_BLOCKS} 下 3.94°），否则速度方向
 	 * 每 tick 只能追上身体的一部分、残量越累越多，速度方向会永久落在身体后面。
+	 * 6° 也意味着 180° 的偏角最多 30 tick（1.5 s）就完全掰正 —— 观感上是「顺着板的方向自己滑回来了」。
 	 */
 	private static final float ALIGN_MAX_DEGREES_PER_TICK = 6.0F;
+	/** 与板轴的角差小于它就当作已经对上（死区：不写、不发包，防抖也防每 tick 多发一份同步）。 */
+	private static final float ALIGN_DEAD_ZONE_DEGREES = 0.05F;
+	/**
+	 * <b>回正只在近地时生效</b>：{@code onGround()} 为真，<b>或</b>脚底往下这么多格内有碰撞方块。
+	 *
+	 * <p>1.5 格是个「还贴着雪面」的宽容值 —— 滑下坡、掠过起伏时 {@code onGround} 常常一两 tick 是假，
+	 * 但这时速度方向当然还该回正；真腾空（跳跃 / 坠落）就让它保持惯性，别在空中把方向掰弯。
+	 * 探针复用 {@link SkiGlide#groundDistance}（向下 {@code range + 0.1} 格的碰撞射线，两端都能用）。
+	 */
+	private static final double ALIGN_GROUND_RANGE = 1.5D;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
@@ -254,7 +262,7 @@ public final class SnowboardControl {
 	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— <b>1.0 ＝ 转向零损失</b>。
 	 *
 	 * <p>用户口径「转向只改变方向、不影响速度大小」：本模组的转向本来就是<b>纯旋转</b>
-	 * （{@link #alignCarveHeading} 只重写水平速度方向，大小与 y 都不动），所以这一段不该再叠一层摩擦。
+	 * （{@link #alignCarveHeading} 只旋转水平速度方向，大小与 y 都不动），所以这一段不该再叠一层摩擦。
 	 * {@code 1.0} 同时管两处：
 	 * <ul>
 	 *   <li>转向期间的<b>动量托底</b>（{@code SkiGlide} 用本值做动量保留）不再衰减；</li>
@@ -307,12 +315,10 @@ public final class SnowboardControl {
 		BODY_YAW.remove(entityId);
 		TILT_VALUE.remove(entityId);
 		TILT_TARGET.remove(entityId);
-		HEAD_SIDE.remove(entityId);
+		BOARD_SIDE.remove(entityId);
 		HEAD_OFFSET.remove(entityId);
 		CARVE_SPEED.remove(entityId);
 		CARVE_TICKS.remove(entityId);
-		CARVE_HEADING.remove(entityId);
-		CARVE_YAW0.remove(entityId);
 		SkiAir.forget(entityId);   // 空中状态（含失控计时）一起清
 	}
 
@@ -320,12 +326,10 @@ public final class SnowboardControl {
 		BODY_YAW.clear();
 		TILT_VALUE.clear();
 		TILT_TARGET.clear();
-		HEAD_SIDE.clear();
+		BOARD_SIDE.clear();
 		HEAD_OFFSET.clear();
 		CARVE_SPEED.clear();
 		CARVE_TICKS.clear();
-		CARVE_HEADING.clear();
-		CARVE_YAW0.clear();
 	}
 
 	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
@@ -372,13 +376,18 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * 头朝哪一侧：<b>+1 = 朝身体右侧（yaw 增大，与 D 同向）</b>、<b>-1 = 朝左侧（yaw 减小）</b>。
+	 * 这一 tick 沿<b>板轴（身体左右轴）</b>往哪一侧走：<b>+1 = 身体左轴</b>、<b>-1 = 身体右轴</b> ——
+	 * 就是 {@link #sideLocked} 的 {@code sign}，也是单板实际的行进方向（单板横着滑，板轴就是行进方向）。
 	 *
-	 * <p>判定顺序：① <b>实际横移方向</b> —— 水平速度投到身体左轴 {@link #sideLocked} 上，往左滑给 -1；
-	 * ② 侧向分量太小（&lt; {@link #HEAD_SIDE_MIN_SPEED}）时看最近按的 <b>A / D</b>（{@link #sideSign}，
-	 * A = 左 → -1，D = 右 → +1）；③ 两者都拿不到就<b>锁存</b>上一次的判定 —— 一停下滑行头不能自己回正。
+	 * <p><b>只此一处判定</b>：头朝向（{@link #headSide}）与速度回正（{@link #alignCarveHeading}）都走它，
+	 * 所以「头往哪边扭」与「速度往哪边掰」永远是同一侧；另写一套就会互相矛盾（头朝右、速度却朝左拽）。
+	 *
+	 * <p>判定顺序：① <b>实际横移方向</b> —— 水平速度投到身体左轴 {@link #sideLocked} 上，
+	 * 分量 ≥ {@link #HEAD_SIDE_MIN_SPEED} 就用它（往身体左侧滑 → +1）；
+	 * ② 分量太小就看 <b>A / D</b>（{@link #sideSign}，A = 左 → +1）；
+	 * ③ 两者都拿不到就<b>锁存</b>上一次的判定（停下来也不能自己换边）。
 	 */
-	public static int headSide(Entity entity, Input input) {
+	public static int boardSide(Entity entity, Input input) {
 		int entityId = entity.getId();
 		Vec3 motion = entity.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
@@ -387,14 +396,24 @@ public final class SnowboardControl {
 		double press = sideSign(input);
 		int side;
 		if (Math.abs(lateral) >= HEAD_SIDE_MIN_SPEED) {
-			side = lateral > 0.0D ? -1 : 1;   // 往身体左侧滑 → 头朝左
+			side = lateral > 0.0D ? 1 : -1;   // 往身体左侧滑 → +1（左轴）
 		} else if (press != 0.0D) {
-			side = press > 0.0D ? -1 : 1;
+			side = press > 0.0D ? 1 : -1;
 		} else {
-			return HEAD_SIDE.getOrDefault(entityId, 1);   // 锁存（默认朝右，与旧的固定 +80 同侧）
+			return BOARD_SIDE.getOrDefault(entityId, -1);   // 锁存（默认身体右轴，与旧的「头默认朝右」同侧）
 		}
-		HEAD_SIDE.put(entityId, side);
+		BOARD_SIDE.put(entityId, side);
 		return side;
+	}
+
+	/**
+	 * 头朝哪一侧：<b>+1 = 朝身体右侧（yaw 增大，与 D 同向）</b>、<b>-1 = 朝左侧（yaw 减小）</b>。
+	 *
+	 * <p>就是 {@link #boardSide} 反过来（板轴在身体左侧 → 头朝左看）—— 判定不在这里另写一份，
+	 * 否则头朝向与速度回正的方向会各说各话。
+	 */
+	public static int headSide(Entity entity, Input input) {
+		return -boardSide(entity, input);
 	}
 
 	/**
@@ -560,59 +579,57 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>速度方向向身体朝向限幅回正</b>：转向期间每 tick 算出「期望方向角 = 入弯方向角 + 身体累计转角」，
-	 * 再按<b>每 tick 最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 6°</b> 把当前速度方向<b>旋转</b>过去
-	 * （大小与 y 都不动）。
+	 * <b>速度方向自动回正到板轴</b>（整 tick 最后一个写速度的点）：每 tick 把水平速度方向朝
+	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，每步最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 6°。
 	 *
-	 * <p>为什么不是「直接写成目标角」：一步到位等于把速度方向钉在身体上，任何同 tick 内别的写者
-	 * （回落加速、动量托底、碰撞裁剪）造成的偏差都被瞬间抹平 —— 「被墙裁歪的方向」永远得不到修正的机会。
-	 * 改成限幅旋转之后，偏差是可见、可追的：每 tick 追 6°，最大身体转角 3.94°/tick，追得上但不会瞬移。
+	 * <p><b>目标量就是板轴</b>（与身体左右轴平行的那个单位向量，哪一侧由 {@link #boardSide} 定 ——
+	 * 与头朝向同一个判定）：单板是横着滑的，板轴就是实际行进方向，所以「速度方向回到板轴」＝
+	 * 「顺着板的方向滑」。这里<b>没有任何入弯基准</b>（旧版那两张入弯方向角 / 入弯朝向的表已删）：
+	 * 不做状态机，也不要求正在 carve —— 只要还贴着地，每一 tick 都在往回拉，偏多少收多少。
 	 *
-	 * <p>为什么不用「每 tick 转 delta」：同一个 tick 里还有别的写者会把速度方向拽回去 ——
-	 * 回落加速沿<b>当前水平速度方向</b>加一份（{@code SkiGlide.descentDirection}，单板不再投影到体轴）、
-	 * 动量托底又按当前方向重写一遍。速度方向每 tick 只跟着转一部分，累计下来永远落在身体朝向后面。
-	 * 所以基准仍是入弯时记下的方向角，只是<b>逼近方式</b>从「一步覆盖」换成「限幅旋转」。
+	 * <p><b>生效条件</b>（全部成立才掰，否则原样返回）：
+	 * <ul>
+	 *   <li>穿着单板（调用点只在单板分支，另用 {@link #isSnowboard} 兜一层）；</li>
+	 *   <li>不在失控里（{@link SkiAir#isStunned}）—— 摔了就不掰，让惯性自己滑停；</li>
+	 *   <li>水平速度 &gt; 1e-4（没有方向可掰）；</li>
+	 *   <li><b>近地</b>：{@code onGround()} <b>或</b>脚底往下 {@link #ALIGN_GROUND_RANGE} 1.5 格内有碰撞方块
+	 *       —— 滑下坡 / 掠过起伏时 {@code onGround} 会抖，1.5 格内一律照拉；真腾空就保持惯性。</li>
+	 * </ul>
 	 *
-	 * <p><b>撞墙那一 tick 一点方向都不修</b>（{@code horizontalCollision} 为真就直接返回）：这一 tick 的
-	 * 速度是被碰撞<b>逐轴裁过</b>的（进墙分量被削掉），方向已经不是滑行方向。若这一 tick 还按目标角旋转，
-	 * 等于就地把被裁歪的方向「洗白」成滑行方向，回正就永远不会发生 —— 玩家顶着墙滑时方向会一直歪着，
-	 * 墙实际上把路线改了。跳过之后：墙只削<b>速度大小</b>，方向留到下一个自由 tick 再按 6°/tick 掰回去。
-	 * 同时 {@link #applyCarve} 在撞墙 tick 也不登记入弯基准（{@code CARVE_HEADING == null && !horizontalCollision}）。
+	 * <p><b>怎么掰</b>：用 {@link Mth#wrapDegrees} 取「板轴方向角 − 当前速度方向角」的最短角差
+	 * （两边都按 {@code atan2(z, x)} 口径），差 ≤ {@link #ALIGN_DEAD_ZONE_DEGREES} 0.05° 就当作对上、
+	 * 不写也不发包；否则把角差夹到 ±6° 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
+	 * （大小与 y 都不动、{@code hurtMarked = true}）—— 不是一步写成目标角，所以偏差可见、可追、不瞬移。
 	 *
-	 * <p>调用点是整 tick 里<b>最后一个</b>写速度的地方（{@code SkiGlide.register} 里 {@link #guardCarveSpeed}
-	 * 之后），所以同 tick 内别的写者造成的偏角每一 tick 都会被收窄 6°，不会累下去。
+	 * <p><b>撞墙 tick 也照拉</b>（不再因 {@code horizontalCollision} 提前返回）：限幅 6°/tick 本身够温和，
+	 * 撞墙那一 tick 顶多把被碰撞逐轴裁过的方向往板轴掰 6°，方向不会没完没了地歪着。
+	 *
+	 * <p>为什么每 tick 都要这一道：同一 tick 里还有别的写者（回落加速沿当前方向加长、动量托底、
+	 * 碰撞裁剪）会把方向拽偏，这一道是最后一个写速度的地方，收的就是这些残留。
+	 *
+	 * <p>步长 <b>必须大于每 tick 最大身体转角</b>（满速 3.94°/tick）：身体转得比速度掰得快时，
+	 * 速度方向会永久落在身体后面追不上。
 	 */
 	public static void alignCarveHeading(ServerPlayer player) {
 		int entityId = player.getId();
-		Input keys = player.getLastClientInput();
+		if (!isSnowboard(player) || SkiAir.isStunned(entityId)) {
+			return;
+		}
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
-		double speed = horizontal.length();
-
-		if (!isCarving(entityId, keys, speed)) {
-			// 已经不在 carve：两份状态一起清掉，下一段弯重新记
-			CARVE_HEADING.remove(entityId);
-			CARVE_YAW0.remove(entityId);
-			return;
+		if (horizontal.length() <= 1.0E-4D) {
+			return;   // 没速度可掰
 		}
-		Double heading = CARVE_HEADING.get(entityId);
-		Float yaw0 = CARVE_YAW0.get(entityId);
-		if (heading == null || yaw0 == null || speed < 1.0E-6D) {
-			return;   // 没有入弯记录 / 没有方向可对齐
-		}
-		if (player.horizontalCollision) {
-			// 撞墙这一 tick 速度是被碰撞**逐轴裁过**的（进墙分量被削掉），方向已经不是滑行方向了。
-			// 这一 tick 一点方向都不修：既不算回正量、也不登记 —— 让墙裁歪的方向留到下一个自由 tick
-			// 再由回正逻辑掰回去。若这一 tick 还转，等于把被裁歪的方向就地「洗白」成基准，回正就永远不发生。
-			return;
+		if (!player.onGround() && SkiGlide.groundDistance(player, ALIGN_GROUND_RANGE) > ALIGN_GROUND_RANGE) {
+			return;   // 真腾空了：速度方向由惯性保持，不在空中把路线掰弯
 		}
 
-		float yawNow = bodyYaw(entityId, player.getYRot());
-		double turned = Mth.wrapDegrees(yawNow - yaw0);      // 身体从入弯到现在累计转了多少度
-		double wantRad = heading + Math.toRadians(turned);    // 期望方向角（弧度，atan2(z, x) 口径）
+		Input keys = player.getLastClientInput();
+		Vec3 axis = sideLocked(entityId, player.getYRot(), boardSide(player, keys));
 		double curRad = Math.atan2(horizontal.z, horizontal.x);
+		double wantRad = Math.atan2(axis.z, axis.x);   // 板轴方向角（同一套 atan2(z, x) 口径）
 		float errDeg = Mth.wrapDegrees((float) (Math.toDegrees(wantRad) - Math.toDegrees(curRad)));
-		if (Math.abs(errDeg) <= 0.05F) {
+		if (Math.abs(errDeg) <= ALIGN_DEAD_ZONE_DEGREES) {
 			return;   // 死区：差不到 0.05° 就别写、别发包（既防抖，也防每 tick 多发一份同步）
 		}
 		float stepDeg = Mth.clamp(errDeg, -ALIGN_MAX_DEGREES_PER_TICK, ALIGN_MAX_DEGREES_PER_TICK);
@@ -629,15 +646,12 @@ public final class SnowboardControl {
 	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 8 格给定
 	 * （{@link #turnDegreesPerTick}，满速 3.94°/tick、下限 1.0、上限 6.0）。
 	 *
-	 * <p>另外，本方法兼作<b>入弯登记</b>：进入 carve 那一 tick 记下速度方向角与 bodyYaw
-	 * （{@link #CARVE_HEADING} / {@link #CARVE_YAW0}），退出 carve 清掉；每 tick 的方向最终由
-	 * {@link #alignCarveHeading} 在 tick 末尾按「入弯方向角 + 身体累计转角」限幅回正 —— 这里的
-	 * {@link #rotateVelocity} 只是让同 tick 内的后续计算（客户端尤其）方向先对上。
+	 * <p>这里<b>不登记任何「入弯基准」</b>（旧版那两张入弯方向角 / 入弯朝向的表已删）：
+	 * 速度方向最终对不对，由 {@link #alignCarveHeading} 在 tick 末尾每 tick 朝<b>板轴</b>限幅拉回来，
+	 * 与「从哪个方向进的弯」无关 —— 所以撞墙、蹭墙、从任意角度起弯都不用特殊处理。
 	 *
-	 * <p><b>撞墙那一 tick 不转速度、也不登记入弯基准</b>（{@code horizontalCollision} 为真）：这一 tick
-	 * 的速度是被碰撞「剃过刀」的（进墙分量被削掉），既不能拿它定义基准（基准一开始就是歪的，之后
-	 * {@link #alignCarveHeading} 每 tick 都会朝那个歪方向回正），也不能顺着它再转（等于把歪方向当成
-	 * 滑行方向洗白）。身体照旧转，速度留给下一个自由 tick 回正 —— 那时速度是真实的滑行方向。
+	 * <p><b>撞墙那一 tick 也照转速度</b>（不再判 {@code horizontalCollision}）：身体转多少速度就转多少，
+	 * 这一 tick 顶多多歪一点，下一个 tick 由 {@link #alignCarveHeading} 按 6°/tick 收回去。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
@@ -645,26 +659,7 @@ public final class SnowboardControl {
 		int entityId = entity.getId();
 		if (!isCarving(entityId, input, speed)) {
 			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向。
-			// 退出 carve 就把入弯记录清掉 —— 下一段弯重新记一次速度方向角与 bodyYaw。
-			CARVE_HEADING.remove(entityId);
-			CARVE_YAW0.remove(entityId);
 			return 0.0F;
-		}
-		Vec3 entry = entity.getDeltaMovement();
-		Vec3 entryHorizontal = new Vec3(entry.x, 0.0D, entry.z);
-		if (entryHorizontal.lengthSqr() < 1.0E-6D) {
-			// 速度几乎为 0：没有方向可记（下面照旧转身体，原地压刃也照样摆姿态）
-			CARVE_HEADING.remove(entityId);
-			CARVE_YAW0.remove(entityId);
-		} else if (CARVE_HEADING.get(entityId) == null && !entity.horizontalCollision) {
-			// 本 tick 开始 carve：记下入弯时的速度方向角（atan2(z, x)，弧度）与当时的 bodyYaw。
-			// 撞墙这一 tick 不登记（horizontalCollision 为真就留着 null，下一 tick 再试）：
-			// 这一 tick 的速度是「被碰撞剃过刀」的，用它定义基准，基准一开始就是歪的，
-			// 之后 alignCarveHeading 每 tick 重写方向都会朝那个歪方向按 —— 墙就把方向改了。
-			// 之后每 tick 由 alignCarveHeading 用「它 + 身体累计转角」直接算出期望方向 ——
-			// 不再靠每 tick 的增量，增量会被回落加速 / 动量托底一路拽回去，越滑越落后。
-			CARVE_HEADING.put(entityId, Math.atan2(entryHorizontal.z, entryHorizontal.x));
-			CARVE_YAW0.put(entityId, bodyYaw(entityId, entity.getYRot()));
 		}
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
 		double turn;
@@ -697,11 +692,7 @@ public final class SnowboardControl {
 		}
 		float delta = (float) turn;
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
-		if (!entity.horizontalCollision) {
-			// 撞墙这一 tick 速度已被碰撞逐轴裁过，方向不是滑行方向 —— 不转它，
-			// 留给 {@link #alignCarveHeading} 在下一个自由 tick 掰回去。
-			rotateVelocity(entity, delta);
-		}
+		rotateVelocity(entity, delta);   // 撞墙这一 tick 也照转：偏角由 alignCarveHeading 每 tick 收回
 		return delta;
 	}
 

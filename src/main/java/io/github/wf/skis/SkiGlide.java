@@ -144,8 +144,8 @@ public final class SkiGlide {
 				applyMomentum(player);
 				if (SnowboardControl.isSnowboard(player)) {
 					SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
-					// 单板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」直接推导，
-					// 不再靠每 tick 增量（增量会被上面的回落加速 / 动量托底拽回去，累计滞后且 W / S 不一致）。
+					// 单板：整 tick 最后一个写速度的点 —— 速度方向每 tick 朝**板轴**限幅回正
+					// （近地 1.5 格内就生效，不需要在 carve 里，也没有入弯基准这种状态）。
 					SnowboardControl.alignCarveHeading(player);
 				} else {
 					// 双板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」推导，
@@ -512,6 +512,7 @@ public final class SkiGlide {
 	 * 脚底到下方地面的距离（格）；往下 {@code range + 0.1} 格内探不到东西就返回一个很大的值。
 	 *
 	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它，
+	 * 单板的速度回正（{@code SnowboardControl#alignCarveHeading} 的 1.5 格近地判定）也用它。
 	 * 判定一律是「离地 ≤ range」而不是 {@code onGround}（滑下坡时人常常一两 tick 没踩着地）。
 	 */
 	public static double groundDistance(Entity entity, double range) {
