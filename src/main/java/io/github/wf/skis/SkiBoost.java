@@ -56,6 +56,12 @@ public final class SkiBoost {
 				return;
 			}
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				if (player.getAbilities().flying) {
+					// 创造飞行：已有冲刺 / 待出力一律清掉，也不发力 —— 飞行完全按原版走。
+					PENDING.remove(player.getId());
+					ACTIVE.remove(player.getId());
+					continue;
+				}
 				// 先处理“举手 → 点下去”的延迟：时间到才真正发力
 				Integer pending = PENDING.get(player.getId());
 				if (pending != null) {
@@ -101,6 +107,9 @@ public final class SkiBoost {
 	 * 右键一次：<b>先举手</b>，{@link #DELAY_TICKS} tick 之后（动画里杖点下去那一刻）才真正发力。
 	 */
 	public static void burst(Player player) {
+		if (player.getAbilities().flying) {
+			return;   // 创造飞行：不进 pending，也不给任何冲量（手感完全按原版飞行）
+		}
 		if (SnowboardControl.isSnowboard(player)) {
 			return;   // 单板站定：撑杖也不给冲刺
 		}

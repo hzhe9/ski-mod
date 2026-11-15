@@ -5,7 +5,6 @@ import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SnowboardControl;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.EquipmentSlot;
 
 /**
  * <b>视角限位的唯一权威（单板 + 双板同一套）</b>：头相对锁定的身体朝向最多左右各
@@ -73,7 +72,8 @@ public final class SkiViewSmoothing {
 	 */
 	public static void frame(LocalPlayer player, float partialTick) {
 		if (player == null || player.isPassenger()
-				|| !SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+				|| !SkisMod.isSkiMotionActive(player)) {
+			// 没穿板 / 骑乘 / 创造飞行：不插值、不限位、也不写视角 —— 飞行时视角完全归原版
 			reset();
 			return;
 		}

@@ -47,8 +47,8 @@ public final class GlideAudioGate {
 	 * 与雪粒子的 {@code AIR_RANGE} 1.5 格**不联动**（各一个常量，见 {@code docs/tuning.md}）。
 	 */
 	public static boolean isGliding(Player player, double minSpeed, double groundRange) {
-		if (!isBoarded(player)) {
-			return false;
+		if (!SkisMod.isSkiMotionActive(player)) {
+			return false;   // 没穿板 / 创造飞行：不滑行，也就没有切雪声
 		}
 		if (player.getDeltaMovement().horizontalDistance() < minSpeed) {
 			return false;

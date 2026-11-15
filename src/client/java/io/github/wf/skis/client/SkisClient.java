@@ -43,8 +43,7 @@ public class SkisClient implements ClientModInitializer {
 			// 视角限位（单板 / 双板同一套）的客户端状态：脱板 / 退出世界 / 换人时清掉，
 			// 重新穿板时按当时的视角重新起算（SkiViewSmoothing 内部还会按板块种类再判一次）。
 			LocalPlayer self = client.player;
-			if (client.level == null || self == null
-					|| !SkisMod.isSkiFeet(self.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
+			if (client.level == null || self == null || !SkisMod.isSkiMotionActive(self)) {
 				SkiViewSmoothing.reset();
 			}
 			if (client.level == null) {
@@ -56,7 +55,10 @@ public class SkisClient implements ClientModInitializer {
 			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），W 时身体再朝视角追 2.4°/tick；视角由鼠标转、并被限在身体 ±90°
 			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
-				if (!SkisMod.isSkiFeet(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET))) {
+				if (!SkisMod.isSkiMotionActive(player)) {
+					// 没穿板 / 创造飞行：这一 tick 一条运动逻辑都不跑（速度方向、身体朝向、空翻 / 落地状态机），
+					// 本 tick 的残留状态整份清掉 —— 飞行期间不写速度、也不留半个状态机；
+					// 落地 / 退出飞行后下一 tick 判据自然为真，各表从零重新起算。
 					SnowboardControl.forget(player.getId());
 					SkisControl.forgetBody(player.getId());
 					SkiAir.forget(player.getId());
@@ -128,7 +130,8 @@ public class SkisClient implements ClientModInitializer {
 			}
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			if (self != null) {
-				if (!SnowboardControl.isSnowboard(self)) {
+				if (!SkisMod.isSkiMotionActive(self) || !SnowboardControl.isSnowboard(self)) {
+					// 没穿板 / 创造飞行：姿态回中立（飞行时按 W 不该让模型前倾）
 					SnowboardControl.setTiltTarget(self.getId(), 0);
 					SnowboardControl.tickTilt(self.getId());
 				} else {

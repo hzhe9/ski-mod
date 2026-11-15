@@ -14,7 +14,6 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
@@ -444,8 +443,8 @@ public final class SnowSpray {
 		}
 		for (Player player : level.players()) {
 			int id = player.getId();
-			if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-				forget(id);
+			if (!SkisMod.isSkiMotionActive(player)) {
+				forget(id);   // 没穿板 / 创造飞行：不扬雪，状态也别留着串下一段
 				continue;
 			}
 			double speed = player.getDeltaMovement().horizontalDistance();

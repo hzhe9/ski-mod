@@ -167,12 +167,15 @@ public final class SkiGlide {
 		});
 	}
 
-	/** 穿着滑雪板（双板 / 单板）、且不是在创造飞行 / 骑乘等状态下才算滑行。 */
+	/**
+	 * 穿着滑雪板（双板 / 单板）、且不在创造飞行 / 骑乘等状态下才算滑行。
+	 *
+	 * <p>「穿板 + 不在创造飞行」这一条是共有判据 {@link SkisMod#isSkiMotionActive}（客户端也读它，
+	 * 见 {@code ClientInputMixin} / {@code SkisClient}）—— 免得同一个条件两端各写一份之后走偏。
+	 * 这里只多一条服务端特有的「骑乘时不算」（骑乘由下面的兜底请下车）。
+	 */
 	private static boolean isSkiing(ServerPlayer player) {
-		if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-			return false;
-		}
-		return !player.getAbilities().flying && !player.isPassenger();
+		return SkisMod.isSkiMotionActive(player) && !player.isPassenger();
 	}
 
 	/** 下落加速：比较每 tick 的 Y 变化，累计下降高度；每满 STEP_BLOCKS 格就沿当前方向加一点速度。 */

@@ -4,6 +4,8 @@ import io.github.wf.skis.registry.ModCreativeTabs;
 import io.github.wf.skis.registry.ModItems;
 
 import net.fabricmc.api.ModInitializer;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
@@ -53,5 +55,25 @@ public class SkisMod implements ModInitializer {
 	/** 脚上的滑雪装备：双板或单板——滑行物理、摆姿都按这个判定（转发到 {@link ModItems#isSkiFeet}）。 */
 	public static boolean isSkiFeet(ItemStack stack) {
 		return ModItems.isSkiFeet(stack);
+	}
+
+	/**
+	 * <b>滑雪运动逻辑这一刻是否生效</b>：穿着我们的板，且<b>不在创造飞行里</b>。
+	 *
+	 * <p>这是<b>唯一</b>一条「运动逻辑该不该跑」的判据，客户端与服务端共用（服务端滑行
+	 * {@link SkiGlide}、客户端输入改写 {@code ClientInputMixin}、客户端每个 tick 的运动写入
+	 * {@code SkisClient}、视角限位 {@code SkiHeadLimitMixin} / {@code SkiViewSmoothing}）——
+	 * 同一个条件写四遍迟早走偏，所以只留这一处。
+	 *
+	 * <p>创造飞行（{@code Abilities#flying}）时返回 {@code false}：速度、身体朝向、空翻状态机、
+	 * 撑杖冲刺一律不写，飞行完全按原版走。判据是<b>每 tick 现读</b>的，所以落地 / 退出飞行后
+	 * 下一 tick 自然恢复 —— 调用方不需要额外记状态（残留的表由各自的 {@code forget} 清）。
+	 *
+	 * <p>骑乘<b>不</b>在这里判：那是 {@link SkiGlide} 自己的一条附加条件（它会把人请下车）。
+	 */
+	public static boolean isSkiMotionActive(Player player) {
+		return player != null
+				&& isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))
+				&& !player.getAbilities().flying;
 	}
 }

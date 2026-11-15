@@ -7,7 +7,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -42,10 +41,12 @@ public abstract class ClientInputMixin {
 		if (player == null || move == null) {
 			return;
 		}
+		// 没穿板 / 创造飞行：滑板不改输入，原版 move vector 原样交回。
+		// 创造飞行必须走这一条 —— 单板会把 W / S 清零、双板会把 A / D 清零，飞行时那就是「WASD 全废」。
+		if (!SkisMod.isSkiMotionActive(player)) {
+			return;
+		}
 		if (!SnowboardControl.isSnowboard(player)) {
-			if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-				return;   // 没穿板：原版移动原样交回
-			}
 			// ——— 双板 ———
 			// A / D 只转身体（SkisControl.turnBody），横向分量在这里清掉；前后分量按 δ = 身体朝向 − 视角
 			// 旋到视角坐标系 —— 原版是按视角解释输入的，转完之后 W / S 就是沿身体前后走

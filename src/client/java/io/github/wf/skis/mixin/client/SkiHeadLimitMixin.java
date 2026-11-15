@@ -5,7 +5,6 @@ import io.github.wf.skis.client.ShoulderSurfingCompat;
 import io.github.wf.skis.client.SkiViewSmoothing;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -36,7 +35,7 @@ public abstract class SkiHeadLimitMixin {
 		if (!((Object) this instanceof LocalPlayer player)) {
 			return;
 		}
-		if (player.isPassenger() || !SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+		if (player.isPassenger() || !SkisMod.isSkiMotionActive(player)) {
 			return;
 		}
 		if (ShoulderSurfingCompat.isActive()) {
@@ -50,8 +49,8 @@ public abstract class SkiHeadLimitMixin {
 		if (!((Object) this instanceof LocalPlayer player)) {
 			return;
 		}
-		if (!SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-			return;
+		if (!SkisMod.isSkiMotionActive(player)) {
+			return;   // 没穿板 / 创造飞行：不限位（飞行时视角完全归原版）
 		}
 		if (ShoulderSurfingCompat.isActive()) {
 			return;   // 越肩视角：不限位 —— 一个字节都不写回 yRot

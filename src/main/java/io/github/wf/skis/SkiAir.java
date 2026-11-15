@@ -459,6 +459,11 @@ public final class SkiAir {
 		if (player == null || tuning == null) {
 			return false;
 		}
+		if (player.getAbilities().flying) {
+			// 创造飞行：不起跳（含计时也不推进）—— 飞行完全按原版走。客户端 LocalPlayerJumpMixin
+			// 每 tick 无条件调这里，所以这道闸门必须在本方法里，不能只靠调用方的穿板判据。
+			return false;
+		}
 		AirState state = state(player);
 		// 计时先走：冷却 / 缓冲 / 逗留窗都是「每 tick 掉一格」的计数
 		if (state.jumpCooldownTicks > 0) {
@@ -738,6 +743,9 @@ public final class SkiAir {
 	public static boolean applyLanding(ServerPlayer player, double angleDegrees, Tuning tuning) {
 		if (player == null || tuning == null) {
 			return true;
+		}
+		if (player.getAbilities().flying) {
+			return true;   // 创造飞行：不结算落地（不降速、不扣血）—— 飞行时没有「落地」这回事
 		}
 		boolean clean = isCleanLanding(angleDegrees, tuning);
 		if (clean) {
