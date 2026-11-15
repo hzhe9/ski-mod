@@ -76,9 +76,10 @@ python -m venv .venv
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
 | `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
 | `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 扬起雪屑（都随速度变多，后者随速度抛得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团雪屑**（急刹/撞墙/压刃刹车）；只用 `ITEM_SNOWBALL` 一种粒子（不用雾/烟类），纯客户端观感 |
-| `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势 |
+| `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势。**腿分两段**（`PlayerModelThighMixin` 加的大腿子部件挂在 `leg` 下、`leg.skipDraw = true` 藏原版整条 12 单位的腿，只画 6 单位的大腿），**枢轴在靴口（模型 y=18）**：大腿绕靴口翻 `SQUAT_LEG_TILT`，雪鞋（y=18…24）就是竖直的下半段，脚底 / 板面 / 鞋不动；外层 `leftPants` / `rightPants` 同样只置 `skipDraw`（它们本来就跟着腿的位姿走）；护甲模型（没有大腿子部件）站姿生效时整条腿 `visible = false`、用一个实例字段记住「是我们藏的」才恢复 |
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
+| `mixin/client/PlayerModelThighMixin.java` | **腿的两段化（建模阶段）**：`PlayerModel#createMesh`（static，PLAYER 与 PLAYER_SLIM 都走它）的 **RETURN** 处给 `left_leg` / `right_leg` 各挂一个子部件 `skis_thigh`（`PartPose.offset(0, 6, 0)` ＝ 靴口，往下 6 单位补回髋到靴口那一段）。UV 取原版腿 / 裤腿的同一 `texOffs`：4×6×4 的侧面正好是 4×12 原腿侧面图的上 6 行，朝靴口那端面读到的鞋底像素埋在雪鞋里看不见 —— 所以**就是原版皮肤的上半段**，不是另画的贴图。`HumanoidModelMixin` 靠 `skipDraw` 藏原版整条腿、只画它 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟）；后空翻也在这里绕「脚底往上 `SkiAir.FLIP_PIVOT_HEIGHT`（1.0 格）」转，**该常量已从本 mixin 挪到 `SkiAir`**，第一人称相机（`CameraFlipMixin`）引用同一个值 |
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
 | `mixin/client/CameraFlipMixin.java` | **第一人称相机随空翻翻滚（位置也跟）**：`Camera#alignWithEntity(F)V` 的 **TAIL** 再 `setRotation(yRot, xRot − flip)`，**并把位置绕 `SkiAir.FLIP_PIVOT_HEIGHT`（1.0 格，脚底往上）转过去（跟模型同一条圆弧）** —— 模型绕腰翻时头画在半径 `1.62 − 1.0 = 0.62` 的圆上，相机留在竖直眼高那点原地转、翻到 180° 就会看见自己后背。`flip = SkiAir.angleDegrees(id, partialTick)`（与第三人称 `EntityTiltMixin` 同一套符号：`Axis.XP.rotationDegrees(flip)` 正角＝向后翻，相机 `xRot` 正＝俯视，所以减）；刚体旋转的局部轴用**身体朝向** `Mth.rotLerp(pt, yBodyRotO, yBodyRot)`（模型的翻转发生在 `180 − bodyRot` 之后的局部系，局部 +z＝背后；用视角偏航会在歪头时把圆弧转错平面），枢轴取插值后的脚底点 + `FLIP_PIVOT_HEIGHT`。只在第一人称 + 穿本模组的板 + 角度非 0 时动手，读的是 `CameraTiltMixin` 已经写好的 `position()`，所以是「先倾斜修正、再把整份偏移一起旋过去」；第三人称那条链一点不动 |

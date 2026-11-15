@@ -5,6 +5,7 @@ import io.github.wf.skis.client.SkiStance;
 import io.github.wf.skis.client.SkiState;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.HumanoidRenderState;
 import net.minecraft.util.Mth;
@@ -18,19 +19,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <ul>
  *   <li>双腿：取消走路摆腿、不做外撇，只把左右腿各向外平移 {@link SkiStance#LEG_SPREAD}
- *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>角度微蹲</b> ——
- *       腿往后斜 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
- *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>不缩腿、不挪 y</b>（腿长与枢轴都是原版的）。</li>
+ *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>屈膝微蹲</b> ——
+ *       <b>大腿</b>绕靴口翻 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
+ *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。</li>
  *   <li>双臂：<b>静止</b>固定在划动的中间位置，不随移动摆动；</li>
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
  * </ul>
  *
- * <p><b>为什么用角度而不是缩腿</b>：原版 biped 的腿是单节 box（枢轴往下 12 单位），没有膝关节，
- * 缩腿也弯不出膝、反而让脚离开板面；而腿后倾 + 上身前压 + 头低 三个角度就足够读成「微蹲」，
- * 且脚底位置与不穿板时完全一致（{@code yScale} 恒 1.0、{@code leg.y} 恒 12，一律不写）。
+ * <p><b>腿为什么是「两段」</b>：原版腿只有一根 12 单位的单节 box（髋 y=12 → 脚底 y=24），没有膝关节，
+ * 绕髋倾就会把脚底甩出去、和雪鞋穿模。所以 {@code PlayerModelThighMixin} 给每条腿加了一个
+ * <b>大腿子部件</b>（枢轴在靴口，模型 y=18，往下 6 单位补回髋到靴口那一段），这里把原版整条腿
+ * {@code skipDraw = true} 藏掉、只让那个大腿子部件绕靴口翻（{@code xRot = SQUAT_LEG_TILT}，
+ * 负角＝膝往前顶）。雪鞋（{@code SkiBoardModel} / {@code SnowboardModel} 的 boot，模型 y=18…24，
+ * 与腿下半段同形同位）由此成为<b>竖直的下半段</b>：脚底、板面、鞋都不动，只有膝盖被顶出去。
+ * 腿本身仍是原版的位置（{@code y} 恒 12、{@code yScale} 恒 1.0，一律不写），所以脚底与板面始终对齐。
  *
- * 游泳 / 鞘翅 / 骑乘时保持原版姿势。
+ * <p>游泳 / 鞘翅 / 骑乘时保持原版姿势。
  */
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
@@ -67,27 +72,38 @@ public abstract class HumanoidModelMixin {
 	/** 双板空手时两臂**向两侧微微抬起**的角度（弧度，右臂 + / 左臂 -）。 */
 	private static final float SKI_FREE_ARM_ROLL = 0.28F;
 
+	/**
+	 * 上一帧是不是<b>我们自己</b>把这条腿（护甲模型那种没有大腿子部件的）藏起来的。
+	 *
+	 * <p>用一个实例字段记住，是为了不覆盖原版自己的可见性逻辑：只有「我们藏过」时才由我们恢复；
+	 * 原版本就把腿藏起来时（某些模型本来不画腿）我们不去动它。
+	 */
+	private boolean skis$armorLegsHidden;
+
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
-		if (!SkisMod.isSkiFeet(state.feetEquipment)) {
-			return;
-		}
-		if (state.isVisuallySwimming || state.isFallFlying || state.isPassenger) {
-			return;
-		}
-
 		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
+
+		boolean stance = SkisMod.isSkiFeet(state.feetEquipment)
+				&& !state.isVisuallySwimming && !state.isFallFlying && !state.isPassenger;
+		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
+		// 同一个模型实例被所有渲染对象共用（玩家、不穿板的人），漏写一条分支就会把上一个
+		// 渲染对象留下的状态带给下一个 —— 那正是「不穿板的人腿少了一截」的来源。
+		skis$poseLegSplit(self, stance);
+		if (!stance) {
+			return;
+		}
 
 		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
 		if (board) {
-			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开、下半身往后倾（SQUAT_LEG_TILT）
-			// （横向偏移与 SnowboardModel 的鞋位同值，否则脚会与鞋错开）
-			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, SkiStance.SQUAT_LEG_TILT);
-			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, SkiStance.SQUAT_LEG_TILT);
+			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开（横向偏移与 SnowboardModel 的鞋位同值，
+			// 否则脚会与鞋错开）；屈膝在上面的 skis$poseLegSplit 里绕靴口做。
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD);
 		} else {
-			// 双板：两腿只横向拉开、保持平行；下半身往后倾出去一点（同一个 SQUAT_LEG_TILT）
-			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), SkiStance.SQUAT_LEG_TILT);
-			placeLeg(self.leftLeg, SkiStance.legOffsetX(), SkiStance.SQUAT_LEG_TILT);
+			// 双板：两腿只横向拉开、保持平行
+			placeLeg(self.rightLeg, -SkiStance.legOffsetX());
+			placeLeg(self.leftLeg, SkiStance.legOffsetX());
 		}
 
 		// 手臂：只有拿着滑雪杖的那只手才抬起来摆（左手持杖抬左手、右手持杖抬右手；只穿板不抬）
@@ -134,6 +150,56 @@ public abstract class HumanoidModelMixin {
 		}
 	}
 
+	/**
+	 * 腿的「分两段」开关：站姿生效时只画大腿子部件、不画原版整条腿；不生效时全部交回原版。
+	 *
+	 * <p><b>为什么用 {@code skipDraw} 而不是 {@code visible}</b>：{@code visible = false} 会连 children
+	 * 一起不画（{@code ModelPart#render} 一进门就 return），而大腿恰恰挂在原版腿上当孩子；
+	 * {@code skipDraw} 只跳过<b>本部件自己的 cube</b>、children 照常渲染 —— 正是「藏起 12 单位的那根、
+	 * 只留 6 单位的大腿」需要的开关。
+	 */
+	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance) {
+		ModelPart thigh = thighOf(self.rightLeg);
+		if (thigh != null) {
+			// 玩家模型（createMesh 加了 skis_thigh）：原版整条腿跳过自己的 cube，大腿当孩子照常画
+			self.rightLeg.skipDraw = stance;
+			self.leftLeg.skipDraw = stance;
+			poseThigh(thigh, stance);
+			poseThigh(thighOf(self.leftLeg), stance);
+			if (self instanceof PlayerModel playerModel) {
+				// 外层裤腿是腿的孩子（vanilla 让它们跟着腿的位姿走），同样只跳过自己的 cube ——
+				// 别再单独给 pants 写位置 / 旋转，那会和腿差一帧
+				playerModel.leftPants.skipDraw = stance;
+				playerModel.rightPants.skipDraw = stance;
+			}
+			return;
+		}
+		if (!stance) {
+			if (this.skis$armorLegsHidden) {          // 只撤我们自己藏的那次，不碰原版的可见性
+				self.leftLeg.visible = true;
+				self.rightLeg.visible = true;
+				this.skis$armorLegsHidden = false;
+			}
+			return;
+		}
+		// 护甲模型（HumanoidArmorModel 等）没有大腿子部件：腿仍是整条 12 单位、绕髋倾，
+		// 照样会戳出雪鞋 —— 只能整条腿藏掉；雪鞋本身就盖住了小腿，视觉上不缺。
+		self.leftLeg.visible = false;
+		self.rightLeg.visible = false;
+		this.skis$armorLegsHidden = true;
+	}
+
+	/** 取腿上的大腿子部件；没有（护甲模型等）返回 null。 */
+	private static ModelPart thighOf(ModelPart leg) {
+		return leg.hasChild(PlayerModelThighMixin.THIGH) ? leg.getChild(PlayerModelThighMixin.THIGH) : null;
+	}
+
+	/** 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。 */
+	private static void poseThigh(ModelPart thigh, boolean stance) {
+		thigh.visible = stance;
+		thigh.xRot = stance ? SkiStance.SQUAT_LEG_TILT : 0.0F;
+	}
+
 	/** 空手时两臂的前后角：单板不前抬（0），双板向前微抬。 */
 	private static float freeArmXrot(boolean board) {
 		return board ? FREE_ARM_XROT : SKI_FREE_ARM_XROT;
@@ -152,17 +218,17 @@ public abstract class HumanoidModelMixin {
 	}
 
 	/**
-	 * 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）；xRot 决定前后倾。
+	 * 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）。
 	 *
-	 * <p><b>不缩腿、不挪 y</b>：枢轴恒在 {@link #LEG_PIVOT_Y}（12）、{@code yScale} 恒为 1.0 ——
-	 * 原版 biped 是单节腿（枢轴往下 12 单位的一根 box），没有膝关节，缩腿弯不出膝、还会把脚
-	 * 从板面上抬起来。微蹲的观感全部由角度表达（腿后倾 + 上身前压 + 头略低）。
+	 * <p>屈膝<b>不在这里</b>：腿本身仍是原版那条（枢轴恒在 {@link #LEG_PIVOT_Y}（12）、{@code yScale} 恒 1.0），
+	 * 角度归零是为了让「髋 → 靴口」这一段保持竖直；蹲的观感全由挂在它下面的大腿子部件
+	 * （{@link #poseThigh}）绕靴口翻出来 —— 这样脚底永远在板面上，膝是唯一被顶出去的东西。
 	 */
-	private static void placeLeg(ModelPart leg, float x, float xRot) {
+	private static void placeLeg(ModelPart leg, float x) {
 		leg.x = x;
 		leg.y = LEG_PIVOT_Y;
 		leg.z = 0.0F;
-		leg.xRot = xRot;
+		leg.xRot = 0.0F;
 		leg.yRot = 0.0F;
 		leg.zRot = 0.0F;
 	}
