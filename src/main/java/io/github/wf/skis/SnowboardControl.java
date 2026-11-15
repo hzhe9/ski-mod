@@ -94,6 +94,13 @@ public final class SnowboardControl {
 	 * 模型慢多少、速度就慢多少。
 	 */
 	private static final float TURN_RATE_DEGREES = 1.2F;
+	/**
+	 * <b>限幅回正</b>（{@link #alignCarveHeading}）每 tick 最多把速度方向掰回多少度。
+	 *
+	 * <p><b>必须大于每 tick 最大身体转角</b>，否则速度方向每 tick 只能追上身体的一部分、残量越累越多，
+	 * 速度方向会永久落在身体后面。
+	 */
+	private static final float ALIGN_MAX_DEGREES_PER_TICK = 6.0F;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
@@ -541,8 +548,9 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>速度方向由身体朝向推导</b>：转向期间每 tick 把水平速度方向<b>直接写成</b>
-	 * 「入弯时的速度方向角 + 身体累计转角」，大小与 y 都不动。
+	 * <b>速度方向向身体朝向限幅回正</b>：转向期间每 tick 算出「期望方向角 = 入弯方向角 + 身体累计转角」，
+	 * 再按<b>每 tick 最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 6°</b> 把当前速度方向<b>旋转</b>过去
+	 * （大小与 y 都不动）。
 	 *
 	 * <p>为什么不是「每 tick 转 delta」：同一个 tick 里还有别的写者会把速度方向拽回去 ——
 	 * 回落加速沿<b>当前水平速度方向</b>加一份（{@code SkiGlide.descentDirection}，单板不再投影到体轴）、
@@ -556,22 +564,17 @@ public final class SnowboardControl {
 	 *       与 {@link #CARVE_YAW0}（当时的 bodyYaw）；退出 carve 时清掉；</li>
 	 *   <li>期望方向角 = {@code CARVE_HEADING + toRadians(wrapDegrees(bodyYawNow - CARVE_YAW0))}
 	 *       —— {@code atan2(z, x)} 与 yaw 在同一个旋转方向上（都随 yaw 增量增大），所以直接相加；</li>
-	 *   <li>变化超过 {@code 1e-4} 就 {@code setDeltaMovement} 并 {@code hurtMarked = true}（客户端才吃得到）。</li>
+	 *   <li>与当前方向差 ≤ 0.05° 就返回（死区），否则按 {@code clamp(errDeg, ±6°)} 旋转（客户端才吃得到）。</li>
 	 * </ul>
 	 *
 	 * <p>调用点是整 tick 里<b>最后一个</b>写速度的地方（{@code SkiGlide.register} 里 {@link #guardCarveSpeed}
 	 * 之后），所以同 tick 内别的写者造成的偏角不会累下去；只改方向，不改大小、不改 y。
 	 *
-	 * <p><b>撞墙时也必须照样写</b>（{@code horizontalCollision} 为真）：原版碰撞把「进墙」的分量削掉了，
-	 * 剩下的是沿墙面的分量。这时<b>不能</b>跳过重写 —— 一跳过，碰撞剃过的这个方向就会在下一 tick 被
-	 * {@link #applyCarve} 的 {@code CARVE_HEADING == null} 分支当成<b>新的入弯基准</b>登记下来，
-	 * 「被弹歪的方向」于是变成基准：墙就这样把方向改了，之后 A / D 只是在那个歪基准上累加，拉不回来。
-	 * 反过来，每 tick 都按「入弯方向 + 身体累计转角」重写，等于把方向<b>按住</b>：墙只能削
-	 * <b>速度大小</b>（碰撞吃掉进墙分量），改不了方向；玩家顶住墙时的表现是<b>停住</b>，转身
-	 * （A / D 或 W / S 让 bodyYaw 变）之后方向自然滑开。
-	 *
-	 * <p>真正要挡的是「撞墙那一 tick 拿被剃过的速度当入弯基准」—— 那件事在 {@link #applyCarve} 的
-	 * 登记分支里挡（撞墙 tick 不登记，留着下一 tick 再试），不在这里。
+	 * <p><b>撞墙那一 tick 一点方向都不修</b>（{@code horizontalCollision} 为真就直接返回）：这一 tick 的
+	 * 速度是被碰撞<b>逐轴裁过</b>的（进墙分量被削掉），方向已经不是滑行方向。若这一 tick 还按目标角旋转，
+	 * 等于就地把被裁歪的方向「洗白」成滑行方向，回正就永远不会发生 —— 玩家顶着墙滑时方向会一直歪着，
+	 * 墙实际上把路线改了。跳过之后：墙只削<b>速度大小</b>，方向留到下一个自由 tick 再按 6°/tick 掰回去。
+	 * 同时 {@link #applyCarve} 在撞墙 tick 也不登记入弯基准（{@code CARVE_HEADING == null && !horizontalCollision}）。
 	 */
 	public static void alignCarveHeading(ServerPlayer player) {
 		int entityId = player.getId();
@@ -591,17 +594,23 @@ public final class SnowboardControl {
 		if (heading == null || yaw0 == null || speed < 1.0E-6D) {
 			return;   // 没有入弯记录 / 没有方向可对齐
 		}
+		if (player.horizontalCollision) {
+			// 撞墙这一 tick 速度是被碰撞**逐轴裁过**的（进墙分量被削掉），方向已经不是滑行方向了。
+			// 这一 tick 一点方向都不修：既不算回正量、也不登记 —— 让墙裁歪的方向留到下一个自由 tick
+			// 再由回正逻辑掰回去。若这一 tick 还转，等于把被裁歪的方向就地「洗白」成基准，回正就永远不发生。
+			return;
+		}
 
 		float yawNow = bodyYaw(entityId, player.getYRot());
 		double turned = Mth.wrapDegrees(yawNow - yaw0);      // 身体从入弯到现在累计转了多少度
 		double wantRad = heading + Math.toRadians(turned);    // 期望方向角（弧度，atan2(z, x) 口径）
-		double wantX = Math.cos(wantRad) * speed;
-		double wantZ = Math.sin(wantRad) * speed;
-		if (Math.abs(wantX - horizontal.x) <= 1.0E-4D && Math.abs(wantZ - horizontal.z) <= 1.0E-4D) {
-			return;   // 已经在期望方向上（没被拽偏）就不写，省一次同步
+		double curRad = Math.atan2(horizontal.z, horizontal.x);
+		float errDeg = Mth.wrapDegrees((float) (Math.toDegrees(wantRad) - Math.toDegrees(curRad)));
+		if (Math.abs(errDeg) <= 0.05F) {
+			return;   // 死区：差不到 0.05° 就别写、别发包（既防抖，也防每 tick 多发一份同步）
 		}
-		player.setDeltaMovement(wantX, motion.y, wantZ);
-		player.hurtMarked = true;
+		float stepDeg = Mth.clamp(errDeg, -ALIGN_MAX_DEGREES_PER_TICK, ALIGN_MAX_DEGREES_PER_TICK);
+		rotateVelocity(player, stepDeg);   // 按限幅后的角度**旋转**速度方向（大小与 y 都不动）
 	}
 
 	/**
@@ -676,7 +685,11 @@ public final class SnowboardControl {
 		}
 		float delta = (float) (turn * TURN_RATE_DEGREES);
 		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
-		rotateVelocity(entity, delta);
+		if (!entity.horizontalCollision) {
+			// 撞墙这一 tick 速度已被碰撞逐轴裁过，方向不是滑行方向 —— 不转它，
+			// 留给 {@link #alignCarveHeading} 在下一个自由 tick 掰回去。
+			rotateVelocity(entity, delta);
+		}
 		return delta;
 	}
 
