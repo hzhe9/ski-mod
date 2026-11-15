@@ -409,6 +409,10 @@ public final class SkiAir {
 	 * 所以跳过 / 翻过之后<b>按住空格也不能落地即跳</b>，要等冷却走完（摔倒另叠 {@code CRASH_STUN_TICKS} 失控）。
 	 * 落在 {@code jumpedThisAir} / {@code flipStarted} 上的两个标志各有归属：前者只由本方法置与清，
 	 * 后者仍由 {@code landClient} 在落地时清（本方法<b>不碰</b>它，避免两处写同一个字段）。
+	 * 而且 {@code jumpedThisAir} <b>也只在真落地时才清</b>（不是一 {@code onGround} 就清）：
+	 * 一次真跳跃中途 {@code onGround} 闪一 tick 就会走贴地分支，若无条件清标记，真落地时标记已为 false、
+	 * 没翻的纯跳落地就<b>不罚</b>了 —— 贴面抖动不能把「这一趟起过跳」抹掉。
+	 * {@code airTicks} 仍然一贴地就归零（它是「连续腾空」的计数，抖动打断就是该重新数）。
 	 *
 	 * <p><b>落地沿只认真腾空（防抖）</b>：滑行时 {@code onGround} 在上坡 / 起伏 / 贴面走但没严格落地时
 	 * 经常为假、还会逐 tick 抖动 —— 纯「{@code onGround && !wasOnGround}」的边沿会在坡上每抖一次就把
@@ -452,16 +456,21 @@ public final class SkiAir {
 			state.coyoteTicks--;
 		}
 		if (onGround) {
-			if (!state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS
-					&& (state.jumpedThisAir || state.flipStarted)) {
+			// 真落地 = 上一次不贴地、且这一趟连续腾空够长（≥ LANDING_LOCK_MIN_AIR_TICKS），与下面「这一趟起过跳/开过翻」分开判
+			boolean realLanding = !state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS;
+			if (realLanding && (state.jumpedThisAir || state.flipStarted)) {
 				// 落地沿：这一趟腾空里起过跳（jumpedThisAir）或开过翻（flipStarted）才重新起算起跳冷却。
 				// 只是从坡上滑落 / 走下台阶 / 掉到地上、全程没起跳也没翻的，落地不罚（否则按不出跳）。
 				// tryJump 两端（客户端 aiStep HEAD / 服务端 START_SERVER_TICK）每 tick 各调一次，
 				// 两边读的都是自己的 onGround，所以双方得到同一个落地沿、不需要额外发包。
 				state.jumpCooldownTicks = Math.max(state.jumpCooldownTicks, tuning.jumpCooldownTicks());
 			}
+			if (realLanding) {
+				// 只有真落地才清：贴面抖动（1~2 tick 的假 onGround）不能把「这一趟起过跳」抹掉，
+				// 否则一次真跳跃中途闪一 tick，真落地时 jumpedThisAir 已是 false，这一趟就不罚了。
+				state.jumpedThisAir = false;                // （flipStarted 归 landClient 清，这里不碰）
+			}
 			state.airTicks = 0;                             // 贴地：腾空计数清零（下一次离地从 0 数）
-			state.jumpedThisAir = false;                    // 落地即清：下一趟腾空重新算（flipStarted 归 landClient 清）
 		} else {
 			// 腾空：累加（饱和到 LANDING_LOCK_MIN_AIR_TICKS 就够，不必无限涨）
 			state.airTicks = Math.min(state.airTicks + 1, LANDING_LOCK_MIN_AIR_TICKS);
