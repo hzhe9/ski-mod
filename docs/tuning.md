@@ -39,8 +39,8 @@
 | `CARVE_MOMENTUM_DECAY` | **1.0** | **单板：转向期间（carve 生效，压着 W / S）专用的摩擦 —— 1.0 ＝ 转向零损失**（用户口径「转向只改变方向、不影响速度大小」：转向本来就是纯旋转 `alignCarveHeading`，不该再叠一层摩擦）。历史 0.999（1 秒 −2%）→ **1.0**。同一个常数还当**速度下限的衰减率**用：`SnowboardControl.guardCarveSpeed` 每 tick 拿 `入场速度 × 1.0^已持续 tick ＝ 入场速度` 作下限（撞方块那一 tick 不补），所以平地转向完全不掉速、撞墙被砍半之后下一个自由 tick 就回到入场速度。**不会失控增长**：上限仍有 `MAX_SPEED` 0.55 夹住（target 取 `min(..., MAX_SPEED)`）。**改成 0.998 ＝ 转向与直行同摩擦**，**0.999 ＝ 留一点点损耗** |
 | （无刹车常量） | — | **单板：按 A/D 分“同向 / 反向”两种，但只在没压刃时算刹车**。① **反向按**（向左滑时按 D，且**没**按 W/S）＝刹车 —— 原版横移把人往右挪、速度自然抵消，代码**不覆盖玩家速度、也不托动量**（只把动量对齐当前速度），反着按才真的减得下来；② **同向按**（顺着滑行方向按）＝动量**托住**速度，下落加速攒出来的速度不会被地面摩擦（每 tick ×≈0.55）吃掉 —— 否则一直按住 A/D 下坡会“只有基础速度、叠加不上去”（用户报的正是这个）。③ **压着刃（W/S）时反向按侧压＝换刃转向，不再算刹车**：这也是转向，所以用 `CARVE_MOMENTUM_DECAY` 托住速度（旧行为下起弯那一下 0.5 → 0.165，掉 67% 且动量被清掉后整段弯回不来）。**S 与刹车无关** |
 | `BRAKE_DECAY` / `BRAKE_MIN_ALIGN` | 0.92 / 0.3 | **双板刹车**：按住 S 且「还在往前滑」（速度与**身体前方**点积 > 0.3）时，动量与速度每 tick ×0.92（1 秒剩 ≈19%，约 1 秒刹停），方向**不翻**；低于 0.3（横滑 / 倒滑）按 S 才是真的往后走。单板没有这两个常量 |
-| `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减 —— **连续撞墙 ≥ `MOMENTUM_HIT_TICKS_BEFORE_DECAY` 3 tick 才乘**（坡面上偶尔蹭一次墙不再被砍半；只有真的顶住墙才止损，断开一次就重新数） |
-| `MOMENTUM_HIT_TICKS_BEFORE_DECAY` | 3 tick | **连续**撞墙多少 tick 之后才按 `MOMENTUM_DECAY_ON_HIT` 0.5 砍半：`SkiGlide` 的 `HIT_TICKS`（实体 id → 连续撞墙 tick 数，撞一下 +1、不撞清零、脱板随 `forgetPhysics` 清） |
+| `MOMENTUM_DECAY_ON_HIT` | 0.5 | 横向撞到方块时的额外衰减，**两板口径不同**：**单板**要**连续撞墙 ≥ `MOMENTUM_HIT_TICKS_BEFORE_DECAY` 3 tick 才乘**（坡面上偶尔蹭一次墙不再被砍半，只有真的顶住墙才止损，断开一次就重新数）；**双板撞一下即砍**（`horizontalCollision` 为真就乘 0.5，不看 tick 数，与 0bbc10c 行为一致） |
+| `MOMENTUM_HIT_TICKS_BEFORE_DECAY` | 3 tick | **单板**：**连续**撞墙多少 tick 之后才按 `MOMENTUM_DECAY_ON_HIT` 0.5 砍半（**双板不看这个门槛**）。计数在 `SkiGlide` 的 `HIT_TICKS`（实体 id → 连续撞墙 tick 数，撞一下 +1、不撞清零、脱板随 `forgetPhysics` 清），两板都记，只有单板拿它当门槛 |
 | `MOMENTUM_MIN` | 0.02 | 动量低于它就丢掉 |
 | `GLIDE_PUSH` / `REFRESH_INTERVAL_TICKS` | 0.055 / 10 | 雪/冰面上每 0.5 秒沿移动方向补一点推进 |
 
