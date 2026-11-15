@@ -66,7 +66,7 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），W 时身体再朝视角追 2.4°/tick；视角由鼠标转、并被限在身体 ±90°
+			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），W 时身体再朝视角追 4.8°/tick；视角由鼠标转、并被限在身体 ±90°
 			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiMotionActive(player)) {
@@ -97,7 +97,8 @@ public class SkisClient implements ClientModInitializer {
 				float yaw;
 				if (board) {
 					// ——— 单板：carve（前倾 + 横移 → 身体朝向持续转），与服务端同一套规则 ———
-					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+					// 客户端这一端一律传 true：写 / 读客户端那张表（服务端写它自己那张，见 SnowboardControl#table）。
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot(), true);
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
 					// 速度方向朝板轴限幅回正 —— 只对本机玩家跑：位置是**客户端权威**，本机速度才是
 					// 真正用于位移的那个；服务端那份写入要算出误差才发 SetEntityMotion，客户端撞墙
@@ -106,18 +107,18 @@ public class SkisClient implements ClientModInitializer {
 					if (player == self) {
 						SnowboardControl.alignCarveHeading(player, keys);
 					}
-					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
+					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot(), true);
 				} else {
-					// ——— 双板：A / D 转身体 2.0°/tick，W 再朝视角方向补 2.4°/tick ———
+					// ——— 双板：A / D 转身体 4.0°/tick，W 再朝视角方向补 4.8°/tick ———
 					// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
-					SkisControl.ensureLocked(player.getId(), player.getYRot());
-					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys));
+					SkisControl.ensureLocked(player.getId(), player.getYRot(), true);
+					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys), true);
 					// 越肩视角下跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）
 					if (keys != null && keys.forward() && !ShoulderSurfingCompat.isActive()) {
-						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
+						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), true);
 					}
 					// yaw 必须在 turnTowardView 之后取
-					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot());
+					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot(), true);
 				}
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
 				// <b>只写本机玩家</b>：远端玩家的 yBodyRot 由服务端同步，客户端每 tick 的写入基本是白做；
@@ -125,7 +126,7 @@ public class SkisClient implements ClientModInitializer {
 				if (player == self) {
 					player.yBodyRot = yaw;
 					if (!board) {
-						// 双板：连 yBodyRotO 一起对齐。每 tick 4.5° 的步长也不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
+						// 双板：连 yBodyRotO 一起对齐。每 tick 4.0° 的步长也不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
 						player.yBodyRotO = yaw;
 					}
 					// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
@@ -144,7 +145,7 @@ public class SkisClient implements ClientModInitializer {
 						SnowboardControl.tickHead(player, keys);
 					}
 					if (ShoulderSurfingCompat.isActive()) {
-						player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId()) : 0.0F));
+						player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId(), true) : 0.0F));
 					}
 				}
 			}
@@ -152,16 +153,16 @@ public class SkisClient implements ClientModInitializer {
 			if (self != null) {
 				if (!SkisMod.isSkiMotionActive(self) || !SnowboardControl.isSnowboard(self)) {
 					// 没穿板 / 创造飞行：姿态回中立（飞行时按 W 不该让模型前倾）
-					SnowboardControl.setTiltTarget(self.getId(), 0);
-					SnowboardControl.tickTilt(self.getId());
+					SnowboardControl.setTiltTarget(self.getId(), 0, true);
+					SnowboardControl.tickTilt(self.getId(), true);
 				} else {
 					Input keys = self.input.keyPresses;
 					// W 与 S 同按（快速切换时的一帧残留）判中立，免得“单按 S 却跳成前倾”
 					boolean forward = keys != null && keys.forward();
 					boolean backward = keys != null && keys.backward();
 					int tilt = forward == backward ? 0 : (forward ? 1 : -1);
-					SnowboardControl.setTiltTarget(self.getId(), tilt);
-					SnowboardControl.tickTilt(self.getId());
+					SnowboardControl.setTiltTarget(self.getId(), tilt, true);
+					SnowboardControl.tickTilt(self.getId(), true);
 					// 注意：这里不「每 tick 硬夹」视角。视角限位只有一处权威状态
 					// （client/SkiViewSmoothing 的 headOffset），按帧写、按帧判断，不会有两处基准互相拉回。
 				}
@@ -198,8 +199,8 @@ public class SkisClient implements ClientModInitializer {
 	private static void resetWorldState() {
 		SnowSpray.forgetAll();
 		SkiState.clear();
-		SnowboardControl.forgetAll();
-		SkisControl.forgetBodyAll();
+		SnowboardControl.forgetAll(true);
+		SkisControl.forgetBodyAll(true);
 		SkiAir.forgetAllClient();
 		SkiViewSmoothing.reset();
 	}

@@ -26,7 +26,7 @@ import net.minecraft.util.Mth;
  * 用的就是这个 {@code getViewYRot(partial)}，所以<b>本地玩家的镜头朝向是「每 tick 的原始 yRot」，没有帧间插值</b>。
  * 原版鼠标之所以顺，是因为 {@code MouseHandler.handleAccumulatedMovement()}（每帧，在
  * {@code Minecraft#runTick} 里）→ {@code turnPlayer} → {@code LocalPlayer#turn} 每帧都在改 yRot。
- * 身体朝向却是按 tick 转的（单板 carve 2°/tick、双板 A/D 4.5°/tick），若只在 tick 上夹一次，镜头就只能
+ * 身体朝向却是按 tick 转的（单板 carve 满速 12°/tick、双板 A/D 4°/tick），若只在 tick 上夹一次，镜头就只能
  * 20 Hz 一档一档地跳，所以这里把身体转动按 {@code partialTick} 插值到每一帧。
  *
  * <p>写入时 {@code yRot / yRotO / yHeadRot / yHeadRotO} 同量偏移（{@link #turnView}），插值不会下沉、
@@ -87,8 +87,8 @@ public final class SkiViewSmoothing {
 		}
 		boolean snowboard = SnowboardControl.isSnowboard(player);
 		float bodyNow = snowboard
-				? SnowboardControl.bodyYaw(player.getId(), player.getYRot())
-				: SkisControl.bodyYaw(player.getId(), player.getYRot());
+				? SnowboardControl.bodyYaw(player.getId(), player.getYRot(), true)
+				: SkisControl.bodyYaw(player.getId(), player.getYRot(), true);
 
 		if (!tracked || trackedId != player.getId() || trackedSnowboard != snowboard) {
 			// 刚穿板 / 换了另一块板 / 换了玩家：从当前视角接手，夹一次，避免视角跳变

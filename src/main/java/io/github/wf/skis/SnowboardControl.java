@@ -20,39 +20,59 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>W 前倾 / S 后倾</b>：整个人连同脚上的板绕脚底一起倾（{@link #tiltDegrees()}，渲染层见
  *       {@code EntityTiltMixin}），相机位置也跟着（{@code CameraTiltMixin}）；倾斜是<b>渐进</b>的
  *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
- *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 沿身体前方补前冲；
- *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反）。</li>
+ *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 速度方向跟着转同样的角度；
+ *       固定半径 {@link #TURN_RADIUS_BLOCKS} 4 格 → 满速算出 14.43°/tick、夹到
+ *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>12.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 2.0）；
+ *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反），摆动上限
+ *       {@link #VEER_MAX_DEGREES} 4.8°/tick。W / S 只转向、<b>不加力</b>。</li>
  *   <li><b>速度方向自动回正</b>：只要还贴着地（离地 1.5 格内），水平速度方向每 tick 朝<b>板轴</b>
- *       （身体左右轴，也就是单板真正的行进方向）掰 ≤6°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，
+ *       （身体左右轴，也就是单板真正的行进方向）掰 ≤12.5°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，
  *       也没有「入弯基准」这种状态。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
  */
 public final class SnowboardControl {
-	/** 实体 id → 穿上单板时锁定的身体朝向（度）。 */
-	private static final IdMap<Float> BODY_YAW = new IdMap<>();
-	/** 实体 id → 俯仰姿态（当前值，平滑后；正 = 前倾 / 负 = 后倾），供模型与相机读取。 */
-	private static final IdMap<Float> TILT_VALUE = new IdMap<>();
-	/** 实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
-	private static final IdMap<Integer> TILT_TARGET = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 穿上单板时锁定的身体朝向（度）。 */
+	private static final IdMap<Float> BODY_YAW_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义（为什么分两份见 {@link #table}）。 */
+	private static final IdMap<Float> BODY_YAW_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 俯仰姿态（当前值，平滑后；正 = 前倾 / 负 = 后倾），供模型与相机读取。 */
+	private static final IdMap<Float> TILT_VALUE_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义（{@link #tickTilt} 只在客户端跑，见 {@link #table}）。 */
+	private static final IdMap<Float> TILT_VALUE_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
+	private static final IdMap<Integer> TILT_TARGET_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Integer> TILT_TARGET_SERVER = new IdMap<>();
 	/**
-	 * 实体 id → <b>上一次判定的行进侧</b>（<b>板轴符号</b>，与 {@link #sideLocked} 的 sign 同一套约定：
-	 * +1 = 身体左轴 / -1 = 右轴）。速度的板轴分量和 A / D 都给不出方向时锁存它。
+	 * <b>客户端</b>那张表：实体 id → <b>上一次判定的行进侧</b>（<b>板轴符号</b>，与 {@link #sideLocked} 的 sign
+	 * 同一套约定：+1 = 身体左轴 / -1 = 右轴）。速度的板轴分量和 A / D 都给不出方向时锁存它。
 	 *
 	 * <p>头朝向（{@link #headSide}）与速度回正（{@link #alignCarveHeading}）共用这一份判定，
 	 * 所以「头往哪边扭」和「速度往哪边掰」永远是同一侧，不会互相矛盾。
+	 *
+	 * <p>这张表是<b>幂等写值型</b>（{@code boardSide} 算出一个 ±1 再 put），不是每 tick 累加的增量，
+	 * 所以拆表时<b>不需要翻倍</b>。
 	 */
-	private static final IdMap<Integer> BOARD_SIDE = new IdMap<>();
-	/** 实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
-	private static final IdMap<Float> HEAD_OFFSET = new IdMap<>();
+	private static final IdMap<Integer> BOARD_SIDE_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Integer> BOARD_SIDE_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 当前头偏角（平滑后的实际值，度；正 = 朝身体右侧、负 = 朝左），越肩时写 {@code yHeadRot}。 */
+	private static final IdMap<Float> HEAD_OFFSET_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义（{@link #tickHead} 只在客户端跑，见 {@link #table}）。 */
+	private static final IdMap<Float> HEAD_OFFSET_SERVER = new IdMap<>();
 	/**
-	 * 实体 id → <b>本次 carve 的入口水平速度</b>（格/tick），见 {@link #guardCarveSpeed}。
+	 * <b>服务端</b>那张表：实体 id → <b>本次 carve 的入口水平速度</b>（格/tick），见 {@link #guardCarveSpeed}。
 	 * 退出 carve 就清掉 —— 下一段弯重新记一次入口速度。
 	 */
-	private static final IdMap<Double> CARVE_SPEED = new IdMap<>();
-	/** 实体 id → 本次 carve <b>已经持续的 tick 数</b>（入口那一 tick 记 0），配 {@link #CARVE_SPEED} 算速度下限。 */
-	private static final IdMap<Integer> CARVE_TICKS = new IdMap<>();
+	private static final IdMap<Double> CARVE_SPEED_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义（{@link #guardCarveSpeed} 只在服务端跑，见 {@link #table}）。 */
+	private static final IdMap<Double> CARVE_SPEED_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：实体 id → 本次 carve <b>已经持续的 tick 数</b>（入口那一 tick 记 0），配 {@link #CARVE_SPEED_SERVER} 算速度下限。 */
+	private static final IdMap<Integer> CARVE_TICKS_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Integer> CARVE_TICKS_CLIENT = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -86,31 +106,46 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>carve（切雪转向）的固定转弯半径</b>（格）：角速度不再是常数，而是由<b>本 tick 真正用于位移的速度</b>
-	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 8.0)} 度，一直按着就是在雪地上画同一个圆。
+	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 4.0)} 度，一直按着就是在雪地上画同一个圆。
 	 *
-	 * <p>满速 0.55 格/tick 时 <b>3.94°/tick</b>（≈79°/s）：半径 8 格，掉头（半圈）走 25 格 ≈ 2.3 s。
+	 * <p>满速 0.55 格/tick 时算出来 <b>14.43°/tick</b>，被 {@link #TURN_MAX_DEGREES_PER_TICK} 12.0 夹住
+	 * （≈240°/s，半圈 15 tick ≈ 0.75 s）；中速 0.30 格/tick 时 <b>7.87°/tick</b>，极慢 0.05 格/tick 时触底 2.0。
 	 * 慢滑自然转得慢、快滑自然转得快，不会出现「慢滑也按满速角速度剃头」那种手感。
+	 *
+	 * <p><b>半径 4 而不是 8 —— 这个常量按「每端各跑一次」标定</b>（见 {@link #table}）：拆表前单机里
+	 * 客户端与服务端各往同一张 {@code BODY_YAW} 加一次同样的增量（等效半径 8 的 2 倍角速度），
+	 * 拆表后每端只写自己那张表，半径取 4 才能在单机里逐 tick 复现同样的转角；
+	 * 专用服务器也随之从「一半」变成和单机一样。
 	 */
-	private static final double TURN_RADIUS_BLOCKS = 8.0D;
+	private static final double TURN_RADIUS_BLOCKS = 4.0D;
 	/**
-	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 1° 以下，而
+	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 2° 以下，而
 	 * {@code client/SnowSpray} 判「在转向」的门槛是 {@code TURN_DEGREES_PER_TICK} 1.0°/tick ——
-	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 1.0。
+	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 2.0（＝拆表前单机里每 tick 实际生效的 1.0 ×2）。
 	 */
-	private static final double TURN_MIN_DEGREES_PER_TICK = 1.0D;
+	private static final double TURN_MIN_DEGREES_PER_TICK = 2.0D;
 	/**
-	 * 每 tick 身体转角的<b>上限</b>（度）：半径 8 格下 6° 对应 0.84 格/tick，高于单板上限
-	 * {@link #MAX_SPEED} 0.55，实际只会兜底（防某 tick 速度爆表时身体甩过头）。
+	 * 每 tick 身体转角的<b>上限</b>（度）：满速算出 14.43°/tick，这里夹到 <b>12.0</b>（拆表前单机里每 tick
+	 * 实际生效的 6.0 ×2；半径 4 格下 12° 对应 0.84 格/tick，高于单板上限 {@link #MAX_SPEED} 0.55，
+	 * 所以只在满速附近封顶）。
+	 *
+	 * <p><b>{@link #ALIGN_MAX_DEGREES_PER_TICK} 12.5 必须严格大于它</b> —— 见那个常量的注释。
 	 */
-	private static final double TURN_MAX_DEGREES_PER_TICK = 6.0D;
+	private static final double TURN_MAX_DEGREES_PER_TICK = 12.0D;
 	/**
 	 * <b>限幅回正</b>（{@link #alignCarveHeading}）每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
 	 *
-	 * <p><b>必须大于每 tick 最大身体转角</b>（满速 {@link #TURN_RADIUS_BLOCKS} 下 3.94°），否则速度方向
+	 * <p><b>必须严格大于每 tick 最大身体转角</b>（{@link #TURN_MAX_DEGREES_PER_TICK} 12.0），否则速度方向
 	 * 每 tick 只能追上身体的一部分、残量越累越多，速度方向会永久落在身体后面。
-	 * 6° 也意味着 180° 的偏角最多 30 tick（1.5 s）就完全掰正 —— 观感上是「顺着板的方向自己滑回来了」。
+	 *
+	 * <p>取 <b>12.5 ＝ 12.0 + 0.5 余量</b>：拆表前这条不变量在专用服务器上<b>刚好取等</b>（6.0 vs 6.0）、
+	 * 在单机里根本<b>没成立</b>（6.0 vs 12.0 —— 身体朝向被两端各写一次，掰正步长却只有一个 6.0）。
+	 * 本批拆表 + 翻倍之后两边都满足，12.5°/tick 也意味着 180° 的偏角最多 15 tick（0.75 s）掰正 ——
+	 * 观感仍是「顺着板的方向自己滑回来了」。
+	 *
+	 * <p>它作用在<b>实体自己的速度方向</b>上（每端每实体各一次、不写共享表），所以<b>不属于翻倍清单</b>。
 	 */
-	private static final float ALIGN_MAX_DEGREES_PER_TICK = 6.0F;
+	private static final float ALIGN_MAX_DEGREES_PER_TICK = 12.5F;
 	/** 与板轴的角差小于它就当作已经对上（死区：不写、不发包，防抖也防每 tick 多发一份同步）。 */
 	private static final float ALIGN_DEAD_ZONE_DEGREES = 0.05F;
 	/**
@@ -283,13 +318,20 @@ public final class SnowboardControl {
 	 * 每格总量仍是 {@link #FALL_GAIN_PER_BLOCK} 0.15/格。
 	 */
 	private static final double DESCENT_STEP_BLOCKS = 0.5D;
-	/** 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。 */
-	private static final double VEER_SMOOTHING = 0.35D;
+	/**
+	 * 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。
+	 *
+	 * <p><b>0.58 ≈ 1 − (1 − 0.35)² = 0.5775，按「每端各跑一次」标定</b>（见 {@link #table}）：
+	 * 拆表前单机里客户端与服务端各吃一次 0.35（两次复合 ＝ 每 tick 吃掉 57.75%），拆表后每端只写自己那张表，
+	 * 取 0.58 才能让单机每 tick 的收敛量与拆表前一致，专用服务器也随之从 35% 提到 57.75%。
+	 */
+	private static final double VEER_SMOOTHING = 0.58D;
 	/**
 	 * 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。
-	 * <b>2.4</b>°/tick ＝ 48°/s（转满 180° 需 75 tick ＝ 3.75 s）；4.0 → <b>2.4</b>，与双板的 W 转向同速。
+	 * <b>4.8</b>°/tick ＝ 96°/s（转满 180° 需 37.5 tick ≈ 1.9 s）；拆表前单机里两端各 2.4（合计 4.8），
+	 * 这一项是<b>饱和步长</b>、两次复合正好等于一次 4.8，所以 ×2 是精确等价的。
 	 */
-	private static final double VEER_MAX_DEGREES = 2.4D;
+	private static final double VEER_MAX_DEGREES = 4.8D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -300,15 +342,41 @@ public final class SnowboardControl {
 	private SnowboardControl() {
 	}
 
+	/**
+	 * 按端选一份表（照 {@link SkiAir} 的 {@code CLIENT_STATES} / {@code SERVER_STATES} 的做法）。
+	 *
+	 * <p><b>为什么每张表都要两份</b>：单机（集成服务端与客户端在同一个 JVM）里 {@code LocalPlayer} 与
+	 * {@code ServerPlayer} <b>共用同一个 entity id</b>，而「每 tick 加一个增量」的方法
+	 * （{@link #applyCarve}、{@link SkisControl#turnBody} …）是<b>两端各调一次</b>。共用一张表时
+	 * 同一份增量会被加两次 —— 单机的转向 / carve 速率因此是专用服务器的 2 倍。
+	 * {@link SkiAir} 早就为同一个坑拆过表，这里照它的样式把剩下的表全部拆开。
+	 *
+	 * <p><b>常量按「每端各跑一次」标定</b>：拆开之后单机每 tick 只有一次写入，所以每个<b>累加型</b>的
+	 * 每 tick 步长都在本批里 ×2（`TURN_*`、`VEER_*`、`SkisControl.TURN_RATE_DEGREES` /
+	 * `VIEW_TURN_RATE_DEGREES`），这样单机手感与拆表前逐 tick 一致，专用服务器也终于和单机一样快。
+	 * <b>幂等写值型</b>（{@link #BOARD_SIDE_CLIENT}）、<b>只在一端跑</b>（{@code TILT_*}、{@code HEAD_OFFSET}、
+	 * {@code CARVE_*}）的表<b>不翻倍</b> —— 翻倍会让倾斜 / 头偏一次快一倍。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端那一份、{@code false} ＝ 服务端那一份
+	 */
+	private static <T> IdMap<T> table(IdMap<T> clientTable, IdMap<T> serverTable, boolean clientSide) {
+		return clientSide ? clientTable : serverTable;
+	}
+
 	/** 这个实体是不是穿着单板（脚部槽）。 */
 	public static boolean isSnowboard(Entity entity) {
 		return entity instanceof LivingEntity living
 				&& living.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.SNOWBOARD;
 	}
 
-	/** 锁住身体朝向：第一次调用时记下当时的 yaw，之后不再改变。 */
-	public static void ensureLocked(int entityId, float yaw) {
-		BODY_YAW.putIfAbsent(entityId, yaw);
+	/**
+	 * 锁住身体朝向：第一次调用时记下当时的 yaw，之后不再改变。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端（{@code SkisClient}）、{@code false} ＝ 服务端（{@link SkiGlide}）；
+	 *                   两端各锁自己那张表，见 {@link #table}
+	 */
+	public static void ensureLocked(int entityId, float yaw, boolean clientSide) {
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).putIfAbsent(entityId, yaw);
 	}
 
 	/**
@@ -319,13 +387,13 @@ public final class SnowboardControl {
 	 *                   同一个 entity id，客户端清表不能把服务端的失控 / 冷却一起抹掉
 	 */
 	public static void forget(int entityId, boolean clientSide) {
-		BODY_YAW.remove(entityId);
-		TILT_VALUE.remove(entityId);
-		TILT_TARGET.remove(entityId);
-		BOARD_SIDE.remove(entityId);
-		HEAD_OFFSET.remove(entityId);
-		CARVE_SPEED.remove(entityId);
-		CARVE_TICKS.remove(entityId);
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).remove(entityId);
+		table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).remove(entityId);
+		table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide).remove(entityId);
+		table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide).remove(entityId);
+		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).remove(entityId);
+		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).remove(entityId);
+		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).remove(entityId);
 		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
 		if (clientSide) {
 			SkiAir.forgetClient(entityId);
@@ -337,45 +405,58 @@ public final class SnowboardControl {
 	/**
 	 * 整表清空：换世界 / 重连 / 换维度时由客户端（{@code SkisClient}）调用 —— 那些场合所有 id 都作废，
 	 * 留着只会在 id 被复用时把上一段的压刃 / 俯仰状态带进新维度。
+	 *
+	 * @param clientSide 清哪一端那套表；客户端调用传 {@code true}（服务端那张表不归客户端管）
 	 */
-	public static void forgetAll() {
-		BODY_YAW.clear();
-		TILT_VALUE.clear();
-		TILT_TARGET.clear();
-		BOARD_SIDE.clear();
-		HEAD_OFFSET.clear();
-		CARVE_SPEED.clear();
-		CARVE_TICKS.clear();
+	public static void forgetAll(boolean clientSide) {
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).clear();
+		table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).clear();
+		table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide).clear();
+		table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide).clear();
+		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).clear();
+		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).clear();
+		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).clear();
 	}
 
-	/** 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。 */
-	public static float bodyYaw(int entityId, float fallback) {
-		return BODY_YAW.getOrDefault(entityId, fallback);
+	/**
+	 * 锁定的身体朝向；还没锁（刚穿上的那一 tick）就用当前朝向兜底。
+	 *
+	 * @param clientSide 读哪一端那张表（{@code SkisClient} / 渲染层传 {@code true}，{@link SkiGlide} 传 {@code false}）
+	 */
+	public static float bodyYaw(int entityId, float fallback, boolean clientSide) {
+		return table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).getOrDefault(entityId, fallback);
 	}
 
 	/** 客户端每 tick 记录俯仰姿态<b>目标</b>：+1 前倾 / 0 直立 / -1 后倾。 */
-	public static void setTiltTarget(int entityId, int target) {
-		TILT_TARGET.put(entityId, target);
+	public static void setTiltTarget(int entityId, int target, boolean clientSide) {
+		table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide).put(entityId, target);
 	}
 
-	/** 客户端每 tick 推进一步平滑：当前值按 {@link #TILT_LERP} 向目标靠拢（所以倾斜是渐进的）。 */
-	public static void tickTilt(int entityId) {
-		int target = TILT_TARGET.getOrDefault(entityId, 0);
-		float current = TILT_VALUE.getOrDefault(entityId, 0.0F);
+	/**
+	 * 客户端每 tick 推进一步平滑：当前值按 {@link #TILT_LERP} 向目标靠拢（所以倾斜是渐进的）。
+	 *
+	 * <p>{@link #TILT_LERP} <b>不翻倍</b>：这个方法只被 {@code SkisClient} 调（客户端独有），
+	 * 服务端从不推进倾斜，所以拆表前后都是每 tick 一次。
+	 */
+	public static void tickTilt(int entityId, boolean clientSide) {
+		IdMap<Integer> targets = table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide);
+		IdMap<Float> values = table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide);
+		int target = targets.getOrDefault(entityId, 0);
+		float current = values.getOrDefault(entityId, 0.0F);
 		float next = current + (target - current) * TILT_LERP;
 		if (Math.abs(target - next) < TILT_EPSILON) {
 			next = target;
 		}
 		if (next == 0.0F) {
-			TILT_VALUE.remove(entityId);
+			values.remove(entityId);
 		} else {
-			TILT_VALUE.put(entityId, next);
+			values.put(entityId, next);
 		}
 	}
 
 	/** 当前俯仰姿态（平滑后的浮点值：1 = 完全前倾，-1 = 完全后倾），模型与相机用它。 */
-	public static float tiltValue(int entityId) {
-		return TILT_VALUE.getOrDefault(entityId, 0.0F);
+	public static float tiltValue(int entityId, boolean clientSide) {
+		return table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).getOrDefault(entityId, 0.0F);
 	}
 
 	/**
@@ -405,20 +486,22 @@ public final class SnowboardControl {
 	 */
 	public static int boardSide(Entity entity, Input input) {
 		int entityId = entity.getId();
+		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
 		Vec3 motion = entity.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		// 身体左轴（sideLocked 的 sign=+1），与 sideLocked / A 键同一个「左」的约定
-		double lateral = horizontal.dot(sideLocked(entityId, entity.getYRot(), 1.0D));
+		double lateral = horizontal.dot(sideLocked(entityId, entity.getYRot(), 1.0D, clientSide));
 		double press = sideSign(input);
+		IdMap<Integer> sides = table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide);
 		int side;
 		if (Math.abs(lateral) >= HEAD_SIDE_MIN_SPEED) {
 			side = lateral > 0.0D ? 1 : -1;   // 往身体左侧滑 → +1（左轴）
 		} else if (press != 0.0D) {
 			side = press > 0.0D ? 1 : -1;
 		} else {
-			return BOARD_SIDE.getOrDefault(entityId, -1);   // 锁存（默认身体右轴，与旧的「头默认朝右」同侧）
+			return sides.getOrDefault(entityId, -1);   // 锁存（默认身体右轴，与旧的「头默认朝右」同侧）
 		}
-		BOARD_SIDE.put(entityId, side);
+		sides.put(entityId, side);
 		return side;
 	}
 
@@ -445,20 +528,26 @@ public final class SnowboardControl {
 	 */
 	public static void tickHead(Entity entity, Input input) {
 		int entityId = entity.getId();
+		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
+		IdMap<Float> offsets = table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide);
 		float target = headSide(entity, input) * headMagnitude(input);
-		float current = HEAD_OFFSET.getOrDefault(entityId, target);
+		float current = offsets.getOrDefault(entityId, target);
 		float step = Mth.clamp((target - current) * HEAD_OFFSET_LERP,
 				-HEAD_OFFSET_MAX_STEP_DEGREES, HEAD_OFFSET_MAX_STEP_DEGREES);
 		float next = current + step;
 		if (Math.abs(target - next) < HEAD_OFFSET_EPSILON) {
 			next = target;
 		}
-		HEAD_OFFSET.put(entityId, next);
+		offsets.put(entityId, next);
 	}
 
-	/** 当前头偏角（度；正 = 朝身体右侧、负 = 朝左）—— 越肩视角下 {@code yHeadRot = 身体朝向 + 它}。 */
-	public static float headOffset(int entityId) {
-		return HEAD_OFFSET.getOrDefault(entityId, 0.0F);
+	/**
+	 * 当前头偏角（度；正 = 朝身体右侧、负 = 朝左）—— 越肩视角下 {@code yHeadRot = 身体朝向 + 它}。
+	 *
+	 * @param clientSide 读哪一端那张表（越肩视角是纯客户端观感，调用点一律传 {@code true}）
+	 */
+	public static float headOffset(int entityId, boolean clientSide) {
+		return table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).getOrDefault(entityId, 0.0F);
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
@@ -473,8 +562,8 @@ public final class SnowboardControl {
 	 * <p><b>别用视角朝向</b>（{@code player.getYRot()}）：那是鼠标看的那个方向，玩家一转视野它就变，
 	 * 偏移会绕着玩家转圈（症状：转视野时相机甩到身体外面去）。身体朝上是锁死的，才是不动的那个基准。
 	 */
-	public static Vec3 frontLocked(int entityId, float fallbackYaw) {
-		return front(bodyYaw(entityId, fallbackYaw));
+	public static Vec3 frontLocked(int entityId, float fallbackYaw, boolean clientSide) {
+		return front(bodyYaw(entityId, fallbackYaw, clientSide));
 	}
 
 	public static float tiltDegrees() {
@@ -567,21 +656,24 @@ public final class SnowboardControl {
 		Input keys = player.getLastClientInput();
 		Vec3 motion = player.getDeltaMovement();
 		double speed = motion.horizontalDistance();
+		// 只在服务端跑（SkiGlide）—— 固定取服务端那张表；这两张表不属于翻倍清单（单机里也只有一次写入）
+		IdMap<Double> carveSpeed = table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, false);
+		IdMap<Integer> carveTicks = table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, false);
 
 		if (!isCarving(entityId, keys, speed)) {
-			CARVE_SPEED.remove(entityId);
-			CARVE_TICKS.remove(entityId);
+			carveSpeed.remove(entityId);
+			carveTicks.remove(entityId);
 			return;
 		}
-		Double entry = CARVE_SPEED.get(entityId);
+		Double entry = carveSpeed.get(entityId);
 		if (entry == null) {
 			// 进入 carve 这一 tick：只记入口速度（下限就等于当前速度，不必动速度）
-			CARVE_SPEED.put(entityId, speed);
-			CARVE_TICKS.put(entityId, 0);
+			carveSpeed.put(entityId, speed);
+			carveTicks.put(entityId, 0);
 			return;
 		}
-		int elapsed = CARVE_TICKS.getOrDefault(entityId, 0);
-		CARVE_TICKS.put(entityId, elapsed + 1);
+		int elapsed = carveTicks.getOrDefault(entityId, 0);
+		carveTicks.put(entityId, elapsed + 1);
 		if (player.horizontalCollision) {
 			return;   // 撞到方块这一 tick 不补（否则等于顶着墙往前推）
 		}
@@ -596,7 +688,7 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>速度方向自动回正到板轴</b>（整 tick 最后一个写速度的点）：每 tick 把水平速度方向朝
-	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，每步最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 6°。
+	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，每步最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 12.5°。
 	 *
 	 * <p><b>目标量就是板轴</b>（与身体左右轴平行的那个单位向量，哪一侧由 {@link #boardSide} 定 ——
 	 * 与头朝向同一个判定）：单板是横着滑的，板轴就是实际行进方向，所以「速度方向回到板轴」＝
@@ -614,11 +706,11 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>怎么掰</b>：用 {@link Mth#wrapDegrees} 取「板轴方向角 − 当前速度方向角」的最短角差
 	 * （两边都按 {@code atan2(z, x)} 口径），差 ≤ {@link #ALIGN_DEAD_ZONE_DEGREES} 0.05° 就当作对上、
-	 * 不写也不发包；否则把角差夹到 ±6° 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
+	 * 不写也不发包；否则把角差夹到 ±12.5° 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
 	 * （大小与 y 都不动、{@code hurtMarked = true}）—— 不是一步写成目标角，所以偏差可见、可追、不瞬移。
 	 *
-	 * <p><b>撞墙 tick 也照拉</b>（不再因 {@code horizontalCollision} 提前返回）：限幅 6°/tick 本身够温和，
-	 * 撞墙那一 tick 顶多把被碰撞逐轴裁过的方向往板轴掰 6°，方向不会没完没了地歪着。
+	 * <p><b>撞墙 tick 也照拉</b>（不再因 {@code horizontalCollision} 提前返回）：限幅 12.5°/tick 本身够温和，
+	 * 撞墙那一 tick 顶多把被碰撞逐轴裁过的方向往板轴掰 12.5°，方向不会没完没了地歪着。
 	 *
 	 * <p><b>服务端与客户端各跑一遍</b>（{@link SkiGlide} 的单板分支 + {@code client/SkisClient} 的
 	 * {@code END_CLIENT_TICK}，客户端只对<b>本机玩家</b>跑）：26.2 里玩家位置是<b>客户端权威</b>
@@ -630,11 +722,12 @@ public final class SnowboardControl {
 	 * <p>为什么每 tick 都要这一道：同一 tick 里还有别的写者（回落加速沿当前方向加长、动量托底、
 	 * 碰撞裁剪）会把方向拽偏，这一道是最后一个写速度的地方，收的就是这些残留。
 	 *
-	 * <p>步长 <b>必须大于每 tick 最大身体转角</b>（满速 3.94°/tick）：身体转得比速度掰得快时，
-	 * 速度方向会永久落在身体后面追不上。
+	 * <p>步长 <b>必须严格大于每 tick 最大身体转角</b>（{@link #TURN_MAX_DEGREES_PER_TICK} 12.0）：身体转得比
+	 * 速度掰得快时，速度方向会永久落在身体后面追不上。12.5 &gt; 12.0，见那个常量的注释。
 	 */
 	public static void alignCarveHeading(Entity entity, Input keys) {
 		int entityId = entity.getId();
+		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
 		if (!isSnowboard(entity) || SkiAir.isStunned(entityId)) {
 			return;
 		}
@@ -647,7 +740,7 @@ public final class SnowboardControl {
 			return;   // 真腾空了：速度方向由惯性保持，不在空中把路线掰弯
 		}
 
-		Vec3 axis = sideLocked(entityId, entity.getYRot(), boardSide(entity, keys));
+		Vec3 axis = sideLocked(entityId, entity.getYRot(), boardSide(entity, keys), clientSide);
 		double curRad = Math.atan2(horizontal.z, horizontal.x);
 		double wantRad = Math.atan2(axis.z, axis.x);   // 板轴方向角（同一套 atan2(z, x) 口径）
 		float errDeg = Mth.wrapDegrees((float) (Math.toDegrees(wantRad) - Math.toDegrees(curRad)));
@@ -665,20 +758,25 @@ public final class SnowboardControl {
 	 *
 	 * <p>腾空也照跑（从高处落下时要能带着速度拐弯）。
 	 *
-	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 8 格给定
-	 * （{@link #turnDegreesPerTick}，满速 3.94°/tick、下限 1.0、上限 6.0）。
+	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 4 格给定
+	 * （{@link #turnDegreesPerTick}，满速算出 14.43°/tick、被上限夹到 12.0，下限 2.0）。
+	 *
+	 * <p><b>累加型，常量已按「每端各跑一次」×2</b>：拆表前单机里两端各往同一张 {@code BODY_YAW} 加一次
+	 * 同一份增量（等效 2 倍角速度），拆表后每端只写自己那张表，所以 {@code TURN_*} / {@code VEER_*}
+	 * 都翻倍，单机每 tick 的转角与拆表前逐 tick 相同（见 {@link #table}）。
 	 *
 	 * <p>这里<b>不登记任何「入弯基准」</b>（旧版那两张入弯方向角 / 入弯朝向的表已删）：
 	 * 速度方向最终对不对，由 {@link #alignCarveHeading} 在 tick 末尾每 tick 朝<b>板轴</b>限幅拉回来，
 	 * 与「从哪个方向进的弯」无关 —— 所以撞墙、蹭墙、从任意角度起弯都不用特殊处理。
 	 *
 	 * <p><b>撞墙那一 tick 也照转速度</b>（不再判 {@code horizontalCollision}）：身体转多少速度就转多少，
-	 * 这一 tick 顶多多歪一点，下一个 tick 由 {@link #alignCarveHeading} 按 6°/tick 收回去。
+	 * 这一 tick 顶多多歪一点，下一个 tick 由 {@link #alignCarveHeading} 按 12.5°/tick 收回去。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
 	public static float applyCarve(Entity entity, Input input, double speed) {
 		int entityId = entity.getId();
+		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
 		if (!isCarving(entityId, input, speed)) {
 			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向。
 			return 0.0F;
@@ -701,7 +799,7 @@ public final class SnowboardControl {
 			if (horizontal.lengthSqr() < 1.0E-6D) {
 				return 0.0F;
 			}
-			Vec3 front = frontLocked(entityId, entity.getYRot());
+			Vec3 front = frontLocked(entityId, entity.getYRot(), clientSide);
 			Vec3 target = input.forward() ? front : front.scale(-1.0D);
 			// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大 ＝ 向右转
 			double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
@@ -713,7 +811,8 @@ public final class SnowboardControl {
 			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES);
 		}
 		float delta = (float) turn;
-		BODY_YAW.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
+				.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		rotateVelocity(entity, delta);   // 撞墙这一 tick 也照转：偏角由 alignCarveHeading 每 tick 收回
 		return delta;
 	}
@@ -731,6 +830,12 @@ public final class SnowboardControl {
 	 * <p>还原用的摩擦：{@code entity.level().getBlockState(entity.getBlockPosBelowThatAffectsMyMovement())}
 	 * 的 {@code getBlock().getFriction()}（雪 0.6、冰 0.98、石头 0.6、灵魂沙 0.6）。算出来的 factor
 	 * 不在 (0, 1] 就认为拿不到方块摩擦，退回用原始 speed（宁可角速度偏小，也不要除出个爆表值）。
+	 *
+	 * <p><b>摩擦换算保持不变，倍率由 {@link #TURN_RADIUS_BLOCKS} 承担</b>：半径取 4 格 ＝ 拆表前 8 格 ×2，
+	 * 因为两者都只乘在同一个除法上，等效于把每 tick 的转角整体 ×2（clamp 的两端也同步 ×2，
+	 * 所以 {@code 2 × clamp(x, 1, 6) ≡ clamp(2x, 2, 12)} 逐点相等）。
+	 * <p>实际值（雪面，摩擦 0.6 → factor 0.546）：满速 0.55 → 算 14.43 → 夹到 <b>12.0</b>；
+	 * 0.30 → <b>7.87</b>；0.14 → <b>3.67</b>；0.05 → 夹到下限 <b>2.0</b>。
 	 */
 	private static double turnDegreesPerTick(Entity entity, double speed) {
 		double factor = 0.91D;
@@ -773,8 +878,8 @@ public final class SnowboardControl {
 	}
 
 	/** 沿<b>锁定的身体朝向</b>的左 / 右方向（sign 见 {@link #sideSign}）—— 单板<b>几乎没有速度</b>时下落加速才按它给。 */
-	public static Vec3 sideLocked(int entityId, float fallbackYaw, double sign) {
-		float rad = bodyYaw(entityId, fallbackYaw) * Mth.DEG_TO_RAD;
+	public static Vec3 sideLocked(int entityId, float fallbackYaw, double sign, boolean clientSide) {
+		float rad = bodyYaw(entityId, fallbackYaw, clientSide) * Mth.DEG_TO_RAD;
 		return new Vec3(Mth.cos(rad) * sign, 0.0D, Mth.sin(rad) * sign);
 	}
 }

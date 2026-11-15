@@ -148,19 +148,20 @@ public final class SkiGlide {
 				SkiAir.tickServer(player, SkiAir.tuning(player));
 				if (SnowboardControl.isSnowboard(player)) {
 					// ——— 单板 ———
-					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
+					// 服务端这一端一律传 false：只写 / 读服务端那张表（客户端写它自己那张，见 SnowboardControl#table）
+					SnowboardControl.ensureLocked(player.getId(), player.getYRot(), false);
 					carve(player);
 				} else {
-					// ——— 双板：A / D 转身体（2.0°/tick）；W 再朝视角方向补 2.4°/tick。视角一律不动 ———
-					SkisControl.ensureLocked(player.getId(), player.getYRot());
+					// ——— 双板：A / D 转身体（4.0°/tick）；W 再朝视角方向补 4.8°/tick。视角一律不动 ———
+					SkisControl.ensureLocked(player.getId(), player.getYRot(), false);
 					Input input = player.getLastClientInput();
 					double side = SnowboardControl.sideSign(input);
 					if (side != 0.0D) {
-						SkisControl.turnBody(player.getId(), player.getYRot(), side);
+						SkisControl.turnBody(player.getId(), player.getYRot(), side, false);
 					}
 					// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛
 					if (input != null && input.forward()) {
-						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
+						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), false);
 					}
 				}
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）：只在进入穿板状态那一 tick 写一次
@@ -409,7 +410,7 @@ public final class SkiGlide {
 				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 				double along = horizontal.lengthSqr() < 1.0E-6D
 						? 0.0D
-						: horizontal.normalize().dot(SnowboardControl.sideLocked(id, player.getYRot(), 1.0D));
+						: horizontal.normalize().dot(SnowboardControl.sideLocked(id, player.getYRot(), 1.0D, false));
 				if (along * side <= 0.0D) {
 					MOMENTUM.put(id, speed);
 					return;
@@ -528,7 +529,7 @@ public final class SkiGlide {
 				return horizontal.normalize();        // 沿当前速度方向：不投影到身体横轴、不跟随朝向
 			}
 			double side = SnowboardControl.sideSign(player.getLastClientInput());
-			return side == 0.0D ? null : SnowboardControl.sideLocked(player.getId(), player.getYRot(), side);
+			return side == 0.0D ? null : SnowboardControl.sideLocked(player.getId(), player.getYRot(), side, false);
 		}
 
 		if (horizontal.lengthSqr() > MIN_MOTION_SQR) {

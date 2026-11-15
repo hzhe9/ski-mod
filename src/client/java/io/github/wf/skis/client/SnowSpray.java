@@ -216,11 +216,11 @@ public final class SnowSpray {
 	/**
 	 * 滑行方向这一 tick 转了多少度算「在转向」。
 	 *
-	 * <p><b>阈值必须低于两板最小的每 tick 转角</b>：单板 A / D carve 走 {@code SnowboardControl.TURN_RATE_DEGREES}
-	 * ＝ 1.2°/tick（两板里最小的稳定转向量），阈值取 1.0° 留 0.2° 余量；双板 A / D 是
-	 * {@code SkisControl.TURN_RATE_DEGREES} 2.0°/tick，两板按 W / S 的最大偏转 2.4°/tick（{@code VEER_MAX_DEGREES} /
-	 * {@code VIEW_TURN_RATE_DEGREES}），四档都在这条线以上。走位那种低幅方向修正一般不到 1°/tick，
-	 * 0.5° / 0.8° 的抖动不会被误判成转向。
+	 * <p><b>阈值必须低于两板最小的每 tick 转角</b>：单板 A / D carve 的角速度封底
+	 * {@code SnowboardControl.TURN_MIN_DEGREES_PER_TICK} ＝ 2.0°/tick（两板里最小的稳定转向量），阈值取 1.0° 留 1.0° 余量；
+	 * 双板 A / D 是 {@code SkisControl.TURN_RATE_DEGREES} 4.0°/tick，两板按 W / S 的最大偏转 4.8°/tick
+	 * （{@code VEER_MAX_DEGREES} / {@code VIEW_TURN_RATE_DEGREES}），四档都在这条线以上。走位那种低幅方向修正
+	 * 一般不到 1°/tick，0.5° / 0.8° 的抖动不会被误判成转向。
 	 *
 	 * <p>只是「在转向」的两个条件之一：另一条是滑速 ≥ {@link #TURN_MIN_SPEED} 0.25 格/tick
 	 * （低速时速度方向随便就转几度，光看角度会把挪步当成切弯）。
@@ -663,7 +663,7 @@ public final class SnowSpray {
 		// 只朝弯外侧单侧 0.15–1.0 × END_LATERAL（≈0.08–0.55 格），横向速度同向 —— 板端这簇不再左右开花。
 		// 顶点走与扬起层同一套 randomApex（这里仍传 turning：板端簇自己吃转向的加成）再 +BIAS_APEX_BONUS，仍夹 FLURRY_APEX_CAP。
 		if (biasEnd != 0) {
-			Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot());   // 沿锁定的身体朝向，不是视角
+			Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot(), true);   // 沿锁定的身体朝向，不是视角
 			double frontX = front.x;
 			double frontZ = front.z;
 			double endRightX = -frontZ;   // 身体右手边（与上面 rightX/rightZ 同一定义）

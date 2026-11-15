@@ -36,7 +36,7 @@ public abstract class CameraTiltMixin {
 		if (!(this.entity instanceof Player player) || !SnowboardControl.isSnowboard(player)) {
 			return null;
 		}
-		float tilt = SnowboardControl.tiltValue(player.getId());
+		float tilt = SnowboardControl.tiltValue(player.getId(), true);
 		if (tilt == 0.0F) {
 			return null;
 		}
@@ -44,7 +44,7 @@ public abstract class CameraTiltMixin {
 		double rad = Math.toRadians(tilt * SnowboardControl.tiltDegrees());
 		double forward = eye * Math.sin(rad);        // 前倾时眼睛向前移这么多格
 		double dy = eye * (Math.cos(rad) - 1.0D);    // 高度略降
-		Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot());   // 沿锁定的身体朝向，不是视角
+		Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot(), true);   // 沿锁定的身体朝向，不是视角
 		return new double[] {front.x * forward, dy, front.z * forward};
 	}
 

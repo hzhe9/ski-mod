@@ -15,7 +15,7 @@ import net.minecraft.world.phys.Vec3;
  * 以后调双板的手感只改这里，不会碰到单板。
  *
  * <p><b>朝向</b>：A / D 只转<b>身体朝向</b>
- * （{@link #BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
+ * （{@code BODY_YAW} 锁表，每 tick {@link #TURN_RATE_DEGREES} 度），滑行方向跟身体走。
  * 和单板一样是「锁住 + 按键转」，区别是双板的 W / S 仍然沿身体前后滑（单板的 W / S 只改姿态）。
  *
  * <p><b>按 W 时身体朝视角转</b>：{@link #turnTowardView} 每 tick 把身体朝视角方向拨
@@ -26,7 +26,7 @@ import net.minecraft.world.phys.Vec3;
  * {@link #ALIGN_DEGREES_PER_TICK} 度（{@link #shouldAlignOnGround} / {@link #alignVelocity}，
  * 由 {@link SkiGlide} 的双板分支调用）—— 转完身落地，方向立刻跟上，不靠 {@code SkiControl.steer} 慢慢摆。
  *
- * <p><b>转向期间速度方向由身体朝向推导</b>（{@link #alignTurnHeading}）：只要这一 tick {@link #BODY_YAW}
+ * <p><b>转向期间速度方向由身体朝向推导</b>（{@link #alignTurnHeading}）：只要这一 tick {@code BODY_YAW}
  * 真的被 {@link #turnBody} / {@link #turnTowardView} 转过，整 tick 末尾就把水平速度方向<b>直接写成</b>
  * 「入弯方向角 + 身体累计转角」—— 模型转多少、速度方向就转多少。上面那条 {@code alignVelocity} 是 9°/tick 的
  * <b>限幅趋近</b>，空中 / 按 S 时干脆不跑，所以只靠它速度会落后于身体；末尾这一道锁定把偏角钉在「入弯时的
@@ -39,14 +39,21 @@ import net.minecraft.world.phys.Vec3;
  * 不动（身体在下面转）；顶到之后头被身体拖着走。
  */
 public final class SkisControl {
-	/** 实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
-	private static final IdMap<Float> BODY_YAW = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
+	private static final IdMap<Float> BODY_YAW_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义（为什么分两份见 {@link #table}）。 */
+	private static final IdMap<Float> BODY_YAW_SERVER = new IdMap<>();
 	/**
-	 * 双板：按住 A / D 时每 tick 转身体多少度（<b>2.0</b>°/tick ＝ 40°/s，转满 180° 需 90 tick ＝ 4.5 s）。
-	 * 8.0 → 4.5 → 3.5 → <b>2.0</b>（用户 2026-10-31 要「再慢一档」）。速度方向由 {@link #alignTurnHeading}
-	 * 从身体推导，所以模型慢多少、速度方向就慢多少。
+	 * 双板：按住 A / D 时每 tick 转身体多少度（<b>4.0</b>°/tick ＝ 80°/s，转满 180° 需 45 tick ＝ 2.25 s）。
+	 * 8.0 → 4.5 → 3.5 → 2.0（用户 2026-10-31 要「再慢一档」）→ <b>4.0</b>。
+	 * 速度方向由 {@link #alignTurnHeading} 从身体推导，所以模型慢多少、速度方向就慢多少。
+	 *
+	 * <p><b>2.0 → 4.0 是按「每端各跑一次」重新标定</b>（见 {@link #table}）：这个常量是<b>累加型</b>
+	 * 的每 tick 固定步长，拆表前单机里客户端与服务端各减一次 2.0（同一张 {@code BODY_YAW} 每 tick 走 4.0），
+	 * 拆表后每端只写自己那张表，取 4.0 才能让单机每 tick 的转角不变；专用服务器也随之从 2.0 提到 4.0
+	 * （＝终于和单机一致）。饱和步长型的 {@link #VIEW_TURN_RATE_DEGREES} 同理。
 	 */
-	private static final float TURN_RATE_DEGREES = 2.0F;
+	private static final float TURN_RATE_DEGREES = 4.0F;
 	/**
 	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
 	 * 刚好看到正侧方，背后整片都是禁区。
@@ -57,10 +64,14 @@ public final class SkisControl {
 	public static final float VIEW_LIMIT_DEGREES = 90.0F;
 
 	/**
-	 * W 时身体每 tick 朝视角方向转多少度（<b>2.4</b>°/tick ＝ 48°/s；90° 残余约 38 tick ≈ 1.9 s 对齐，
-	 * 转满 180° 需 75 tick ＝ 3.75 s）。4.0 → <b>2.4</b>：与 A / D 同步降速。
+	 * W 时身体每 tick 朝视角方向转多少度（<b>4.8</b>°/tick ＝ 96°/s；90° 残余约 19 tick ≈ 0.9 s 对齐，
+	 * 转满 180° 需 37.5 tick ≈ 1.9 s）。4.0 → 2.4 → <b>4.8</b>：与 A / D 同步。
+	 *
+	 * <p>2.4 → 4.8 同 {@link #TURN_RATE_DEGREES} 的理由（每端各跑一次）。这一项是<b>饱和步长</b>
+	 * （{@code clamp(delta, ±rate)}）：两次复合正好等于一次 2×rate，所以 ×2 是<b>逐 tick 精确等价</b>的
+	 * （残余 ≤ rate 时两端各走一步就到目标，一次 2×rate 也一样到目标）。
 	 */
-	private static final float VIEW_TURN_RATE_DEGREES = 2.4F;
+	private static final float VIEW_TURN_RATE_DEGREES = 4.8F;
 
 	/** 残余偏角小于它就当成对齐（防抖，不要每 tick 无限逼近）。 */
 	private static final float VIEW_TURN_MIN_DEGREES = 0.5F;
@@ -69,28 +80,36 @@ public final class SkisControl {
 	private static final float TURN_EPS_DEGREES = 1.0E-4F;
 
 	/**
-	 * 实体 id → <b>入弯（开始转向）时的水平速度方向角</b>（度，{@code atan2(-x, z)} 口径 ——
+	 * <b>服务端</b>那张表：实体 id → <b>入弯（开始转向）时的水平速度方向角</b>（度，{@code atan2(-x, z)} 口径 ——
 	 * 与 {@link #alignVelocity} 同一套参数化）。
 	 *
 	 * <p>转向期间速度方向<b>不再靠每 tick 增量维持</b>（{@link #alignVelocity} 是 9°/tick 的限幅趋近，
 	 * 空中 / 按 S 时干脆不跑，累计下来速度越来越落后于身体），而是每 tick 用它 + 身体累计转角<b>直接算出来</b>。
-	 * 退出转向就清掉。<b>双板专属</b>，与单板的 {@code CARVE_HEADING} 各一份、互不相干。
+	 * 退出转向就清掉。<b>双板专属</b>，与单板的 {@code CARVE_*} 各一份、互不相干。
+	 *
+	 * <p>这张表只在 {@link #alignTurnHeading}（服务端）里读写 —— 单机里也只有一次写入，所以<b>不翻倍</b>。
 	 */
-	private static final IdMap<Double> TURN_HEADING = new IdMap<>();
+	private static final IdMap<Double> TURN_HEADING_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Double> TURN_HEADING_CLIENT = new IdMap<>();
 	/**
-	 * 实体 id → <b>入弯时的身体朝向</b>（度，{@link #BODY_YAW} 的那个 yaw）。
-	 * 期望速度方向 = {@link #TURN_HEADING} + ({@code BODY_YAW 现在 − 它})，所以「身体转多少、速度就转多少」；
+	 * <b>服务端</b>那张表：实体 id → <b>入弯时的身体朝向</b>（度，{@link #BODY_YAW_SERVER} 的那个 yaw）。
+	 * 期望速度方向 = {@link #TURN_HEADING_SERVER} + ({@code BODY_YAW 现在 − 它})，所以「身体转多少、速度就转多少」；
 	 * 两者之差就是<b>入弯那一刻固有的「身体−速度」偏角</b>，整段弯保持不变。
 	 */
-	private static final IdMap<Float> TURN_YAW0 = new IdMap<>();
+	private static final IdMap<Float> TURN_YAW0_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Float> TURN_YAW0_CLIENT = new IdMap<>();
 	/**
-	 * 实体 id → <b>上一次 tick 结束时的 bodyYaw</b>（{@link #alignTurnHeading} 每次跑都刷新）。
+	 * <b>服务端</b>那张表：实体 id → <b>上一次 tick 结束时的 bodyYaw</b>（{@link #alignTurnHeading} 每次跑都刷新）。
 	 *
 	 * <p>「这一 tick 到底有没有在转向」就看 {@code BODY_YAW 现在} 与它的差：{@link #turnBody} /
 	 * {@link #turnTowardView} 真的转过才说明在转（A / D 按下一定转；按 W 且朝视角还有残差才转）。
-	 * 不靠那两个方法打标记 —— 客户端与服务端都会在 tick 里写 {@code BODY_YAW}，比对<b>实际写入量</b>才准。
+	 * 不靠那两个方法打标记 —— 客户端与服务端都会在 tick 里写自己的 {@code BODY_YAW}，比对<b>实际写入量</b>才准。
 	 */
-	private static final IdMap<Float> TURN_LAST_YAW = new IdMap<>();
+	private static final IdMap<Float> TURN_LAST_YAW_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Float> TURN_LAST_YAW_CLIENT = new IdMap<>();
 
 	/**
 	 * 下落加速的基数：每下落 1 格加多少。
@@ -255,16 +274,41 @@ public final class SkisControl {
 	private SkisControl() {
 	}
 
+	/**
+	 * 按端选一份表（照 {@link SkiAir} 的 {@code CLIENT_STATES} / {@code SERVER_STATES}，与
+	 * {@link SnowboardControl} 同一套做法）。
+	 *
+	 * <p><b>为什么每张表都要两份</b>：单机（集成服务端与客户端在同一个 JVM）里 {@code LocalPlayer} 与
+	 * {@code ServerPlayer} <b>共用同一个 entity id</b>，而 {@link #turnBody} / {@link #turnTowardView}
+	 * 这类「每 tick 加一个增量」的方法是<b>两端各调一次</b>。共用一张表时同一份增量被加两次 ——
+	 * 单机的转向速率因此是专用服务器的 2 倍（`TURN_RATE_DEGREES` 2.0 在单机实际是 4.0）。
+	 *
+	 * <p><b>常量按「每端各跑一次」标定</b>：拆开后单机每 tick 只有一次写入，所以累加型 / 饱和步长型的
+	 * {@link #TURN_RATE_DEGREES} 与 {@link #VIEW_TURN_RATE_DEGREES} 都 ×2，
+	 * 单机逐 tick 与拆表前相同、专用服务器终于和单机一致。只在一端跑的
+	 * {@code TURN_HEADING / TURN_YAW0 / TURN_LAST_YAW}（{@link #alignTurnHeading}）与
+	 * {@link #ALIGN_DEGREES_PER_TICK}（{@link #alignVelocity}）<b>不翻倍</b>。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端那一份、{@code false} ＝ 服务端那一份
+	 */
+	private static <T> IdMap<T> table(IdMap<T> clientTable, IdMap<T> serverTable, boolean clientSide) {
+		return clientSide ? clientTable : serverTable;
+	}
+
 	// ---------------------------------------------------------------- 身体朝向
 
-	/** 穿双板时锁住身体朝向：<b>第一次调用</b>记下当时的朝向，之后只由 {@link #turnBody} 改。 */
-	public static void ensureLocked(int entityId, float yaw) {
-		BODY_YAW.putIfAbsent(entityId, yaw);
+	/**
+	 * 穿双板时锁住身体朝向：<b>第一次调用</b>记下当时的朝向，之后只由 {@link #turnBody} 改。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端（{@code SkisClient}）、{@code false} ＝ 服务端（{@link SkiGlide}）
+	 */
+	public static void ensureLocked(int entityId, float yaw, boolean clientSide) {
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).putIfAbsent(entityId, yaw);
 	}
 
 	/** 拿不到锁时用传入的视角兜底。 */
-	public static float bodyYaw(int entityId, float fallback) {
-		return BODY_YAW.getOrDefault(entityId, fallback);
+	public static float bodyYaw(int entityId, float fallback, boolean clientSide) {
+		return table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).getOrDefault(entityId, fallback);
 	}
 
 	/**
@@ -272,28 +316,34 @@ public final class SkisControl {
 	 *
 	 * <p>MC 的水平朝向向量是 {@code (-sin yaw, cos yaw)}：<b>yaw 增大 ＝ 向右转</b>，
 	 * 所以按 A（左）要<b>减</b>、按 D（右）要加。这里<b>只动身体朝向</b>，视角一律不碰。
+	 *
+	 * @param clientSide 写哪一端那张表（{@code SkisClient} 传 {@code true}、{@link SkiGlide} 传 {@code false}）
 	 */
-	public static float turnBody(int entityId, float fallback, double side) {
+	public static float turnBody(int entityId, float fallback, double side, boolean clientSide) {
+		IdMap<Float> bodyYaw = table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide);
 		if (SkiAir.isStunned(entityId)) {
-			return BODY_YAW.getOrDefault(entityId, fallback);   // 硬着陆失控：A / D 不再转身体
+			return bodyYaw.getOrDefault(entityId, fallback);   // 硬着陆失控：A / D 不再转身体
 		}
-		float yaw = BODY_YAW.getOrDefault(entityId, fallback) - (float) side * TURN_RATE_DEGREES;
-		BODY_YAW.put(entityId, yaw);
+		float yaw = bodyYaw.getOrDefault(entityId, fallback) - (float) side * TURN_RATE_DEGREES;
+		bodyYaw.put(entityId, yaw);
 		return yaw;
 	}
 
 	/**
 	 * <b>W：把身体朝视角方向转一步</b>（步长限幅、不越过目标），返回新朝向。
 	 *
-	 * <p>只转 {@link #BODY_YAW}，<b>不碰视角</b>：视角在世界坐标里不动，身体在下面转过去；
+	 * <p>只转 {@code BODY_YAW}（本端那张），<b>不碰视角</b>：视角在世界坐标里不动，身体在下面转过去；
 	 * 「视角相对身体」的偏角因此每 tick 收窄 {@link #VIEW_TURN_RATE_DEGREES} 度，
 	 * 由 {@code client/SkiViewSmoothing} 的 {@code headOffset -= bodyStep} 自动收敛。
 	 * 残余偏角小于 {@link #VIEW_TURN_MIN_DEGREES} 就不动（防抖）。
 	 *
-	 * <p>客户端与服务端各跑一次同一条规则（顺序：先 A / D 的 {@link #turnBody}，再这里）。
+	 * <p>客户端与服务端各跑一次同一条规则（顺序：先 A / D 的 {@link #turnBody}，再这里），各写自己那张表。
+	 *
+	 * @param clientSide 写哪一端那张表（{@code SkisClient} 传 {@code true}、{@link SkiGlide} 传 {@code false}）
 	 */
-	public static float turnTowardView(int entityId, float fallback, float viewYaw) {
-		float yaw = BODY_YAW.getOrDefault(entityId, fallback);
+	public static float turnTowardView(int entityId, float fallback, float viewYaw, boolean clientSide) {
+		IdMap<Float> bodyYaw = table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide);
+		float yaw = bodyYaw.getOrDefault(entityId, fallback);
 		if (SkiAir.isStunned(entityId)) {
 			return yaw;   // 硬着陆失控：W 不再把身体朝视角追过去
 		}
@@ -303,7 +353,7 @@ public final class SkisControl {
 		}
 		float step = Mth.clamp(delta, -VIEW_TURN_RATE_DEGREES, VIEW_TURN_RATE_DEGREES);
 		yaw += step;
-		BODY_YAW.put(entityId, yaw);
+		bodyYaw.put(entityId, yaw);
 		return yaw;
 	}
 
@@ -311,15 +361,15 @@ public final class SkisControl {
 	 * 脱板 / 换板：清掉这个实体的身体朝向与转向推导状态。
 	 *
 	 * @param clientSide {@code true} ＝ 客户端调用（{@code SkisClient}）、{@code false} ＝ 服务端调用
-	 *                   （{@link SkiGlide}）；只看它决定清 {@link SkiAir} 的哪一张表 —— 单机里两端共用
-	 *                   同一个 entity id，客户端清表不能把服务端的失控 / 冷却一起抹掉
+	 *                   （{@link SkiGlide}）；决定清哪一端的表 —— 单机里两端共用同一个 entity id，
+	 *                   客户端清表不能把服务端的失控 / 冷却（以及服务端那份转向推导状态）一起抹掉
 	 */
 	public static void forgetBody(int entityId, boolean clientSide) {
-		BODY_YAW.remove(entityId);
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).remove(entityId);
 		// 转向推导的三份状态一起清：脱板 / 换板之后不能拿着上一段弯的入弯方向继续算
-		TURN_HEADING.remove(entityId);
-		TURN_YAW0.remove(entityId);
-		TURN_LAST_YAW.remove(entityId);
+		table(TURN_HEADING_CLIENT, TURN_HEADING_SERVER, clientSide).remove(entityId);
+		table(TURN_YAW0_CLIENT, TURN_YAW0_SERVER, clientSide).remove(entityId);
+		table(TURN_LAST_YAW_CLIENT, TURN_LAST_YAW_SERVER, clientSide).remove(entityId);
 		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
 		if (clientSide) {
 			SkiAir.forgetClient(entityId);
@@ -331,12 +381,14 @@ public final class SkisControl {
 	/**
 	 * 整表清空：换世界 / 重连 / 换维度时由客户端（{@code SkisClient}）调用 —— 那些场合所有 id 都作废，
 	 * 留着只会在 id 被复用时把上一段的身体朝向当成「已经锁好」。
+	 *
+	 * @param clientSide 清哪一端那套表；客户端调用传 {@code true}
 	 */
-	public static void forgetBodyAll() {
-		BODY_YAW.clear();
-		TURN_HEADING.clear();
-		TURN_YAW0.clear();
-		TURN_LAST_YAW.clear();
+	public static void forgetBodyAll(boolean clientSide) {
+		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).clear();
+		table(TURN_HEADING_CLIENT, TURN_HEADING_SERVER, clientSide).clear();
+		table(TURN_YAW0_CLIENT, TURN_YAW0_SERVER, clientSide).clear();
+		table(TURN_LAST_YAW_CLIENT, TURN_LAST_YAW_SERVER, clientSide).clear();
 	}
 
 	// ---------------------------------------------------------------- 参数
@@ -389,7 +441,8 @@ public final class SkisControl {
 			return false;
 		}
 		// 用身体朝向而不是视角：双板现在视角可以独立于滑行方向，拿视角判「在往前滑」会在转过身后失效
-		float yaw = bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
+		// 只在服务端跑（ServerPlayer）-> 读服务端那张表
+		float yaw = bodyYaw(player.getId(), player.getYRot(), false) * Mth.DEG_TO_RAD;
 		Vec3 front = new Vec3(-Mth.sin(yaw), 0.0D, Mth.cos(yaw));
 		return horizontal.normalize().dot(front) > BRAKE_MIN_ALIGN;
 	}
@@ -421,14 +474,14 @@ public final class SkisControl {
 	}
 
 	/**
-	 * <b>贴地对齐</b>：把水平速度的<b>方向</b>朝身体前方（{@link #BODY_YAW}，拿不到锁时用玩家 yaw 兜底）
+	 * <b>贴地对齐</b>：把水平速度的<b>方向</b>朝身体前方（{@code BODY_YAW}，拿不到锁时用玩家 yaw 兜底）
 	 * 转 {@code min(|残差|, ALIGN_DEGREES_PER_TICK)} 度 —— <b>只改方向、大小一点不动</b>
 	 * （绕 Y 旋转水平分量，{@code y} 原样保留），写回 {@code setDeltaMovement} 并置
 	 * {@code hurtMarked = true}（不置会被客户端的移动预测抹掉）。
 	 *
 	 * <p>残差用 {@link Mth#wrapDegrees(float)} 算（−180…180），所以「已经转过身」时也是走<b>短的那条</b>弧、
 	 * 不会绕远路；每 tick 只转 {@link #ALIGN_DEGREES_PER_TICK} 9° ≈ 180°/s，落地后一两 tick 就朝上。
-	 * 方向角与 {@link #BODY_YAW} 同一套参数化：{@code 方向角 = atan2(−x, z)}，yaw 增大 ＝ 向右转
+	 * 方向角与 {@code BODY_YAW} 同一套参数化：{@code 方向角 = atan2(−x, z)}，yaw 增大 ＝ 向右转
 	 * （与 {@code SnowboardControl#rotateVelocity} 的旋转公式一致）。
 	 *
 	 * <p>判定在 {@link #shouldAlignOnGround}；本方法只做旋转，不判条件、也不动动量。
@@ -440,7 +493,7 @@ public final class SkisControl {
 			return;   // 没速度可掰
 		}
 		double current = Math.toDegrees(Math.atan2(-motion.x, motion.z));
-		float yaw = bodyYaw(player.getId(), player.getYRot());
+		float yaw = bodyYaw(player.getId(), player.getYRot(), false);   // 只在服务端跑 -> 服务端那张表
 		float residual = Mth.wrapDegrees((float) (yaw - current));
 		double step = Mth.clamp(residual, -ALIGN_DEGREES_PER_TICK, ALIGN_DEGREES_PER_TICK);
 		double rad = Math.toRadians(step);
@@ -455,11 +508,11 @@ public final class SkisControl {
 	/**
 	 * <b>转向期间速度方向由身体朝向推导</b>（双板专用，由 {@link SkiGlide} 的双板分支在整 tick
 	 * <b>最后一个</b>写速度的位置调用）：把水平速度方向<b>直接写成</b>
-	 * 「{@link #TURN_HEADING 入弯时的速度方向角} + 身体累计转角」，大小与 {@code y} 都不动。
+	 * 「{@code TURN_HEADING}（入弯时的速度方向角）+ 身体累计转角」，大小与 {@code y} 都不动。
 	 *
 	 * <p><b>贴地才重写速度方向</b>：{@code !player.onGround()} 时本方法<b>直接返回</b>，只转身体 / 视角，
 	 * 速度方向由惯性保持（空中转身不掰速度 —— 否则下落加速会沿新朝向叠加，人物在空中一转身，落点就跟着偏）；
-	 * 空中这一 tick 连同 {@link #TURN_HEADING} / {@link #TURN_YAW0} 两份入弯记录一起清掉，
+	 * 空中这一 tick 连同 {@code TURN_HEADING} / {@code TURN_YAW0} 两份入弯记录一起清掉，
 	 * 免得落地那一 tick 把空中累计的转角一次性算进速度方向、猛地一扭。
 	 *
 	 * <p>为什么要这一道：{@link #alignVelocity} 是 9°/tick 的限幅趋近，而且只在「贴地 + 没按 S」时跑
@@ -469,9 +522,9 @@ public final class SkisControl {
 	 *
 	 * <p>口径（每 tick 一次）：
 	 * <ul>
-	 *   <li><b>判定在不在转向</b>：拿 {@code BODY_YAW 现在} 与上一次调用时记下的 {@link #TURN_LAST_YAW}
+	 *   <li><b>判定在不在转向</b>：拿 {@code BODY_YAW 现在} 与上一次调用时记下的 {@code TURN_LAST_YAW}
 	 *       比 —— {@link #turnBody} / {@link #turnTowardView} 这一 tick 真的转过才算（A / D 按下一定转；
-	 *       按 W 且朝视角还有残差才转）；没转就把 {@link #TURN_HEADING} / {@link #TURN_YAW0} 一起清掉；</li>
+	 *       按 W 且朝视角还有残差才转）；没转就把 {@code TURN_HEADING} / {@code TURN_YAW0} 一起清掉；</li>
 	 *   <li><b>入弯那一 tick</b>：记下当前速度方向角（{@code atan2(-x, z)}，与 {@link #alignVelocity}
 	 *       同一套参数化）与当前 bodyYaw，本 tick 不改速度（off = 0）；</li>
 	 *   <li><b>持续期间</b>：{@code off = wrapDegrees(bodyYawNow − TURN_YAW0)}，
@@ -486,6 +539,11 @@ public final class SkisControl {
 	 */
 	public static void alignTurnHeading(ServerPlayer player) {
 		int entityId = player.getId();
+		// 只在服务端跑（SkiGlide）-> 全部走服务端那套表；这三份都是「写一次值」型的推导状态，
+		// 单机里也只有这一次写入，所以不属于翻倍清单
+		IdMap<Double> headings = table(TURN_HEADING_CLIENT, TURN_HEADING_SERVER, false);
+		IdMap<Float> yaw0s = table(TURN_YAW0_CLIENT, TURN_YAW0_SERVER, false);
+		IdMap<Float> lastYaws = table(TURN_LAST_YAW_CLIENT, TURN_LAST_YAW_SERVER, false);
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double speed = horizontal.length();
@@ -495,32 +553,32 @@ public final class SkisControl {
 			// 会在落地那一 tick 把空中累计的转角一次性算进速度方向，速度猛地一扭。
 			// 下落加速（trackDescent）是沿当前速度方向叠加的，速度方向若跟着身体走，
 			// 下落加速就会沿「新朝向」叠加 —— 这就是「空中转身改了速度方向」的观感来源。
-			TURN_HEADING.remove(entityId);
-			TURN_YAW0.remove(entityId);
+			headings.remove(entityId);
+			yaw0s.remove(entityId);
 			return;
 		}
 
-		float yawNow = bodyYaw(entityId, player.getYRot());
-		Float lastYaw = TURN_LAST_YAW.put(entityId, yawNow);   // 记下本 tick 结束时的朝向，供下一 tick 比对
+		float yawNow = bodyYaw(entityId, player.getYRot(), false);
+		Float lastYaw = lastYaws.put(entityId, yawNow);   // 记下本 tick 结束时的朝向，供下一 tick 比对
 		boolean turning = lastYaw != null
 				&& Math.abs(Mth.wrapDegrees(yawNow - lastYaw)) > TURN_EPS_DEGREES;
 
 		if (!turning) {
 			// 这一 tick 身体没动：退出转向，入弯记录一起清，下一段弯重新记
-			TURN_HEADING.remove(entityId);
-			TURN_YAW0.remove(entityId);
+			headings.remove(entityId);
+			yaw0s.remove(entityId);
 			return;
 		}
 		if (speed < 1.0E-6D) {
 			return;   // 速度几乎为 0：没有方向可推导（身体照旧转，下一 tick 有速度了再记 / 再锁）
 		}
 
-		Double heading = TURN_HEADING.get(entityId);
-		Float yaw0 = TURN_YAW0.get(entityId);
+		Double heading = headings.get(entityId);
+		Float yaw0 = yaw0s.get(entityId);
 		if (heading == null || yaw0 == null) {
 			// 入弯这一 tick：记下速度方向角与当时的 bodyYaw。本 tick 期望方向 == 当前方向，不必写。
-			TURN_HEADING.put(entityId, Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z)));
-			TURN_YAW0.put(entityId, yawNow);
+			headings.put(entityId, Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z)));
+			yaw0s.put(entityId, yawNow);
 			return;
 		}
 

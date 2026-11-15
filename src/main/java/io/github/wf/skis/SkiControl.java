@@ -84,7 +84,7 @@ public final class SkiControl {
 			return null;
 		}
 		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝身体前方转过去
-		float yaw = SkisControl.bodyYaw(player.getId(), player.getYRot()) * Mth.DEG_TO_RAD;
+		float yaw = SkisControl.bodyYaw(player.getId(), player.getYRot(), false) * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(yaw) * sign, 0.0D, Mth.cos(yaw) * sign);
 	}
 }

@@ -41,7 +41,7 @@ public abstract class EntityTiltMixin {
 		}
 		if (avatar.feetEquipment.getItem() == SkisMod.SNOWBOARD) {
 			// 单板 W / S 的前后倾（双板没有这一项）
-			float tilt = SnowboardControl.tiltValue(avatar.id);
+			float tilt = SnowboardControl.tiltValue(avatar.id, true);
 			if (tilt != 0.0F) {
 				poseStack.mulPose(Axis.XP.rotationDegrees(-tilt * SnowboardControl.tiltDegrees()));
 			}
