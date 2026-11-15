@@ -4,7 +4,11 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"LivingEntityJumpMixin",
-		"LivingEntityJumpPowerMixin"
+		"LivingEntityJumpPowerMixin",
+		"EntityStartRidingMixin",
+		"PlayerGlideMixin",
+		"LivingEntityClimbMixin",
+		"EntitySwimMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

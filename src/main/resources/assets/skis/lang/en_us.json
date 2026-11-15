@@ -14,5 +14,6 @@
   "item.skis.snowboard.brushed": "Brushed Snowboard",
   "item.skis.snowboard.neon": "Neon Snowboard",
   "item.skis.snowboard.leopard": "Leopard Snowboard",
-  "itemGroup.skis": "Ski Gear"
+  "itemGroup.skis": "Ski Gear",
+  "message.skis.no_riding": "You can't ride while wearing skis"
 }

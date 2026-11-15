@@ -108,6 +108,12 @@ public final class SkiGlide {
 		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				// 兜底：已经在车上 / 生物上，再右键穿上板 —— 新上车那一侧由 EntityStartRidingMixin 拦，
+				// 已经在骑的这一侧只能靠「每 tick 检查一次，穿板就下车」。放在 isSkiing 早退之前：
+				// 骑乘时 isSkiing 本来就是 false（见下面那个方法），不能等它。
+				if (player.isPassenger() && SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+					player.stopRiding();
+				}
 				if (!isSkiing(player)) {
 					setStepHeight(player, 0.6D);   // 恢复原版台阶高度
 					resetGravity(player);          // 恢复原版重力
