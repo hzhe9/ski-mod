@@ -37,8 +37,9 @@ import net.minecraft.world.phys.Vec3;
  *       的失控（<b>失控期间禁止起跳</b>：{@link #tryJump} 在 {@code stunTicks > 0} 时直接返回 false）。
  *       多翻了几圈只要停在直立附近也算净落。</li>
  *   <li><b>起跳（唯一入口，{@link #tryJump}）</b>：本模组接管 —— 原版 {@code jumpFromGround()} 在穿板时被取消
- *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
- *       （6 tick）内仍可跳；否则 {@code vy ≤ 0} 且脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}（1.0 格）也跳。
+ *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发，条件<b>只有两条</b>：{@code onGround} 立即跳；
+ *       离地 {@code COYOTE_TICKS}（6 tick）内仍可跳。**不再有「空中向下打射线、地面在 1 格内就补跳」那条** ——
+ *       见 {@link #canJump} 的说明。
  *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发；
  *       这个冷却<b>在落地沿也重新起算，但只在这一趟腾空里真起过跳（{@code jumpedThisAir}）
  *       或真开过翻（{@code flipStarted}）时才算</b> —— 只是从坡上滑落 / 走下台阶 / 掉到地上的，
@@ -78,6 +79,12 @@ public final class SkiAir {
 	 * 定位完成后<b>把本常量与所有 {@code DEBUG_LANDING} 分支一起删掉</b>。
 	 */
 	private static final boolean DEBUG_LANDING = true;
+
+	/**
+	 * <b>临时探针专用的射线长度</b>（格）：只给 {@code [skis/LAND] ... groundBelow=} 那一行量「脚底到下方地面」
+	 * 用，<b>不参与任何判定</b>。与 {@code DEBUG_LANDING} 同生共死 —— 探针删掉时一起删。
+	 */
+	private static final double PROBE_GROUND_RANGE = 1.0D;
 
 	/** 一整圈。角度按它取模保存（多圈只体现在落地判定上）。 */
 	public static final double FULL_TURN_DEGREES = 360.0D;
@@ -125,8 +132,6 @@ public final class SkiAir {
 		private final double[] powerBySpeedLut;
 		/** 这张表对应的跳高上限（格）：只作依据/自检，不参与反推（表才是唯一事实源）。 */
 		private final double jumpMaxHeight;
-		/** 离地补跳的高度门槛（格）：腾空时脚底到下方地面 ≤ 它就还能再起跳一次；0 ＝ 关掉。 */
-		private final double jumpGroundRange;
 		/** 离开地面后多少 tick 内按空格仍算「刚离地」可起跳（土狼时间 / coyote time）。 */
 		private final int coyoteTicks;
 		/** 按下空格后多少 tick 内只要条件满足就自动发出（输入缓冲）。 */
@@ -158,7 +163,7 @@ public final class SkiAir {
 		/** 摔倒扣血上限（0 = 关闭）。 */
 		private final double crashDamageMax;
 
-		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight, double jumpGroundRange,
+		public Tuning(double[] powerBySpeedLut, double jumpMaxHeight,
 				int coyoteTicks, int jumpBufferTicks, int jumpCooldownTicks, double maxSpeed,
 				double flipMinSpeed,
 				double flipDegreesPerTick, int flipHoldDelayTicks, double flipLandingToleranceDegrees,
@@ -168,7 +173,6 @@ public final class SkiAir {
 			}
 			this.powerBySpeedLut = powerBySpeedLut.clone();   // 拷一份：外部那张表以后被改也不影响已建的 Tuning
 			this.jumpMaxHeight = jumpMaxHeight;
-			this.jumpGroundRange = jumpGroundRange;
 			this.coyoteTicks = coyoteTicks;
 			this.jumpBufferTicks = jumpBufferTicks;
 			this.jumpCooldownTicks = jumpCooldownTicks;
@@ -204,11 +208,6 @@ public final class SkiAir {
 		/** 这张表对应的跳高上限（格）：给调试 / 文档对账用，不参与力度计算。 */
 		public double jumpMaxHeight() {
 			return jumpMaxHeight;
-		}
-
-		/** 离地补跳的高度门槛（格）：脚底到下方地面 ≤ 它 ＋ {@code vy ≤ 0} ＋ 按住空格 ＝ 再起跳一次。 */
-		public double jumpGroundRange() {
-			return jumpGroundRange;
 		}
 
 		/** 离地后多少 tick 内按空格仍算「刚离地」（土狼时间）。 */
@@ -405,10 +404,23 @@ public final class SkiAir {
 	 * <p><b>触发条件</b>（先要「想跳」＝按住空格，或按下那一次还在缓冲窗内）：
 	 * <ol>
 	 *   <li>{@code onGround} → 立即起跳；</li>
-	 *   <li>不在 {@code onGround}，但离地还没超过 {@code COYOTE_TICKS}（6 tick「逗留窗」）→ 仍算刚离地；</li>
-	 *   <li>不在 {@code onGround}，{@code vy ≤ 0} 且脚底到下方地面 ≤ {@code JUMP_GROUND_RANGE}（1.0 格，
-	 *       向下那 1.0 格的<b>碰撞射线</b>）→ 贴地小跳 / 过台阶后立刻再跳（原来的「离地补跳」并进这里，只此一份）。</li>
+	 *   <li>不在 {@code onGround}，但离地还没超过 {@code COYOTE_TICKS}（6 tick「逗留窗」）→ 仍算刚离地。</li>
 	 * </ol>
+	 *
+	 * <p><b>为什么没有「空中向下打射线」那一条</b>（曾经存在、已删除）：原第三条是「不在 {@code onGround}、
+	 * {@code vy ≤ 0}、且脚底到下方地面 ≤ 1.0 格就打射线补跳」。实机日志直接证伪：腾空下落时
+	 * {@code groundBelow} 落在 0.6–0.9 格（正是 1.0 格射线内），服务端每 tick 都判「可以跳」并把人再次弹起 ——
+	 * <pre>
+	 * S jump! y=1118.64 vy=0.460 holdTicks=0 onGround=false groundBelow=0.635
+	 * S jump! y=1116.62 vy=0.458 holdTicks=0 onGround=false groundBelow=0.621
+	 * S jump! y=1113.87 vy=0.456 holdTicks=0 onGround=false groundBelow=0.874
+	 * </pre>
+	 * {@code holdTicks} 为 0 就暴露了另一半问题：它<b>只在客户端 tick 里累加</b>，服务端永远是 0，
+	 * 所以 {@link #tryJump} 里「空翻中不补跳」那道门在服务端形同虚设 —— 服务端一路补跳，人一下落就被弹起、
+	 * <b>永远碰不到地</b>，于是落地沿 / 落地判定 / 禁跳 / 角度归零全都不发生（地面一旦掉出 1 格射线范围
+	 * 反而能真落上，用户看到的就是「相差一格以内就不判定」）。删掉这条之后下落就是下落，落地沿正常触发。
+	 * 它原本要兜的「坡面 {@code onGround} 抖动 → 按空格没反应」已由土狼窗覆盖：
+	 * {@code COYOTE_TICKS} ＝ 6 tick，实测贴面抖动最多 3 tick，6 tick 的门槛足够宽。
 	 *
 	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
 	 * 自动发出。<b>防连发</b>：{@code JUMP_COOLDOWN_TICKS}（10 tick）在起跳成功时置满；<b>落地沿也重新起算，
@@ -521,7 +533,7 @@ public final class SkiAir {
 		if (state.jumpCooldownTicks > 0) {
 			return false;                                       // 刚起跳过：防连发
 		}
-		if (!canJump(player, tuning, onGround, state)) {
+		if (!canJump(onGround, state)) {
 			return false;
 		}
 		Vec3 motion = player.getDeltaMovement();
@@ -537,26 +549,28 @@ public final class SkiAir {
 			SkisMod.LOGGER.info("[skis/LAND] {} jump! y={} vy={} holdTicks={} onGround={} groundBelow={}",
 					player.level().isClientSide() ? "C" : "S", String.format("%.2f", player.getY()),
 					String.format("%.3f", player.getDeltaMovement().y), state.holdTicks, onGround,
-					tuning.jumpGroundRange() > 0.0D
-							? String.format("%.3f", groundDistance(player, tuning.jumpGroundRange()))
-							: "-");
+					String.format("%.3f", groundDistance(player, PROBE_GROUND_RANGE)));
 		}
 		return true;
 	}
 
-	/** 这一 tick「脚在哪儿」是否满足起跳：贴地 / 逗留窗 / 贴地小跳，三条之一。 */
-	private static boolean canJump(Player player, Tuning tuning, boolean onGround, AirState state) {
-		if (onGround || state.coyoteTicks > 0) {
-			return true;
-		}
-		if (player.getDeltaMovement().y > 0.0D) {
-			return false;                                       // 上升段不补（不会变成空中二段跳）
-		}
-		double range = tuning.jumpGroundRange();
-		return range > 0.0D && groundDistance(player, range) <= range;
+	/**
+	 * 这一 tick「脚在哪儿」是否满足起跳：<b>只两条</b> —— 贴地，或离地仍在土狼窗内。
+	 *
+	 * <p>这里<b>不能</b>再按「脚底到下方地面 ≤ 若干格」放行（曾经有过、已删除）：腾空下落时脚底到地面的距离
+	 * 本来就在 1 格左右，服务端每 tick 都会命中，把人反复弹起、永远落不了地 —— 落地沿与落地判定因此全都不触发。
+	 * （详细日志证据见 {@link #tryJump} 的 javadoc。）
+	 */
+	private static boolean canJump(boolean onGround, AirState state) {
+		return onGround || state.coyoteTicks > 0;
 	}
 
-	/** 脚底到下方地面的距离（格）：向下 {@code range} 格的碰撞射线；探不到东西返回 {@link Double#MAX_VALUE}。 */
+	/**
+	 * 脚底到下方地面的距离（格）：向下 {@code range} 格的碰撞射线；探不到东西返回 {@link Double#MAX_VALUE}。
+	 *
+	 * <p><b>只剩临时探针在用</b>（{@code DEBUG_LANDING} 的 {@code groundBelow=} 日志），不再参与任何起跳判定；
+	 * 探针删掉时把它一起删。
+	 */
 	private static double groundDistance(Player player, double range) {
 		Vec3 from = player.position();
 		Vec3 to = from.add(0.0D, -range, 0.0D);

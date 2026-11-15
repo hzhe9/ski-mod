@@ -139,13 +139,6 @@ public final class SnowboardControl {
 		}
 	}
 	/**
-	 * <b>单板：离地补跳的高度门槛</b>（格）：腾空时脚底到下方地面 ≤ 这个距离、{@code vy ≤ 0}、且按住空格，
-	 * 就能再拿到一次起跳速度（力度照 {@link #JUMP_POWER_BY_SPEED_LUT}，与地面起跳同一个取值方法）。
-	 * 只补竖直速度，<b>不碰空翻角度 / 连续按住计数 / 失控计时</b>。
-	 * 1.0 ＝ 离地不到一格（过台阶、贴地小跳的余量）仍可再跳；0 ＝ 关掉。
-	 */
-	private static final double JUMP_GROUND_RANGE = 1.0D;
-	/**
 	 * <b>单板：离地后的「逗留窗」（土狼时间，coyote time）</b>：离开地面（{@code onGround} 由真变假）之后还有
 	 * <b>6 tick</b>（0.3 s）之内按空格仍算「刚离地」，照样起跳 —— 滑行时 {@code onGround} 在下坡 / 起伏上
 	 * 本来就会抖，不留这个窗口就会出现「明明还贴着雪面，按空格却不跳」。
@@ -208,7 +201,7 @@ public final class SnowboardControl {
 
 	/** 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
 	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
-			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT, JUMP_GROUND_RANGE,
+			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT,
 			COYOTE_TICKS, JUMP_BUFFER_TICKS, JUMP_COOLDOWN_TICKS, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
 			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);

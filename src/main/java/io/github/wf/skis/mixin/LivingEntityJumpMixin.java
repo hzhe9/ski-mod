@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <b>且（{@code onGround()} 或在水里）</b>」—— 穿板滑行时 {@code onGround} 在上坡 / 起伏 / 贴面走
  * 但没严格落地时经常为假，于是「按空格没反应」。
  *
- * <p>现在起跳只由 {@link SkiAir#tryJump} 发（贴地 / 逗留窗 / 贴地小跳三条之一），两端各一次、都放在
+ * <p>现在起跳只由 {@link SkiAir#tryJump} 发（贴地 / 逗留窗两条之一，**没有「空中向下打射线补跳」那条**），两端各一次、都放在
  * 实体 tick 之前（客户端 {@code LocalPlayerJumpMixin} 注入 {@code LocalPlayer#aiStep} 的 HEAD，
  * 服务端 {@code SkiGlide} 的 {@code START_SERVER_TICK}），
  * 原版这条路径被这里 cancel 掉，<b>同一个 tick 不会有两处各写一次 {@code deltaMovement.y}</b>
