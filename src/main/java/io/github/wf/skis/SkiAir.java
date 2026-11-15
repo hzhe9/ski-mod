@@ -579,10 +579,15 @@ public final class SkiAir {
 	 * <b>落地判定（唯一一份）</b>：与直立的最小角距 {@code |a|} ≤ {@code FLIP_LANDING_TOLERANCE_DEGREES} ＝净落。
 	 *
 	 * <p>客户端落地与 {@link #applyLanding}（服务端收到包）都调这一个方法 —— 两边不允许各写一套公式。
+	 *
+	 * <p><b>契约（无效输入）</b>：{@code tuning == null} 或角度非有限值时本方法返回 {@code true}（净落），
+	 * 意思是「<b>不惩罚</b>一份读不懂的输入」—— 它不是「非法即安全」的判据。调用方必须<b>先</b>自己校验
+	 * （客户端状态机给的角永远是有限的；服务端要先过 {@link SkiFlip} 的包校验），并在校验失败时
+	 * <b>早退、整份不结算</b>；走到这里时参数按契约已经合法。
 	 */
 	public static boolean isCleanLanding(double angleDegrees, Tuning tuning) {
 		if (tuning == null || !Double.isFinite(angleDegrees)) {
-			return true;
+			return true;   // 契约见 javadoc：无效输入不惩罚，由调用方早退，不当判据
 		}
 		return Math.abs(uprightOffsetDegrees(angleDegrees)) <= tuning.flipLandingToleranceDegrees;
 	}
@@ -658,6 +663,11 @@ public final class SkiAir {
 		if (player == null || tuning == null) {
 			return true;
 		}
+		if (!Double.isFinite(angleDegrees)) {
+			// 非法输入一律丢弃、整份不结算（与 SkiFlip 的包校验同一条口径）：
+			// 不要依赖 isCleanLanding 对无效输入返回 true 来「兜底」，那是契约外的用法。
+			return true;
+		}
 		if (player.getAbilities().flying) {
 			return true;   // 创造飞行：不结算落地（不降速、不扣血）—— 飞行时没有「落地」这回事
 		}
@@ -731,10 +741,32 @@ public final class SkiAir {
 		return server != null && server.stunTicks > 0;
 	}
 
-	/** 脱板 / 离开世界：整份状态丢掉（两张表都清，失控计时也一起清）。 */
-	public static void forget(int entityId) {
+	/**
+	 * <b>客户端</b>那张表丢掉这个实体（脱板 / 换板 / 没穿板）：<b>只清客户端</b>。
+	 *
+	 * <p>单机里 {@code LocalPlayer} 与 {@code ServerPlayer} 共用同一个 entity id，而客户端的
+	 * {@code SkisClient} 每 tick 都会对「没穿板 / 创造飞行」的玩家调一次清表 —— 如果这里顺手清服务端那张，
+	 * 服务端的 {@code stunTicks} / {@code jumpCooldownTicks} / {@code jumpBufferTicks} 会被客户端一起抹掉
+	 * （失控期间能起跳、冷却凭空消失）。所以两端各有一个入口，谁调谁清自己那张。
+	 */
+	public static void forgetClient(int entityId) {
 		CLIENT_STATES.remove(entityId);
+	}
+
+	/** <b>服务端</b>那张表丢掉这个实体（脱板 / 换板）：只清服务端，理由见 {@link #forgetClient}。 */
+	public static void forgetServer(int entityId) {
 		SERVER_STATES.remove(entityId);
+	}
+
+	/**
+	 * 客户端<b>整表</b>丢掉：换世界 / 重连 / 换维度时调（{@code SkisClient}）。
+	 *
+	 * <p>换维度时玩家的 entity id 会变，旧表里的 id 再也回不来 —— 留着只会占容量，还会在 id 被复用
+	 * （单机反复进出世界、旁观传送到别的维度）时把上一段空翻的角度 / 失控计时串给「新」实体。
+	 * 服务端那张表不归客户端管，服务端自己靠脱板清理。
+	 */
+	public static void forgetAllClient() {
+		CLIENT_STATES.clear();
 	}
 
 	/**

@@ -9,6 +9,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * <b>滑行音效</b>（纯客户端）：雪面上滑行时的<b>切雪声</b> —— 每到时间就播一声 {@code SNOW_STEP}
@@ -44,6 +45,16 @@ public final class GlideSounds {
 	/** 脚底离地不超过这个高度（格）才算“在滑”—— <b>声音自己的门槛</b>，雪粒子用 1.5 格（{@code SnowSpray.AIR_RANGE}），两者不联动。 */
 	private static final double GROUND_RANGE = 1.0D;
 
+	/**
+	 * <b>距离剔除</b>（平方，格²）：离相机超过 32 格（{@code 32² = 1024}）的玩家不推进计时、不出声。
+	 *
+	 * <p>与 {@code SnowSpray.CULL_DISTANCE_SQR} 同值，理由也一样：{@code playLocalSound} 确实会随距离衰减，
+	 * 但衰减到听不见之后仍然每 tick 跑一遍判据（{@link GlideAudioGate#isGliding} 里有一次
+	 * {@code SkiGlide.groundDistance} 射线）—— 那是白烧的。剔除阈值取「反正听不见」的距离，
+	 * 所以听感一点不变。
+	 */
+	private static final double CULL_DISTANCE_SQR = 1024.0D;
+
 	/** 实体 id → 距离下一声切雪还有几 tick。 */
 	private static final IdMap<Integer> SNOW_TIMER = new IdMap<>();
 
@@ -57,11 +68,16 @@ public final class GlideSounds {
 			return;
 		}
 		if (client.isPaused()) {
-			silence(client);   // 暂停时立刻收声（原因见 silence 的注释）
+			silence();   // 暂停时立刻收声（原因见 silence 的注释）
 			return;
 		}
+		Vec3 camera = client.gameRenderer.mainCamera().position();
 		for (Player player : level.players()) {
 			int id = player.getId();
+			if (player.distanceToSqr(camera) > CULL_DISTANCE_SQR) {
+				SNOW_TIMER.remove(id);   // 太远：听不见，计时也别留着（滑近时当作从头起算）
+				continue;
+			}
 			if (!GlideAudioGate.isGliding(player, MIN_SPEED, GROUND_RANGE)) {
 				SNOW_TIMER.remove(id);
 				continue;
@@ -76,17 +92,19 @@ public final class GlideSounds {
 	}
 
 	/**
-	 * 暂停时立刻收声。
+	 * 暂停时收声：<b>只清我们自己那张计时表</b>，不动全局声道。
 	 *
 	 * <p>暂停（单人 Esc / 失焦）时游戏仍在渲染、{@code Minecraft#tick()} 照跑（所以本类每 tick 还是被调用），
-	 * 但声音引擎拿到的参数是「已暂停」——她只推进音乐，<b>不再推进游戏内的声音</b>：
-	 * 每几 tick 播一次的切雪声会一直继续播下去。所以暂停时必须<b>主动停</b>：
-	 * {@code SoundManager#stop(音效 id, 声道)} 把已经在播的那一声（以及刚排队的）一起掐掉，
-	 * 状态表清空，解暂停后重新起算。
+	 * 但声音引擎拿到的参数是「已暂停」—— 她只推进音乐，<b>不再推进游戏内的声音</b>：
+	 * 每几 tick 播一次的切雪声会一直继续播下去。所以暂停时必须停止<b>继续发声</b>：清掉计时表就够 ——
+	 * 我们用的是 {@code playLocalSound} 的一次性声音，下一次想播得等计时表重新攒满。
+	 *
+	 * <p><b>为什么不调 {@code SoundManager#stop}</b>：那要传（音效 id, 声道）这一对<b>全局</b>键 ——
+	 * 我们用的是原版 {@code SoundEvents.SNOW_STEP} + {@code SoundSource.PLAYERS}，一停就会把场上
+	 * 任何实体 / 别的玩家正在播的雪地脚步一起掐掉。
 	 */
-	private static void silence(Minecraft client) {
+	private static void silence() {
 		SNOW_TIMER.clear();
-		client.getSoundManager().stop(SNOW_SOUND.location(), SoundSource.PLAYERS);
 	}
 
 	/** 速度越快间隔越短。 */

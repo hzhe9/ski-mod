@@ -2,8 +2,11 @@ package io.github.wf.skis;
 
 import io.github.wf.skis.registry.ModCreativeTabs;
 import io.github.wf.skis.registry.ModItems;
+import io.github.wf.skis.util.IdMap;
 
 import net.fabricmc.api.ModInitializer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -53,7 +56,7 @@ public class SkisMod implements ModInitializer {
 	}
 
 	/**
-	 * <b>滑雪运动逻辑这一刻是否生效</b>：穿着我们的板，且<b>不在创造飞行里</b>。
+	 * <b>滑雪运动逻辑这一刻是否生效</b>：穿着我们的板，且<b>不在创造飞行里、不是旁观者</b>。
 	 *
 	 * <p>这是<b>唯一</b>一条「运动逻辑该不该跑」的判据，客户端与服务端共用（服务端滑行
 	 * {@link SkiGlide}、客户端输入改写 {@code ClientInputMixin}、客户端每个 tick 的运动写入
@@ -64,11 +67,38 @@ public class SkisMod implements ModInitializer {
 	 * 撑杖冲刺一律不写，飞行完全按原版走。判据是<b>每 tick 现读</b>的，所以落地 / 退出飞行后
 	 * 下一 tick 自然恢复 —— 调用方不需要额外记状态（残留的表由各自的 {@code forget} 清）。
 	 *
+	 * <p><b>旁观者</b>（{@code isSpectator}）也返回 {@code false}：旁观者保留背包（靴子槽里还有板），
+	 * 但它不参与任何运动 / 碰撞 —— 不排除的话它每 tick 会被写 {@code STEP_HEIGHT} / {@code GRAVITY}，
+	 * 客户端还会给它算身体朝向、扬雪、切雪声。死亡玩家不用在这里判：靴子那时已经掉了。
+	 *
 	 * <p>骑乘<b>不</b>在这里判：那是 {@link SkiGlide} 自己的一条附加条件（它会把人请下车）。
 	 */
 	public static boolean isSkiMotionActive(Player player) {
 		return player != null
 				&& isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))
-				&& !player.getAbilities().flying;
+				&& !player.getAbilities().flying
+				&& !player.isSpectator();
+	}
+
+	/** 穿板禁骑提示的去重间隔（tick）：同一个 id 最短 20 tick 提示一次，见 {@link #notifyNoRiding}。 */
+	private static final int NO_RIDING_NOTICE_INTERVAL_TICKS = 20;
+
+	/** 玩家 id → 上次「穿板不能上车」提示的实体 tick 数（{@code Entity#tickCount}）。 */
+	private static final IdMap<Integer> NO_RIDING_NOTICE_TICK = new IdMap<>();
+
+	/**
+	 * 给玩家发一条 action bar「穿板不能上车」。
+	 *
+	 * <p><b>为什么要去重</b>：模组 / 连按会反复尝试上车，逐次发一条 action bar 就是刷屏，看着像坏了。
+	 * 同一个 id 最短 {@link #NO_RIDING_NOTICE_INTERVAL_TICKS} tick 才有下一句。
+	 */
+	public static void notifyNoRiding(ServerPlayer player) {
+		int tick = player.tickCount;
+		Integer last = NO_RIDING_NOTICE_TICK.get(player.getId());
+		if (last != null && tick - last >= 0 && tick - last < NO_RIDING_NOTICE_INTERVAL_TICKS) {
+			return;
+		}
+		NO_RIDING_NOTICE_TICK.put(player.getId(), tick);
+		player.sendOverlayMessage(Component.translatable("message.skis.no_riding"));
 	}
 }

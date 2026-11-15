@@ -3,6 +3,7 @@ package io.github.wf.skis;
 import io.github.wf.skis.util.IdMap;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
@@ -52,6 +53,11 @@ public final class SkiGlide {
 	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
 	private static final double STEP_UP_MIN_HEIGHT = 0.5D;
 	/**
+	 * <b>穿板时的台阶高度</b>（格）：原版玩家默认 0.6，穿板时 1.0 —— 能直接滑上 1 格高的地面。
+	 * 只在进入穿板状态那一 tick 写一次，脱板写回进入前的原值（见 {@link #enterSkiAttributes}）。
+	 */
+	private static final double SKI_STEP_HEIGHT = 1.0D;
+	/**
 	 * 每累计下落这么多格算一次，按次均匀给速度（**双板**；单板用 {@link SnowboardControl#descentStepBlocks()} 的 0.5）。
 	 *
 	 * <p>双板也按每 0.5 格结算：单次 = 0.1 × 0.5 = 0.05，
@@ -86,6 +92,18 @@ public final class SkiGlide {
 	/** 玩家实体 id → <b>连续撞墙的 tick 数</b>（撞一下 +1、不撞清零），只有单板拿它当门槛，见 {@link #MOMENTUM_DECAY_ON_HIT}。 */
 	private static final IdMap<Integer> HIT_TICKS = new IdMap<>();
 
+	/**
+	 * 玩家实体 id → <b>进入穿板状态前</b> {@code STEP_HEIGHT} 的 base 值。
+	 *
+	 * <p>这是「我们改过这个人的属性」的标记：<b>在表里＝当前处于穿板状态</b>（进出各写一次属性，
+	 * 而不是每 tick 覆盖）。脱板时把记下来的原值写回去，而不是写死 0.6 / 默认值 —— 见 {@link #enterSkiAttributes}。
+	 */
+	private static final IdMap<Double> PRE_STEP_HEIGHT = new IdMap<>();
+	/** 玩家实体 id → <b>进入穿板状态前</b> {@code GRAVITY} 的 base 值（脱板还原用）。 */
+	private static final IdMap<Double> PRE_GRAVITY = new IdMap<>();
+	/** 玩家实体 id → 上一次真正写进 {@code GRAVITY} 的 base 值（值没变就不重写，避免抹掉别人的修改）。 */
+	private static final IdMap<Double> APPLIED_GRAVITY = new IdMap<>();
+
 	private SkiGlide() {
 	}
 
@@ -116,12 +134,13 @@ public final class SkiGlide {
 					player.stopRiding();
 				}
 				if (!isSkiing(player)) {
-					setStepHeight(player, 0.6D);   // 恢复原版台阶高度
-					resetGravity(player);          // 恢复原版重力
+					// 属性只在「刚脱板」这一 tick 还原一次（边沿），不是每 tick 写 —— 每 tick 无条件
+					// setBaseValue 会把别的模组 / 药水对 STEP_HEIGHT / GRAVITY 的修改永久抹掉。
+					exitSkiAttributes(player);
 					forgetPhysics(player.getId());
-					SnowboardControl.forget(player.getId());
-					SkisControl.forgetBody(player.getId());
-					// 空中状态 / 失控计时由上面两个 forget 里的 SkiAir.forget 一起清（两者各调一次，这里不再补第三遍）
+					SnowboardControl.forget(player.getId(), false);
+					SkisControl.forgetBody(player.getId(), false);
+					// 空中状态 / 失控计时由上面两个 forget 清各自那一端（这里传 false ＝ 只清服务端的表）
 					continue;
 				}
 				// 起跳力度 / 后空翻 / 落地：服务端只管失控计时 —— 角度只有客户端知道（按住空格），
@@ -144,8 +163,8 @@ public final class SkiGlide {
 						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot());
 					}
 				}
-				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）
-				setStepHeight(player, 1.0D);
+				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）：只在进入穿板状态那一 tick 写一次
+				enterSkiAttributes(player);
 				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
 				trackDescent(player);
 				applyMomentum(player);
@@ -166,6 +185,10 @@ public final class SkiGlide {
 				}
 			}
 		});
+
+		// 断线：这个 id 的所有表都丢掉（含「进入穿板前的属性原值」，理由见 forgetPlayer）
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+				forgetPlayer(handler.getPlayer().getId()));
 	}
 
 	/**
@@ -223,14 +246,53 @@ public final class SkiGlide {
 	}
 
 	/**
-	 * 设置台阶高度。26.2 里它不是 {@code setMaxUpStep}，而是属性 {@link Attributes#STEP_HEIGHT}
-	 * （原版玩家默认 0.6 格）。
+	 * <b>穿板状态开始</b>（进入边沿，每段只跑一次）：记下 {@code STEP_HEIGHT} / {@code GRAVITY} 的<b>原值</b>，
+	 * 再把台阶高度写成 {@link #SKI_STEP_HEIGHT}（26.2 里它不是 {@code setMaxUpStep}，而是属性
+	 * {@link Attributes#STEP_HEIGHT}，原版玩家默认 0.6 格）。重力交给 {@link #applyGravity}（它按贴地 / 腾空换档）。
+	 *
+	 * <p><b>为什么记原值</b>：{@code setBaseValue} 是覆盖式写入。以前每 tick 都写「脱板恢复 0.6 / 默认重力」，
+	 * 于是别的模组、药水或数据包对这两条属性的 base 值改动会被我们**永久抹掉**。现在只记一次、只还原一次，
+	 * 还的是「我们自己进来之前那个值」——别人的修改原样还在。
 	 */
-	private static void setStepHeight(ServerPlayer player, double value) {
-		AttributeInstance attribute = player.getAttribute(Attributes.STEP_HEIGHT);
-		if (attribute != null) {
-			attribute.setBaseValue(value);
+	private static void enterSkiAttributes(ServerPlayer player) {
+		Integer id = player.getId();
+		AttributeInstance step = player.getAttribute(Attributes.STEP_HEIGHT);
+		if (step != null) {
+			// putIfAbsent 返回 null ＝ 这一段刚进来：这时才记原值 + 写一次台阶高度。
+			// 之后每 tick 都会调到这里，但那两次写入都跳过了（否则还是「每 tick 覆盖式写属性」）。
+			if (PRE_STEP_HEIGHT.putIfAbsent(id, step.getBaseValue()) == null) {
+				step.setBaseValue(SKI_STEP_HEIGHT);
+			}
 		}
+		AttributeInstance gravity = player.getAttribute(Attributes.GRAVITY);
+		if (gravity != null) {
+			PRE_GRAVITY.putIfAbsent(id, gravity.getBaseValue());
+		}
+	}
+
+	/**
+	 * <b>穿板状态结束</b>（离开边沿，每段只跑一次）：把 {@link #enterSkiAttributes} 记下的原值写回去。
+	 *
+	 * <p>没记过（这一段根本没穿板 / 已经还原过）就什么都不写 —— 不再对全场玩家每 tick 无条件
+	 * {@code setBaseValue} 一次。{@link #APPLIED_GRAVITY} 一并清掉，下一段穿板重新按档写。
+	 */
+	private static void exitSkiAttributes(ServerPlayer player) {
+		Integer id = player.getId();
+		Double previousStep = PRE_STEP_HEIGHT.remove(id);
+		if (previousStep != null) {
+			AttributeInstance step = player.getAttribute(Attributes.STEP_HEIGHT);
+			if (step != null) {
+				step.setBaseValue(previousStep);
+			}
+		}
+		Double previousGravity = PRE_GRAVITY.remove(id);
+		if (previousGravity != null) {
+			AttributeInstance gravity = player.getAttribute(Attributes.GRAVITY);
+			if (gravity != null) {
+				gravity.setBaseValue(previousGravity);
+			}
+		}
+		APPLIED_GRAVITY.remove(id);
 	}
 
 	/**
@@ -238,18 +300,19 @@ public final class SkiGlide {
 	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
 	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
 	 *
-	 * <p><b>贴地 / 腾空两档</b>，每 tick 按 {@code player.onGround()} 二选一：
+	 * <p><b>贴地 / 腾空两档</b>，按 {@code player.onGround()} 二选一：
 	 * 贴地（滑行、落地压雪）用 {@code GRAVITY_MULTIPLIER}（单 1.3 / 双 1.5，下落干脆、不发飘），
 	 * 腾空（跳跃 / 坠落）用 {@code AIR_GRAVITY_MULTIPLIER}（两板 0.9 ＝ 原版 0.072，飘一点、滞空长一点）。
-	 * <b>写 GRAVITY 属性的地方全类只有两处</b>：{@code applyGravity}（每 tick 只在末尾写一次）与
-	 * {@link #resetGravity}（脱板还原）—— 不要另加第三个写点
+	 *
+	 * <p><b>只在值真的变了的时候写</b>（换档、换板）：{@code setBaseValue} 是覆盖式写入，每 tick 都写一遍
+	 * 会把别人对这条属性 base 值的修改抹掉。写 GRAVITY 的地方全类只有两处 —— 这里（换档时）
+	 * 与 {@link #exitSkiAttributes}（脱板还原成进入前的原值）—— 不要另加第三个写点
 	 * （本工程踩过「两处各 clamp 一次」的坑）。
 	 *
 	 * <p>原版重力在穿板时太轻（贴地下落像飘在空里），所以贴地取「比平时更快」这一档；
 	 * 空中则比原版还轻 —— 跳高表就是按空中的 0.072 反解的（起跳首 tick 仍读贴地档）。
 	 * （试过「贴地 / 腾空两态 + 前馈地形跟随」的控制器，实测贴太紧、会瞬间吸到下一格，
 	 * 已回退到这条重力方案 —— 别再自作主张加贴地控制。）
-	 * 与 {@link #setStepHeight} 同一套做法：只在穿板时生效，脱板由 {@link #resetGravity} 还原。
 	 */
 	private static void applyGravity(ServerPlayer player) {
 		AttributeInstance attribute = player.getAttribute(Attributes.GRAVITY);
@@ -262,15 +325,13 @@ public final class SkiGlide {
 		double multiplier = grounded
 				? (board ? SnowboardControl.gravityMultiplier() : SkisControl.gravityMultiplier())
 				: (board ? SnowboardControl.airGravityMultiplier() : SkisControl.airGravityMultiplier());
-		attribute.setBaseValue(Attributes.GRAVITY.value().getDefaultValue() * multiplier);
-	}
-
-	/** 脱板（或没穿板）时把重力还原成原版默认值。 */
-	private static void resetGravity(ServerPlayer player) {
-		AttributeInstance attribute = player.getAttribute(Attributes.GRAVITY);
-		if (attribute != null) {
-			attribute.setBaseValue(Attributes.GRAVITY.value().getDefaultValue());
+		double value = Attributes.GRAVITY.value().getDefaultValue() * multiplier;
+		Double applied = APPLIED_GRAVITY.get(player.getId());
+		if (applied != null && applied == value) {
+			return;   // 档位没变（也没换板）：值已经是这个，不必再覆盖一遍
 		}
+		attribute.setBaseValue(value);
+		APPLIED_GRAVITY.put(player.getId(), value);
 	}
 
 	/**
@@ -551,5 +612,18 @@ public final class SkiGlide {
 		DESCEND_ACCUM.remove(id);
 		MOMENTUM.remove(id);
 		HIT_TICKS.remove(id);
+	}
+
+	/**
+	 * 这个 id 的一切（物理动量 ＋「进入穿板前的属性原值」）都丢掉：<b>断线</b>时调。
+	 *
+	 * <p>为什么属性原值也要丢：id 会被新玩家复用，陈旧的原值会在「新玩家脱板」那一 tick 被写回属性，
+	 * 把一个莫名其妙的数种到他身上（真正的原值早就跟着旧实体消失了）。
+	 */
+	private static void forgetPlayer(int id) {
+		forgetPhysics(id);
+		PRE_STEP_HEIGHT.remove(id);
+		PRE_GRAVITY.remove(id);
+		APPLIED_GRAVITY.remove(id);
 	}
 }

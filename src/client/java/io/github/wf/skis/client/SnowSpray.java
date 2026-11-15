@@ -122,6 +122,15 @@ public final class SnowSpray {
 	/** 允许脚底陷进雪面这么多格（站在雪层里 / 雪压到腿）仍然算「在雪面上」。 */
 	private static final double EMBED_TOLERANCE = 0.35D;
 	/**
+	 * <b>距离剔除</b>（平方，格²）：离相机超过 32 格（{@code 32² = 1024}）的玩家整段跳过 ——
+	 * 连雪面扫描（每 tick 最多 9 列 × 4 格 {@code getBlockState}）都不做。
+	 *
+	 * <p>为什么必须有：{@code spawn()} 里那道 32 格筛子只挡住「生成粒子」，扫描本身照跑 ——
+	 * 200 格外的另一座山上的人也会被每 tick 扫一遍地形。这里的门槛与 {@code ClientLevel#addParticle}
+	 * 的可见距离同值，所以剔除掉的人本来也看不见任何雪。
+	 */
+	private static final double CULL_DISTANCE_SQR = 1024.0D;
+	/**
 	 * 雪面扫描深度（<b>方块</b>，从脚底那一格往下数）：{@link #AIR_RANGE} 1.5 格 + 取整余量。
 	 *
 	 * <p>取 3：脚底在格子最下面（y = k + 0.01）时 1.5 格以下已经落到 k−2 格，3 格深度才盖得住；
@@ -441,8 +450,16 @@ public final class SnowSpray {
 		if (level == null) {
 			return;
 		}
+		// 相机位置每 tick 取一次：距离剔除用（逐玩家再取一次就是每 tick 几十次 MC 单例调用）
+		Vec3 camera = client.gameRenderer.mainCamera().position();
 		for (Player player : level.players()) {
 			int id = player.getId();
+			if (player.distanceToSqr(camera) > CULL_DISTANCE_SQR) {
+				// 太远：粒子本来就看不见（spawn 里同一道筛子），雪面扫描也别做 —— 顺手把记录清掉，
+				// 免得「上一 tick 在 30 格内」的旧速度 / 旧方向留在表里，等他滑近时判成急刹。
+				forget(id);
+				continue;
+			}
 			if (!SkisMod.isSkiMotionActive(player)) {
 				forget(id);   // 没穿板 / 创造飞行：不扬雪，状态也别留着串下一段
 				continue;
@@ -867,7 +884,7 @@ public final class SnowSpray {
 	 */
 	private static void spawn(double x, double y, double z, double vx, double vy, double vz, int lifetime) {
 		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
-		if (camera.distanceToSqr(x, y, z) > 1024.0D) {
+		if (camera.distanceToSqr(x, y, z) > CULL_DISTANCE_SQR) {
 			return;   // 与 ClientLevel#addParticle 同一道 32 格筛子
 		}
 		Particle particle = Minecraft.getInstance().particleEngine.createParticle(SNOW, x, y, z, vx, vy, vz);
@@ -909,5 +926,18 @@ public final class SnowSpray {
 		LAST_DIR.remove(id);
 		BURST_COOLDOWN.remove(id);
 		LAST_GROUNDED.remove(id);
+	}
+
+	/**
+	 * 换世界 / 重连 / 换维度：四张表整表丢掉（{@code SkisClient#resetWorldState} 调）。
+	 *
+	 * <p>不清的话，上一维度的「上一 tick 速度 / 上一 tick 贴地」会活到新维度，首 tick 就满足
+	 * 「上一 tick 很快 + 上一 tick 贴地 + 本 tick 骤降」—— 凭空炸一团雪。
+	 */
+	public static void forgetAll() {
+		LAST_SPEED.clear();
+		LAST_DIR.clear();
+		BURST_COOLDOWN.clear();
+		LAST_GROUNDED.clear();
 	}
 }

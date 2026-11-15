@@ -9,14 +9,25 @@ import io.github.wf.skis.SnowboardControl;
 import io.github.wf.skis.SwingHooks;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 
 public class SkisClient implements ClientModInitializer {
+	/**
+	 * 上一次 tick 见到的 {@link ClientLevel}（换世界 / 换维度 / 断线重连都会换实例）。
+	 *
+	 * <p>这就是「换世界清理点」的触发方式：这里没有可靠的单次事件覆盖维度切换
+	 * （{@code ClientPlayConnectionEvents.JOIN} 只在连上服务器时发），所以每 tick 比一次实例，
+	 * 变了就把所有「按 entity id 记」的客户端状态整表丢掉（见 {@link #resetWorldState()}）。
+	 */
+	private static ClientLevel trackedLevel;
+
 	@Override
 	public void onInitializeClient() {
 		// 脚上的板：双板 SkiBoardModel、单板 SnowboardModel，各自一套层与贴图
@@ -37,6 +48,11 @@ public class SkisClient implements ClientModInitializer {
 
 		// 每 tick：推进「一次摆臂」的动画计时（手臂本身不做持续摆动）
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			// 换世界 / 换维度 / 重连：先把上一份世界里的 id 状态整表丢掉（见 resetWorldState）
+			if (client.level != trackedLevel) {
+				trackedLevel = client.level;
+				resetWorldState();
+			}
 			SkiState.tick();
 			// 视角限位（单板 / 双板同一套）的客户端状态：脱板 / 退出世界 / 换人时清掉，
 			// 重新穿板时按当时的视角重新起算（SkiViewSmoothing 内部还会按板块种类再判一次）。
@@ -54,12 +70,13 @@ public class SkisClient implements ClientModInitializer {
 			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiMotionActive(player)) {
-					// 没穿板 / 创造飞行：这一 tick 一条运动逻辑都不跑（速度方向、身体朝向、空翻 / 落地状态机），
+					// 没穿板 / 创造飞行 / 旁观：这一 tick 一条运动逻辑都不跑（速度方向、身体朝向、空翻 / 落地状态机），
 					// 本 tick 的残留状态整份清掉 —— 飞行期间不写速度、也不留半个状态机；
 					// 落地 / 退出飞行后下一 tick 判据自然为真，各表从零重新起算。
-					SnowboardControl.forget(player.getId());
-					SkisControl.forgetBody(player.getId());
-					// 空中状态 / 失控计时由上面两个 forget 内部的 SkiAir.forget 一起清，这里不再补第三遍
+					// 传 true ＝ 只清客户端那一端的表：单机里服务端与客户端共用 entity id，
+					// 客户端清表不能把服务端的失控 / 起跳冷却一起抹掉（见 SkiAir#forgetClient）。
+					SnowboardControl.forget(player.getId(), true);
+					SkisControl.forgetBody(player.getId(), true);
 					continue;
 				}
 				// 起跳力度 / 后空翻 / 落地：空翻角度与「有没有按住空格」只有本机知道（服务端读不到这个输入），
@@ -103,13 +120,17 @@ public class SkisClient implements ClientModInitializer {
 					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot());
 				}
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
-				player.yBodyRot = yaw;
-				if (!board) {
-					// 双板：连 yBodyRotO 一起对齐。每 tick 4.5° 的步长也不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
-					player.yBodyRotO = yaw;
+				// <b>只写本机玩家</b>：远端玩家的 yBodyRot 由服务端同步，客户端每 tick 的写入基本是白做；
+				// 双板那句「连 yBodyRotO 一起对齐」还会抹掉远端的转动插值（单板分支刻意保留插值）。
+				if (player == self) {
+					player.yBodyRot = yaw;
+					if (!board) {
+						// 双板：连 yBodyRotO 一起对齐。每 tick 4.5° 的步长也不小，留它在上一帧会让模型比按键慢一拍、转身发飘。
+						player.yBodyRotO = yaw;
+					}
+					// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
+					// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 				}
-				// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
-				// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 				// ——— 越肩视角：头模型朝横移方向 ———
 				// 相机自由后「视角」不再代表朝向，头改跟身体走：双板 = 正前方（身体朝向 + 0），
 				// 单板 = 身体朝向 + 带符号的头偏角（朝哪侧滑就朝哪侧；幅度 75 / 前倾 90 / 后倾 60，
@@ -154,5 +175,32 @@ public class SkisClient implements ClientModInitializer {
 		// 它把玩家实体按「世界坐标」搬一个 offset，而我们绕腰翻，翻到 ≈90° 时身体会被搬进镜头。
 		// 反射探测、对方不在时零影响（见 FirstPersonModelCompat 的 javadoc）。
 		FirstPersonModelCompat.install();
+
+		// 连上服务器 / 单机开世界：最早的确定时点，先把上一份世界的残留丢掉
+		// （那一刻 client.level 可能还是 null，所以同一个方法还挂在每 tick 的 level 实例比对上）。
+		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			trackedLevel = client.level;
+			resetWorldState();
+		});
+	}
+
+	/**
+	 * <b>换世界 / 重连 / 换维度的唯一清理点</b>：把所有「按 entity id 记」的客户端状态整表丢掉。
+	 *
+	 * <p>为什么必须有：换维度 / 重进世界时玩家的 entity id 会变，旧 id 的记录再也回不来；
+	 * 更要命的是<b>读数还在、写入没了</b>的窗口 —— 比如 {@code SnowSpray} 的「上一 tick 速度 + 上一 tick
+	 * 贴地」跨维度活下来，到了新维度第一 tick 就是「上一 tick 很快、这一 tick 骤降」，凭空炸一团雪。
+	 * 这些表都只在实体被 tick 到、且<b>在滑</b>时才维护，所以「状态整体作废」只能在这里显式做。
+	 *
+	 * <p>清的六份：雪粒子四张表、摆臂倒计时、两块板的朝向 / 姿态 / 压刃、空中状态（客户端那张）、
+	 * 视角限位的插值基准。
+	 */
+	private static void resetWorldState() {
+		SnowSpray.forgetAll();
+		SkiState.clear();
+		SnowboardControl.forgetAll();
+		SkisControl.forgetBodyAll();
+		SkiAir.forgetAllClient();
+		SkiViewSmoothing.reset();
 	}
 }

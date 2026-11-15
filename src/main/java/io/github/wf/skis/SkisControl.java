@@ -255,11 +255,6 @@ public final class SkisControl {
 	private SkisControl() {
 	}
 
-	/** 脱下板时清一下（脱板路径的统一调用入口，实际清的是身体朝向）。 */
-	public static void forget(int entityId) {
-		forgetBody(entityId);
-	}
-
 	// ---------------------------------------------------------------- 身体朝向
 
 	/** 穿双板时锁住身体朝向：<b>第一次调用</b>记下当时的朝向，之后只由 {@link #turnBody} 改。 */
@@ -312,15 +307,31 @@ public final class SkisControl {
 		return yaw;
 	}
 
-	public static void forgetBody(int entityId) {
+	/**
+	 * 脱板 / 换板：清掉这个实体的身体朝向与转向推导状态。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端调用（{@code SkisClient}）、{@code false} ＝ 服务端调用
+	 *                   （{@link SkiGlide}）；只看它决定清 {@link SkiAir} 的哪一张表 —— 单机里两端共用
+	 *                   同一个 entity id，客户端清表不能把服务端的失控 / 冷却一起抹掉
+	 */
+	public static void forgetBody(int entityId, boolean clientSide) {
 		BODY_YAW.remove(entityId);
 		// 转向推导的三份状态一起清：脱板 / 换板之后不能拿着上一段弯的入弯方向继续算
 		TURN_HEADING.remove(entityId);
 		TURN_YAW0.remove(entityId);
 		TURN_LAST_YAW.remove(entityId);
-		SkiAir.forget(entityId);   // 空中状态（含失控计时）一起清
+		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
+		if (clientSide) {
+			SkiAir.forgetClient(entityId);
+		} else {
+			SkiAir.forgetServer(entityId);
+		}
 	}
 
+	/**
+	 * 整表清空：换世界 / 重连 / 换维度时由客户端（{@code SkisClient}）调用 —— 那些场合所有 id 都作废，
+	 * 留着只会在 id 被复用时把上一段的身体朝向当成「已经锁好」。
+	 */
 	public static void forgetBodyAll() {
 		BODY_YAW.clear();
 		TURN_HEADING.clear();

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -100,6 +101,19 @@ public final class SkiBoost {
 			if (ACTIVE.size() > MAX_ENTRIES) {
 				ACTIVE.clear();
 			}
+			if (PENDING.size() > MAX_ENTRIES) {
+				// PENDING 也是「id → 状态」的表：不封顶的话，连点 / 作弊客户端能把表撑大，
+				// 而且退出游戏的玩家不会被 tick 到、那条记录永远不会自己被清（见下面的 DISCONNECT）。
+				PENDING.clear();
+			}
+		});
+
+		// 断线就把这个人的两份状态一起丢掉：两张表都只在「玩家在线且被 tick 到」时才递减 / 移除，
+		// 退出的玩家会留下一条永久记录；id 一旦被新玩家复用，那个人会白拿一次冲刺。
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			int id = handler.getPlayer().getId();
+			PENDING.remove(id);
+			ACTIVE.remove(id);
 		});
 	}
 

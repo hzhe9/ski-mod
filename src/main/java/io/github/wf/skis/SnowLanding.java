@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,7 +40,8 @@ import net.minecraft.world.entity.player.Player;
  *
  * <p>记录表的清理策略（主用「靠时间自然过期」，因为它不需要清表就自带正确性）：① 比对只接受
  * {@code 0 ≤ now - last ≤ SNOW_GRACE_TICKS} 的时间戳，<b>所以退出 / 换维度时残留的旧 id 记录会自然失效</b>，
- * 不用靠清表保证正确性；② 顺手补三道：脱板当场 {@code remove}、断线 {@code remove}、
+ * 不用靠清表保证正确性；② 顺手补四道：脱板当场 {@code remove}、断线 {@code remove}、<b>死亡 / 重生
+ * {@code remove}</b>（重生地点与死亡前无关，不能拿死前 3 秒的雪面记录免掉重生后的摔伤）、
  * 超 {@link #MAX_ENTRIES} 整表 {@code clear()}（与 {@code SkiBoost} 同一套写法；本类用的是裸
  * {@code ConcurrentHashMap}，不走 {@link io.github.wf.skis.util.IdMap} 的自清）。
  */
@@ -79,6 +81,16 @@ public final class SnowLanding {
 		// 断线就忘掉，别留着旧 id 的时间戳。
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
 				LAST_SNOW_TICK.remove(handler.getPlayer().getId()));
+
+		// 死亡 / 重生：id 不变（重生后还是同一个玩家），但**地点与死亡前完全无关** —— 不清掉的话，
+		// 「死前 3 秒还在雪上、重生点是一块石头地」的玩家落下去照样免摔伤（60 tick 窗口跨了生死）。
+		// 也顺手清掉旧实体的那份（旧版服务端换人时会 new 一个 ServerPlayer）。
+		ServerPlayerEvents.AFTER_RESPAWN.register((newPlayer, oldPlayer, alive) -> {
+			LAST_SNOW_TICK.remove(newPlayer.getId());
+			if (oldPlayer != null) {
+				LAST_SNOW_TICK.remove(oldPlayer.getId());
+			}
+		});
 	}
 
 	/** 返回 false ＝ 取消这份伤害。 */

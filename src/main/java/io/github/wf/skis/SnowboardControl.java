@@ -311,7 +311,14 @@ public final class SnowboardControl {
 		BODY_YAW.putIfAbsent(entityId, yaw);
 	}
 
-	public static void forget(int entityId) {
+	/**
+	 * 脱板 / 换板：清掉这个实体的板姿态状态。
+	 *
+	 * @param clientSide {@code true} ＝ 客户端调用（{@code SkisClient}）、{@code false} ＝ 服务端调用
+	 *                   （{@link SkiGlide}）；只看它决定清 {@link SkiAir} 的哪一张表 —— 单机里两端共用
+	 *                   同一个 entity id，客户端清表不能把服务端的失控 / 冷却一起抹掉
+	 */
+	public static void forget(int entityId, boolean clientSide) {
 		BODY_YAW.remove(entityId);
 		TILT_VALUE.remove(entityId);
 		TILT_TARGET.remove(entityId);
@@ -319,9 +326,18 @@ public final class SnowboardControl {
 		HEAD_OFFSET.remove(entityId);
 		CARVE_SPEED.remove(entityId);
 		CARVE_TICKS.remove(entityId);
-		SkiAir.forget(entityId);   // 空中状态（含失控计时）一起清
+		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
+		if (clientSide) {
+			SkiAir.forgetClient(entityId);
+		} else {
+			SkiAir.forgetServer(entityId);
+		}
 	}
 
+	/**
+	 * 整表清空：换世界 / 重连 / 换维度时由客户端（{@code SkisClient}）调用 —— 那些场合所有 id 都作废，
+	 * 留着只会在 id 被复用时把上一段的压刃 / 俯仰状态带进新维度。
+	 */
 	public static void forgetAll() {
 		BODY_YAW.clear();
 		TILT_VALUE.clear();

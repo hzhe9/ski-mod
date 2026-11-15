@@ -3,13 +3,16 @@ package io.github.wf.skis.mixin.client;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.client.SkiStance;
 import io.github.wf.skis.client.SkiState;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.player.PlayerModel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.HumanoidRenderState;
 import net.minecraft.util.Mth;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -26,6 +29,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
  * </ul>
+ *
+ * <p><b>摆臂只对本机玩家生效</b>（已知限制）：{@link SkiState} 那张表只有本机玩家的 id 会被写入
+ * （触发点是本机右键 {@code SwingHooks}，没有任何 S2C 包），所以<b>远端玩家在你屏幕上永远不摆臂</b>，
+ * 你在别人屏幕上也一样。模型层因此只对「本机 avatar」读这张表（{@link #isLocalAvatar}）——
+ * 对所有人读一张只有本机有数据的表，等于给每个远端 avatar 做一次注定返回 0 的查表，
+ * 还会让后来的人误以为「只要发包就能看到别人摆臂」。要修只能是新增一个 S2C/SwingPayload（本轮明确不做）。
  *
  * <p><b>腿为什么是「两段」</b>：原版腿只有一根 12 单位的单节 box（髋 y=12 → 脚底 y=24），没有膝关节，
  * 绕髋倾就会把脚底甩出去、和雪鞋穿模。所以 {@code PlayerModelThighMixin} 给每条腿加了一个
@@ -80,6 +89,14 @@ public abstract class HumanoidModelMixin {
 	 */
 	private boolean skis$armorLegsHidden;
 
+	/**
+	 * 「玩家模型上找不到大腿子部件」这条 warn 只打一次。
+	 *
+	 * <p>{@code @Unique}：这个 mixin 的字段会被并进 {@code HumanoidModel}，加注解免得与目标类的同名成员撞。
+	 */
+	@Unique
+	private boolean skis$warnedMissingThigh;
+
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
 		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
@@ -110,7 +127,7 @@ public abstract class HumanoidModelMixin {
 		// 双板没拿杖的手向前抬 14°，单板只向两侧抬 16°）
 		if (!state.isUsingItem) {
 			float armRot = ARM_REST;   // 默认：杖放低一点（不举到最高）
-			if (state instanceof AvatarRenderState avatar) {
+			if (state instanceof AvatarRenderState avatar && isLocalAvatar(avatar)) {
 				int left = SkiState.swingLeft(avatar.id);
 				if (left > 0) {
 					// 一次撑杖：0 → RAISE_FRACTION 先举到最高，然后往下摆，最后收回 ARM_REST
@@ -185,9 +202,29 @@ public abstract class HumanoidModelMixin {
 		}
 		// 护甲模型（HumanoidArmorModel 等）没有大腿子部件：腿仍是整条 12 单位、绕髋倾，
 		// 照样会戳出雪鞋 —— 只能整条腿藏掉；雪鞋本身就盖住了小腿，视觉上不缺。
+		if (self instanceof PlayerModel && !this.skis$warnedMissingThigh) {
+			// <b>PlayerModel 一定有 thigh</b>（PlayerModelThighMixin 加的）：走到这里说明那个 mixin
+			// 没生效，或者它挂的部件名与 SkiStance.THIGH_PART 不一致。这个失败原本是<b>静默</b>的
+			// （玩家只看到「腿没了」、日志一片干净），所以在这里打一次 warn 让它可诊断。只打一次。
+			this.skis$warnedMissingThigh = true;
+			SkisMod.LOGGER.warn("[skis] 玩家模型的腿上找不到「大腿子部件」（部件名 \"{}\"）—— 滑雪站姿会退化成"
+					+ "「整条腿藏起来」。检查 PlayerModelThighMixin 是否还在 skis.client.mixins.json 里、"
+					+ "以及它挂的部件名是否等于 SkiStance.THIGH_PART。", SkiStance.THIGH_PART);
+		}
 		self.leftLeg.visible = false;
 		self.rightLeg.visible = false;
 		this.skis$armorLegsHidden = true;
+	}
+
+	/**
+	 * 这个 avatar 是不是<b>本机玩家自己</b>（{@link Minecraft#player}）。
+	 *
+	 * <p>只有本机玩家的 id 会被写进 {@link SkiState}（右键触发、无 S2C 包），所以摆臂动画只对本机 avatar 读表；
+	 * 远端玩家<b>不摆臂</b>（见类注释里的已知限制）。
+	 */
+	private static boolean isLocalAvatar(AvatarRenderState avatar) {
+		LocalPlayer self = Minecraft.getInstance().player;
+		return self != null && avatar.id == self.getId();
 	}
 
 	/** 取腿上的大腿子部件；没有（护甲模型等）返回 null。 */
