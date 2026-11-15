@@ -81,6 +81,7 @@ python -m venv .venv
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟） |
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
+| `mixin/client/CameraFlipMixin.java` | **第一人称相机随空翻翻滚**：`Camera#alignWithEntity(F)V` 的 **TAIL** 再 `setRotation(yRot, xRot − flip)`，`flip = SkiAir.angleDegrees(id, partialTick)`（与第三人称 `EntityTiltMixin` 同一套符号：`Axis.XP.rotationDegrees(flip)` 正角＝向后翻，相机 `xRot` 正＝俯视，所以减）。只在第一人称 + 穿本模组的板 + 角度非 0 时动手，叠加在 `CameraTiltMixin` 的位置修正之后；第三人称那条链一点不动 |
 | `mixin/client/CameraViewSmoothingMixin.java` | 每帧在 `Camera#alignWithEntity(F)V` 的 HEAD 调 `SkiViewSmoothing.frame`（相机读视角朝向前的最后一刻，`partialTick` 与相机随后用的是同一个）—— 只对「相机跟的就是本地玩家」生效 |
 | `mixin/client/SkiHeadLimitMixin.java` | 单板 / 双板都在 `Entity#turn` 上记账：HEAD 记下转之前的 yaw，TAIL 把这一帧真正转过的角度加进 `SkiViewSmoothing.headOffset` 并夹到 ±`VIEW_LIMIT_DEGREES`，只撤掉越界那点（**不再**用身体朝向当基准把 yRot 另夹一遍 —— 那会和每帧那次差一帧互相拉回） |
 | `mixin/client/EntityStepSoundMixin.java` + `PlayerStepSoundMixin.java` | 穿板时**静音脚步**：掐 `Entity#vibrationAndSoundEffectsFromBlock` 里对 `walkingStepSound` 的调用（这样连 PresenceFootsteps 挂在同一处的钩子一起哑），再从 `Player#playStepSound` 兜一层 |

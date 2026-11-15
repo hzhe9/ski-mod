@@ -11,6 +11,7 @@
 		"ClientInputMixin",
 		"EntityTiltMixin",
 		"CameraTiltMixin",
+		"CameraFlipMixin",
 		"CameraViewSmoothingMixin",
 		"SkiHeadLimitMixin",
 		"LocalPlayerJumpMixin"
