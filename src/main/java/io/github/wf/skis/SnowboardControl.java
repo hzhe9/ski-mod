@@ -178,10 +178,10 @@ public final class SnowboardControl {
 	 */
 	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
-	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±25°）＝干净落地；
+	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±35°）＝干净落地；
 	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
 	 */
-	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 25.0D;
+	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 35.0D;
 	/** <b>单板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
 	/** <b>单板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
