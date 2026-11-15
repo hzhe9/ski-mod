@@ -232,13 +232,22 @@ public final class SnowboardControl {
 	/** 单板：动量每 tick 保留比例（比双板滑得多 —— 切雪转向时速度不该被地面摩擦啃掉）。 */
 	private static final double MOMENTUM_DECAY = 0.998D;   // 每 tick 掉 0.2%（1 秒 −4%），与双板同值
 	/**
-	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— 比平时更滑（0.999 vs 0.998）。
+	 * <b>转向期间</b>（carve 生效时）的动量保留比例 —— <b>1.0 ＝ 转向零损失</b>。
 	 *
-	 * <p>平时用 {@link #MOMENTUM_DECAY} 0.998（每 tick 掉 0.2%，1 秒 −4%）；转向期间用这个 0.999
-	 * （1 秒 −2%）—— 这是当初「减少转向过程中的摩擦」那条要求在 0.998 基线下的等价值。
-	 * 想让转向与直行完全一样就改成 0.998；想「转向完全不掉速」就改成 1.0。
+	 * <p>用户口径「转向只改变方向、不影响速度大小」：本模组的转向本来就是<b>纯旋转</b>
+	 * （{@link #alignCarveHeading} 只重写水平速度方向，大小与 y 都不动），所以这一段不该再叠一层摩擦。
+	 * {@code 1.0} 同时管两处：
+	 * <ul>
+	 *   <li>转向期间的<b>动量托底</b>（{@code SkiGlide} 用本值做动量保留）不再衰减；</li>
+	 *   <li>{@link #guardCarveSpeed} 的速度下限 ＝ 入场速度<b>不衰减</b>（{@code × 1.0^n}）。</li>
+	 * </ul>
+	 *
+	 * <p><b>不会失控增长</b>：上限仍有 {@link #MAX_SPEED} 0.55 夹住（{@code guardCarveSpeed} 的 target 取
+	 * {@code min(..., MAX_SPEED)}，动量结算那侧同样夹）—— 这里只保证「不往下掉」，不往上加。
+	 * 直行仍走 {@link #MOMENTUM_DECAY} 0.998（那是<b>滑行摩擦</b>，不是转向摩擦，改了平地就永远不减速）；
+	 * 想让转向与直行同摩擦就填 0.998，想留一点点损耗就填 0.999。
 	 */
-	private static final double CARVE_MOMENTUM_DECAY = 0.999D;
+	private static final double CARVE_MOMENTUM_DECAY = 1.0D;
 	/**
 	 * 单板的下落加速<b>结算步长</b>（格）：每累计下降这么多格结算一次。
 	 *
@@ -453,7 +462,7 @@ public final class SnowboardControl {
 		return MOMENTUM_DECAY;
 	}
 
-	/** 单板：<b>转向期间</b>的动量衰减（比 {@link #momentumDecay()} 更滑，见 {@link #CARVE_MOMENTUM_DECAY}）。 */
+	/** 单板：<b>转向期间</b>的动量衰减（{@code 1.0} ＝ 转向零损失，见 {@link #CARVE_MOMENTUM_DECAY}）。 */
 	public static double carveMomentumDecay() {
 		return CARVE_MOMENTUM_DECAY;
 	}
@@ -462,7 +471,7 @@ public final class SnowboardControl {
 	 * 这一 tick 是不是在<b>转向</b>（与 {@link #applyCarve} 的前置条件同一套判定）：压着刃（W / S）
 	 * 且转得动 —— 有侧压（A / D）一定在转，没侧压时要有滑速才转得动。
 	 *
-	 * <p>转向期间用 {@link #CARVE_MOMENTUM_DECAY} 的摩擦，而且反向侧压算「换刃」不算刹车
+	 * <p>转向期间用 {@link #CARVE_MOMENTUM_DECAY}（现值 {@code 1.0} ＝ 零损失）托住动量，而且反向侧压算「换刃」不算刹车
 	 * （见 {@link SkiGlide} 里的动量处理），否则刚起弯那一下速度会被原版摩擦吃掉一大截。
 	 */
 	public static boolean isCarving(int entityId, Input input, double speed) {
@@ -495,8 +504,9 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>只做下限、不封顶</b>：下坡 / 下落加速自己涨上去的速度不会被它拉回去 —— 撞墙那一 tick 动量被砍半之后，
 	 * 下一个自由 tick 就能回到这条曲线上（旧行为是从被砍半的动量继续衰减，整段弯都回不来）。
-	 * 用的是与动量同一个衰减常数，所以平地上这条下限与「动量托底」等价；它的意义是把<b>被截断后的恢复</b>
-	 * 锚定在入口速度上，而不是锚在被截断的那个值上。
+	 * <p>用的是与动量同一个常数（现值 {@code 1.0}）：下限<b>恒等于入场速度、不衰减</b>，所以平地转向
+	 * 完全不吃摩擦 —— 用户口径「转向只改变方向、不影响速度大小」。它的意义是把<b>被截断后的恢复</b>
+	 * 锚定在入场速度上，而不是锚在被截断的那个值上（撞墙被砍半之后，下一个自由 tick 就回到入场速度）。
 	 */
 	public static void guardCarveSpeed(ServerPlayer player) {
 		int entityId = player.getId();

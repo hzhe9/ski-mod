@@ -111,7 +111,7 @@ python -m venv .venv
 
 | 归属 | 类 | 内容 |
 |---|---|---|
-| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制常量（±135°，实现与双板共用 `client/SkiViewSmoothing`）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.15 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 0.999 / `DESCENT_STEP_BLOCKS` 0.5） |
+| **单板** | `SnowboardControl` | 锁定朝向表 `BODY_YAW`、carve（`applyCarve`/`rotateVelocity`）、俯仰 `tilt*`、视角限制常量（±135°，实现与双板共用 `client/SkiViewSmoothing`）、**单板专属数值**（`FALL_GAIN_PER_BLOCK` 0.15 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `CARVE_MOMENTUM_DECAY` 1.0 / `DESCENT_STEP_BLOCKS` 0.5） |
 | **双板** | `SkisControl` | **双板专属数值**：`FALL_GAIN_PER_BLOCK` 0.1 / `FALL_GAIN_PER_TICK_MAX` 0.3 / `MOMENTUM_DECAY` 0.998 / `BRAKE_DECAY` 0.92 / `BRAKE_MIN_ALIGN` 0.3 ＋ **身体朝向锁表 `BODY_YAW` 与转向 `TURN_RATE_DEGREES` 2.0°/tick**（`ensureLocked` / `turnBody` / `forgetBody`）＋ **落地对齐 `ALIGN_DEGREES_PER_TICK` 9°/tick**（`shouldAlignOnGround` / `alignVelocity`，贴地且没按 S 时把速度方向快速朝身体前方掰）＋ **视角限位 `VIEW_LIMIT_DEGREES` 90°**（左右各 90、合计 180；与单板各自一份常量）＋ **W 朝视角转向 `turnTowardView`（`VIEW_TURN_RATE_DEGREES` 2.4°/tick）**；按住 S 且还在往前滑＝刹车（`BRAKE_DECAY`，不拨方向） |
 | 平台（共用骨架，不含手感数值） | `SkiGlide`（tick 循环）、`SkiControl`（原版移动辅助）、`registry/ModItems`（物品）、`SkiBoost`（杖） | 两边各走各的分支，各取各的参数 |
 
