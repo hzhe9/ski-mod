@@ -604,28 +604,34 @@ public final class SnowboardControl {
 	 * <p><b>撞墙 tick 也照拉</b>（不再因 {@code horizontalCollision} 提前返回）：限幅 6°/tick 本身够温和，
 	 * 撞墙那一 tick 顶多把被碰撞逐轴裁过的方向往板轴掰 6°，方向不会没完没了地歪着。
 	 *
+	 * <p><b>服务端与客户端各跑一遍</b>（{@link SkiGlide} 的单板分支 + {@code client/SkisClient} 的
+	 * {@code END_CLIENT_TICK}，客户端只对<b>本机玩家</b>跑）：26.2 里玩家位置是<b>客户端权威</b>
+	 * （{@code Player#isClientAuthoritative()}），真正决定位移的是客户端自己的速度；服务端的速度写入
+	 * 要靠 {@code hurtMarked} → {@code ClientboundSetEntityMotionPacket} 才传得下去，而这个包只在服务端
+	 * 算出误差 &gt; 死区时才发 —— 客户端撞墙把方向裁歪后服务端那边没有误差、不发包，歪方向就永远没人掰。
+	 * 所以这条规则必须两端各跑一次，只靠服务端发包在无误差时不会触发。
+	 *
 	 * <p>为什么每 tick 都要这一道：同一 tick 里还有别的写者（回落加速沿当前方向加长、动量托底、
 	 * 碰撞裁剪）会把方向拽偏，这一道是最后一个写速度的地方，收的就是这些残留。
 	 *
 	 * <p>步长 <b>必须大于每 tick 最大身体转角</b>（满速 3.94°/tick）：身体转得比速度掰得快时，
 	 * 速度方向会永久落在身体后面追不上。
 	 */
-	public static void alignCarveHeading(ServerPlayer player) {
-		int entityId = player.getId();
-		if (!isSnowboard(player) || SkiAir.isStunned(entityId)) {
+	public static void alignCarveHeading(Entity entity, Input keys) {
+		int entityId = entity.getId();
+		if (!isSnowboard(entity) || SkiAir.isStunned(entityId)) {
 			return;
 		}
-		Vec3 motion = player.getDeltaMovement();
+		Vec3 motion = entity.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		if (horizontal.length() <= 1.0E-4D) {
 			return;   // 没速度可掰
 		}
-		if (!player.onGround() && SkiGlide.groundDistance(player, ALIGN_GROUND_RANGE) > ALIGN_GROUND_RANGE) {
+		if (!entity.onGround() && SkiGlide.groundDistance(entity, ALIGN_GROUND_RANGE) > ALIGN_GROUND_RANGE) {
 			return;   // 真腾空了：速度方向由惯性保持，不在空中把路线掰弯
 		}
 
-		Input keys = player.getLastClientInput();
-		Vec3 axis = sideLocked(entityId, player.getYRot(), boardSide(player, keys));
+		Vec3 axis = sideLocked(entityId, entity.getYRot(), boardSide(entity, keys));
 		double curRad = Math.atan2(horizontal.z, horizontal.x);
 		double wantRad = Math.atan2(axis.z, axis.x);   // 板轴方向角（同一套 atan2(z, x) 口径）
 		float errDeg = Mth.wrapDegrees((float) (Math.toDegrees(wantRad) - Math.toDegrees(curRad)));
@@ -633,7 +639,7 @@ public final class SnowboardControl {
 			return;   // 死区：差不到 0.05° 就别写、别发包（既防抖，也防每 tick 多发一份同步）
 		}
 		float stepDeg = Mth.clamp(errDeg, -ALIGN_MAX_DEGREES_PER_TICK, ALIGN_MAX_DEGREES_PER_TICK);
-		rotateVelocity(player, stepDeg);   // 按限幅后的角度**旋转**速度方向（大小与 y 都不动）
+		rotateVelocity(entity, stepDeg);   // 按限幅后的角度**旋转**速度方向（大小与 y 都不动）
 	}
 
 	/**

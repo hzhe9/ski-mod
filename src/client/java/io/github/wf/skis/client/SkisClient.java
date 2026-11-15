@@ -81,6 +81,13 @@ public class SkisClient implements ClientModInitializer {
 					// ——— 单板：carve（前倾 + 横移 → 身体朝向持续转），与服务端同一套规则 ———
 					SnowboardControl.ensureLocked(player.getId(), player.getYRot());
 					SnowboardControl.applyCarve(player, keys, player.getDeltaMovement().horizontalDistance());
+					// 速度方向朝板轴限幅回正 —— 只对本机玩家跑：位置是**客户端权威**，本机速度才是
+					// 真正用于位移的那个；服务端那份写入要算出误差才发 SetEntityMotion，客户端撞墙
+					// 把方向裁歪时服务端没有误差、不发包，所以这里必须自己再掰一次（同一份实现）。
+					// 非本机玩家的速度由服务端同步，本机不改。
+					if (player == self) {
+						SnowboardControl.alignCarveHeading(player, keys);
+					}
 					yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot());
 				} else {
 					// ——— 双板：A / D 转身体 2.0°/tick，W 再朝视角方向补 2.4°/tick ———

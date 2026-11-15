@@ -146,7 +146,9 @@ public final class SkiGlide {
 					SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
 					// 单板：整 tick 最后一个写速度的点 —— 速度方向每 tick 朝**板轴**限幅回正
 					// （近地 1.5 格内就生效，不需要在 carve 里，也没有入弯基准这种状态）。
-					SnowboardControl.alignCarveHeading(player);
+					// 客户端（SkisClient，只对本机玩家）跑的是同一个方法：位置是客户端权威，
+					// 客户端歪掉的方向只能由客户端自己掰回来。
+					SnowboardControl.alignCarveHeading(player, player.getLastClientInput());
 				} else {
 					// 双板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」推导，
 					// 模型转多少、速度方向就转多少（上面 alignVelocity 是 9°/tick 限幅，空中 / 按 S 不跑）。
