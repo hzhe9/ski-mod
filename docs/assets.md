@@ -34,12 +34,28 @@ python tools/gen_item_icons.py
 ### 手上 / 地面模型（`*_hand.json`）
 
 拿在手上的**不是图标几何**，而是**脚上模型的原尺寸几何**（去雪鞋、不缩放：双板全长 26 单位 ≈ 162 cm，
-单板 26 单位含翘头；`build_hand_model()` 只做实体→方块空间换算 + 居中），由 `gen_item_icons.py` 一并生成
-12 个 `<id>[_<款>]_hand.json`。**GUI 与手上的分流**照滑雪杖的模式，写在 `items/` 定义里（`display_context` select）：
+单板 26 单位含翘头；`build_hand_model()` 只做实体→方块空间换算 + 居中），由 `gen_item_icons.py` 一并生成。
+**GUI 与手上的分流**照滑雪杖的模式，写在 `items/` 定义里（`display_context` select）：
 
 ```
 gui → skis:item/<id>（图标模型）        fallback（1/3 人称、地面、展示框…）→ skis:item/<id>_hand
 ```
+
+### 基模型继承（12 个款式文件 = 两行贴图）
+
+同款式的 6 份 `elements` 逐字节相同，**只有 `tex` / `particle` 两行贴图不同** —— 所以每个板种只写两个基模型：
+
+```
+modern_ski_base_gui.json   / modern_ski_base_hand.json     ← display + textures + 完整 elements（~5 KB）
+snowboard_base_gui.json    / snowboard_base_hand.json
+modern_ski[_<款>].json     ← {"parent": "skis:item/modern_ski_base_gui",  "textures": {"tex":…, "particle":…}}   （7 行）
+modern_ski[_<款>]_hand.json ← {"parent": "skis:item/modern_ski_base_hand", "textures": {…}}
+```
+
+模型继承对 `textures` 是**逐键合并**（子覆盖父）、对 `display` 是逐 transform 合并、对 `elements` 是**整块覆盖**
+（款式文件不写 `elements` ⇒ 全部继承）。解析后的模型与「整份复制 + 换两行贴图」逐字段相同
+（含 `display` 里继承自 `minecraft:item/handheld` 的 7 个 transform）。改几何 = 只改基模型；
+**加一款 = 只加两个 7 行的小文件**，不再复制 5 KB 的 `elements`。
 
 手上 display：**1 人称竖持** `[90, 0, 0]`（板面朝镜头 + 板竖起来）；
 **3 人称 = 现实夹板拿法** `[90, 0, ±90]`（板面转到侧向贴体、夹在手臂与身体之间），
@@ -62,7 +78,7 @@ python tools/gen_item_icons.py  # 物品栏的 3D 图标模型（贴图用 item/
 
 款式全在 `tools/gen_assets.py` 顶部的 `VARIANTS` 表里（`top` 板面底色、`ops` 板面花纹区间、`base/side/tip`
 板身其他面、`boot/boot_hi/buckle` 雪鞋三色；`icon` 四色只给 `icon.png` 里那块板子用）。**`wood` 是基础款，产物文件名不带后缀**，
-其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 补 `models/item/<id>_<款>_hand.json`（两者都由 `gen_item_icons.py` 生成）+ 补 `items/item/<id>_<款>.json`（**select 分流**：gui→图标、fallback→hand；缺了图标=紫黑棋盘格）+ 一条衍生配方 + 两个 lang 键。
+其余 5 款加 `_<款>`。加一款 = 表里加一条 + 补 `models/item/<id>_<款>.json` + 补 `models/item/<id>_<款>_hand.json`（两者都由 `gen_item_icons.py` 生成、都只是「parent + 两行贴图」的 7 行文件，见上节基模型继承）+ 补 `items/item/<id>_<款>.json`（**select 分流**：gui→图标、fallback→hand；缺了图标=紫黑棋盘格）+ 一条衍生配方 + 两个 lang 键。
 ⚠ 板面 UV 的 v 轴与板的前后方向相反（v=0 是板尾），板头那一段要画在 v 的高端；改板身长宽会整体挪动所有 u 数字。
 
 产物（全部在 `src/main/resources/assets/skis/`；`[_<款>]` = 6 个款式各一份，共 **27 个 png**）：

@@ -428,14 +428,37 @@ public final class SnowSpray {
 	 */
 	private static final double FALL_TOLERANCE = 0.10D;
 
-	/** 实体 id → 上一 tick 的水平速度（用来发现「突然减速」）。 */
-	private static final IdMap<Double> LAST_SPEED = new IdMap<>();
-	/** 实体 id → 上一 tick 的滑行方向角（弧度）。 */
-	private static final IdMap<Double> LAST_DIR = new IdMap<>();
-	/** 实体 id → 雪屑冷却剩余 tick。 */
-	private static final IdMap<Integer> BURST_COOLDOWN = new IdMap<>();
-	/** 实体 id → 上一 tick 是否贴地（急刹爆发的第一道闸门：落地那一 tick 不算刹车）。 */
-	private static final IdMap<Boolean> LAST_GROUNDED = new IdMap<>();
+	/**
+	 * 每玩家的跨 tick 增量状态 —— 原来拆成 4 张 {@code IdMap<Double>} / {@code IdMap<Integer>} /
+	 * {@code IdMap<Boolean>}（速度 / 方向 / 冷却 / 上一 tick 贴地）。
+	 *
+	 * <p><b>合成一个对象是为了热路径不再装箱</b>：原来一 tick 最多 5 次 {@code Double.valueOf} /
+	 * {@code Boolean.valueOf} / {@code Integer.valueOf}（每张表 put 都要把基本类型装箱，
+	 * {@code getOrDefault(id, 0)} 连那个 0 都要装一次）；现在只有「这个 id 本场第一次出现」时 new 一次
+	 * 本对象，之后每 tick 都是原地读写基本类型字段，稳态<b>零装箱、零分配</b>。
+	 *
+	 * <p>{@code has*} 三个标记对应原来的「表里没这条记录」（{@code put} 返回 null）：
+	 * {@code hasSpeed} 恒等于「表里有这个 id」，{@code hasDir} / {@code hasGrounded} 各自独立
+	 * （速度不到 1e-4 的 tick 不写方向；雪面扫描没跑到贴地判定就 continue 的 tick 不写贴地）。
+	 *
+	 * <p>只在客户端 tick 线程（{@link #tick}）里原地改，其它线程不读本对象 —— {@link IdMap} 本身仍是并发表。
+	 */
+	private static final class PlayerState {
+		/** 上一 tick 的水平速度（格/tick）。 */
+		double speed;
+		/** 上一 tick 的滑行方向角（弧度）。 */
+		double dir;
+		/** 雪屑冷却剩余 tick。 */
+		int cooldown;
+		/** 上一 tick 是否贴地（急刹爆发的第一道闸门：落地那一 tick 不算刹车）。 */
+		boolean grounded;
+		boolean hasSpeed;
+		boolean hasDir;
+		boolean hasGrounded;
+	}
+
+	/** 实体 id → 上一 tick 的速度 / 方向 / 冷却 / 贴地（一条记录 = 原来的四张表）。 */
+	private static final IdMap<PlayerState> STATE = new IdMap<>();
 	/** {@link #DEBUG_LOG} 用：客户端 tick 计数（每 20 tick 打一行）。 */
 	private static int DEBUG_TICKS = 0;
 
@@ -465,7 +488,16 @@ public final class SnowSpray {
 				continue;
 			}
 			double speed = player.getDeltaMovement().horizontalDistance();
-			Double last = LAST_SPEED.put(id, speed);
+			PlayerState state = STATE.get(id);
+			if (state == null) {
+				state = new PlayerState();     // 只有本场第一次见到这个 id 才分配（之后每 tick 原地读写）
+				STATE.put(id, state);
+			}
+			// 先取上一 tick 的值再当场覆盖 —— 与原来「put 返回旧值」等价，且不再装箱
+			double last = state.speed;
+			boolean hasLast = state.hasSpeed;
+			state.speed = speed;
+			state.hasSpeed = true;
 			// 转向检测（两板通用）：滑行方向这一 tick 摆了多少。每 tick 都写回（即使这 tick 不喷粒子），
 			// 否则重新开始喷的那一刻会拿一个几秒前的方向去比，误判成「在转向」。
 			boolean turning = false;
@@ -475,8 +507,11 @@ public final class SnowSpray {
 			if (speed >= 1.0E-4D) {
 				Vec3 motion = player.getDeltaMovement();
 				double dir = Math.atan2(motion.z, motion.x);
-				Double lastDir = LAST_DIR.put(id, dir);
-				if (lastDir != null) {
+				double lastDir = state.dir;
+				boolean hasLastDir = state.hasDir;
+				state.dir = dir;
+				state.hasDir = true;
+				if (hasLastDir) {
 					double delta = dir - lastDir;
 					while (delta > Math.PI) {
 						delta -= Math.PI * 2.0D;
@@ -495,9 +530,9 @@ public final class SnowSpray {
 					turnDelta = delta;
 				}
 			}
-			int cooldown = BURST_COOLDOWN.getOrDefault(id, 0);
+			int cooldown = state.cooldown;
 			if (cooldown > 0) {
-				BURST_COOLDOWN.put(id, cooldown - 1);
+				state.cooldown = cooldown - 1;
 			}
 			// 雪面 + 距离：一次扫描同时给出「雪面上表面的高度」和「脚底到它的距离」，
 			// 门槛只看距离（≤ AIR_RANGE）—— 不看 blockPosition() 落在哪一格、不看往下数几格、不看碰撞射线。
@@ -509,21 +544,24 @@ public final class SnowSpray {
 			}
 			if (Double.isNaN(surface)) {
 				// 空中 / 附近没雪：记成「不贴地」，免得落地那一刻拿几分钟前的旧状态当「一直在雪面上」。
-				LAST_GROUNDED.put(id, false);
+				state.grounded = false;
+				state.hasGrounded = true;
 				continue;
 			}
 			// 贴地判定（浮点比较，不用 autoboxing 的 ==）：脚底到雪面上表面 ≤ 容差才算站在雪面上。
 			boolean grounded = player.getY() - surface <= GROUND_TOUCH_TOLERANCE;
-			Boolean wasGrounded = LAST_GROUNDED.put(id, grounded);
+			boolean wasGrounded = state.hasGrounded && state.grounded;   // 上一 tick（先读再覆盖）
+			state.grounded = grounded;
+			state.hasGrounded = true;
 			// 急减速：炸一团雪屑抛向空中（急刹、撞墙、压刃刹车都是这个形状）。
 			// 三道闸门挡掉「落地」这种假急刹：① 上一 tick 贴地 ② 本 tick 贴地 ③ 垂直速度小（真在往下掉就不是刹车）。
 			// 落地那一 tick 水平速度会突降（动量重置 + 落地摩擦），只看差值的话从一两格高跳下来也会炸一大团。
-			if (last != null && cooldown == 0
-					&& Boolean.TRUE.equals(wasGrounded) && grounded
+			if (hasLast && cooldown == 0
+					&& wasGrounded && grounded
 					&& Math.abs(player.getDeltaMovement().y) < FALL_TOLERANCE
 					&& last > BURST_MIN_SPEED && last - speed > BURST_DROP) {
 				burst(level, player, last - speed, surface);
-				BURST_COOLDOWN.put(id, BURST_COOLDOWN_TICKS);
+				state.cooldown = BURST_COOLDOWN_TICKS;
 			}
 			if (speed < MIN_SPEED) {
 				continue;   // 太慢（站着不动）：不持续扬雪
@@ -843,10 +881,18 @@ public final class SnowSpray {
 	 */
 	private static double snowSurface(ClientLevel level, Player player) {
 		BlockPos base = player.blockPosition();
+		// 先取三个整数坐标：base 是 BlockPos（可能是实体复用的内部实例），不留引用到扫描里去
+		int bx = base.getX();
+		int by = base.getY();
+		int bz = base.getZ();
 		double feet = player.getY();
-		double hit = scanRing(level, base, feet, 0);
+		// 一块可变坐标扫完整个 tick（最多 2 圈 × 每圈 SCAN_DEPTH+1 格）：原来每格一个不可变 BlockPos
+		//（base.offset(...) / top.below(...)），单玩家单 tick 13–45 个新实例；现在整个扫描只分配这 1 个。
+		// 每个位置都是「set 完立刻读数值」，不交给任何会留存它的地方。
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+		double hit = scanRing(level, bx, by, bz, feet, 0, cursor);
 		if (Double.isNaN(hit)) {
-			hit = scanRing(level, base, feet, SCAN_RADIUS);
+			hit = scanRing(level, bx, by, bz, feet, SCAN_RADIUS, cursor);
 		}
 		return hit;
 	}
@@ -854,16 +900,20 @@ public final class SnowSpray {
 	/**
 	 * 扫一圈列，返回半径内所有「离脚底 ≤ {@link #AIR_RANGE}」的雪面里<b>最高的</b>那个。
 	 *
+	 * @param bx    中心列的方块坐标（三轴都写成 int：见 {@link #snowSurface} 的复用说明）
+	 * @param cursor 复用的可变坐标；每次进列前都整块 set 一次，列内由 {@link #scanColumn} 挪 y
 	 * @param radius 0 = 只扫中心列；1 = 3×3（跳过中心，中心已经由 radius 0 那一轮扫过）
 	 */
-	private static double scanRing(ClientLevel level, BlockPos base, double feet, int radius) {
+	private static double scanRing(ClientLevel level, int bx, int by, int bz, double feet, int radius,
+			BlockPos.MutableBlockPos cursor) {
 		double best = Double.NaN;
 		for (int dx = -radius; dx <= radius; dx++) {
 			for (int dz = -radius; dz <= radius; dz++) {
 				if (radius > 0 && dx == 0 && dz == 0) {
 					continue;
 				}
-				double surface = scanColumn(level, base.offset(dx, 0, dz), feet);
+				cursor.set(bx + dx, by, bz + dz);
+				double surface = scanColumn(level, cursor, feet);
 				if (!Double.isNaN(surface) && (Double.isNaN(best) || surface > best)) {
 					best = surface;
 				}
@@ -872,16 +922,24 @@ public final class SnowSpray {
 		return best;
 	}
 
-	/** 一列往下扫 {@link #SCAN_DEPTH} 格，返回这一列里离脚底最近（最高）且 ≤ {@link #AIR_RANGE} 的雪面上表面。 */
-	private static double scanColumn(ClientLevel level, BlockPos top, double feet) {
+	/**
+	 * 一列往下扫 {@link #SCAN_DEPTH} 格，返回这一列里离脚底最近（最高）且 ≤ {@link #AIR_RANGE} 的雪面上表面。
+	 *
+	 * @param cursor 进本方法时位于列顶（x / y / z 三轴都有效）；出口时 y 已还原到列顶
+	 */
+	private static double scanColumn(ClientLevel level, BlockPos.MutableBlockPos cursor, double feet) {
+		int x = cursor.getX();
+		int topY = cursor.getY();
+		int z = cursor.getZ();
 		double best = Double.NaN;
 		for (int dy = 0; dy <= SCAN_DEPTH; dy++) {
-			BlockPos pos = top.below(dy);
-			BlockState state = level.getBlockState(pos);
+			int y = topY - dy;
+			cursor.setY(y);                       // 复用同一个实例，不再 top.below(dy)
+			BlockState state = level.getBlockState(cursor);
 			if (!state.is(BlockTags.SNOW) && !state.is(BlockTags.ICE)) {
 				continue;
 			}
-			double surface = pos.getY() + state.getShape(level, pos).max(Direction.Axis.Y);
+			double surface = y + state.getShape(level, cursor).max(Direction.Axis.Y);
 			double gap = feet - surface;
 			if (gap > AIR_RANGE || gap < -EMBED_TOLERANCE) {
 				continue;   // 太远，或者高过脚底太多（头顶的雪层不算地面）
@@ -890,6 +948,7 @@ public final class SnowSpray {
 				best = surface;
 			}
 		}
+		cursor.setY(topY);                        // 还原列顶，别把脏 y 留给调用方
 		return best;
 	}
 
@@ -950,22 +1009,16 @@ public final class SnowSpray {
 
 	/** 脱板 / 换人：把该实体的记录清掉，免得 id 复用串状态。 */
 	private static void forget(int id) {
-		LAST_SPEED.remove(id);
-		LAST_DIR.remove(id);
-		BURST_COOLDOWN.remove(id);
-		LAST_GROUNDED.remove(id);
+		STATE.remove(id);
 	}
 
 	/**
-	 * 换世界 / 重连 / 换维度：四张表整表丢掉（{@code SkisClient#resetWorldState} 调）。
+	 * 换世界 / 重连 / 换维度：整张状态表丢掉（{@code SkisClient#resetWorldState} 调）。
 	 *
 	 * <p>不清的话，上一维度的「上一 tick 速度 / 上一 tick 贴地」会活到新维度，首 tick 就满足
 	 * 「上一 tick 很快 + 上一 tick 贴地 + 本 tick 骤降」—— 凭空炸一团雪。
 	 */
 	public static void forgetAll() {
-		LAST_SPEED.clear();
-		LAST_DIR.clear();
-		BURST_COOLDOWN.clear();
-		LAST_GROUNDED.clear();
+		STATE.clear();
 	}
 }

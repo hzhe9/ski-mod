@@ -14,6 +14,11 @@
 另外：**模型的 GUI 窗口只有一格（16x16x16）**，超出就裁掉 —— 所以图标几何体要缩到 0..16 里，
 居中在 (8,8,8)；这比调 `display.gui` 的 translation/scale 可靠（原先的滑雪杖就是这么做的）。
 
+**同款式的 6 份元素几何完全一样，只差 2 行贴图引用 —— 所以每个板种只写两个基模型**
+（`<id>_base_gui.json` / `<id>_base_hand.json`，含 `display` + `textures` + 完整 `elements`），
+6 款式 × GUI/手持共 12 个文件缩成 `{"parent": "<基模型>", "textures": {...}}` 的小文件（模型继承，
+`textures` 子覆盖父）。改几何 = 只改基模型；加一款 = 只加一个几行的小文件。
+
 用法: python gen_item_icons.py   （默认写入仓库；--dry 只渲染预览不落盘）
 """
 import json
@@ -217,11 +222,21 @@ def rot_vec(rot, p):
     return (x, y, z)
 
 
-def build_board_model(board, variant):
-    """生成一个款式的 3D 物品模型 json。
+def board_texture(board, variant):
+    """物品模型只能引用 textures/item/（entity/ 不进物品图集 → 图标紫黑缺失）。"""
+    tex = f"skis:item/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
+    if variant != BASE:
+        tex += f"_{variant}"
+    return tex
+
+
+def build_gui_model(board):
+    """生成一个板种的 **GUI 图标基模型**（`<id>_base_gui.json`，贴图用基础款）。
 
     几何流程：实体空间 → 方块空间（居中到原点）→ **按 display 旋转算投影**，据此定缩放到一格
     （11 单位，留出旋转余量）→ 平移回 (8,8,8)。旋转交给模型的 display，不在坐标里烘焙。
+
+    <p>款式差异只有两行贴图，所以 6 款共用这一份（款式文件只写 parent + textures）。
     """
     boxes = collect(board)
     to_block = lambda ex, ey, ez: (ex, 24.0 - ey, ez)   # 不做 x 镜像（与脚上视图的斜向一致）
@@ -249,9 +264,7 @@ def build_board_model(board, variant):
         return tuple((p[k] - center[k] + fix[k]) * scale + offs[k] for k in range(3))
 
     # 物品模型只能引用 textures/item/（entity/ 不进物品图集 → 图标紫黑缺失）
-    tex = f"skis:item/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
-    if variant != BASE:
-        tex += f"_{variant}"
+    tex = board_texture(board, BASE)
     return {
         "parent": "minecraft:item/handheld",
         "display": {"gui": GUI_DISPLAY[board]},
@@ -261,7 +274,7 @@ def build_board_model(board, variant):
 
 
 # ------------------------------------------- 手上/地面模型（脚上几何、无鞋、原尺寸）
-def build_hand_model(board, variant):
+def build_hand_model(board):
     """手（1/3 人称）与地面等上下文用：**脚上模型的原尺寸几何**，去掉雪鞋、不缩放。
 
     - 几何与脚上完全一致（collect 已按 WITH_BOOTS 排除雪鞋），只做「实体空间 → 方块空间 → 居中 (8,8,8)」；
@@ -280,14 +293,27 @@ def build_hand_model(board, variant):
         p = to_block(ex, ey, ez)
         return tuple(p[k] - center[k] + 8.0 for k in range(3))
 
-    tex = f"skis:item/{'ski_board' if board == 'modern_ski' else 'snowboard'}"
-    if variant != BASE:
-        tex += f"_{variant}"
+    tex = board_texture(board, BASE)
     return {
         "parent": "minecraft:item/handheld",
         "display": dict(HAND_DISPLAY),
         "textures": {"tex": tex, "particle": tex},
         "elements": [element_for_box(b, to_model) for b in boxes],
+    }
+
+
+def build_variant_model(base, board, variant):
+    """款式文件：只写 `parent` + 两行贴图（几何与 display 全部继承基模型）。
+
+    解析后与「整份复制 + 换两行贴图」逐字段相同 —— 模型继承对 `textures` 是逐键合并（子覆盖父），
+    对 `elements` / `display` 是整块覆盖或逐键覆盖（款式文件两者都不写 ⇒ 全部继承）。
+
+    @param base 基模型名（`<id>_base_gui` / `<id>_base_hand`，不带命名空间）
+    """
+    tex = board_texture(board, variant)
+    return {
+        "parent": f"skis:item/{base}",
+        "textures": {"tex": tex, "particle": tex},
     }
 
 
@@ -331,12 +357,19 @@ def write_json(path, data):
 def main():
     dry = "--dry" in sys.argv
     for board in ("modern_ski", "snowboard"):
+        # 每个板种两个基模型（GUI 图标缩放版 / 手上原尺寸版），6 款共用
+        gui_base = f"{board}_base_gui"
+        hand_base = f"{board}_base_hand"
+        if not dry:
+            write_json(os.path.join(MODELS, f"{gui_base}.json"), build_gui_model(board))
+            write_json(os.path.join(MODELS, f"{hand_base}.json"), build_hand_model(board))
         for variant in VARIANTS:
             sfx = "" if variant == BASE else "_" + variant
-            model = build_board_model(board, variant)
             if not dry:
-                write_json(os.path.join(MODELS, f"{board}{sfx}.json"), model)
-                write_json(os.path.join(MODELS, f"{board}{sfx}_hand.json"), build_hand_model(board, variant))
+                write_json(os.path.join(MODELS, f"{board}{sfx}.json"),
+                           build_variant_model(gui_base, board, variant))
+                write_json(os.path.join(MODELS, f"{board}{sfx}_hand.json"),
+                           build_variant_model(hand_base, board, variant))
     if not dry:
         write_json(os.path.join(MODELS, "ski_pole_gui.json"), build_pole_gui())
     print("done", "(dry)" if dry else "")
