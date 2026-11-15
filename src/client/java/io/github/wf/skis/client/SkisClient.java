@@ -140,5 +140,10 @@ public class SkisClient implements ClientModInitializer {
 
 		// 物品那边右键时通过这个钩子让客户端播放一次摆臂
 		SwingHooks.setListener(player -> SkiState.triggerSwing(player.getId()));
+
+		// First Person Model（若装了）：空翻期间关掉它的第一人称身体 ——
+		// 它把玩家实体按「世界坐标」搬一个 offset，而我们绕腰翻，翻到 ≈90° 时身体会被搬进镜头。
+		// 反射探测、对方不在时零影响（见 FirstPersonModelCompat 的 javadoc）。
+		FirstPersonModelCompat.install();
 	}
 }

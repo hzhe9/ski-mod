@@ -571,6 +571,19 @@ public final class SkiAir {
 	}
 
 	/**
+	 * 这个实体此刻是不是正在空翻（客户端那张表的当前角度 ≠ 0）。渲染期用（FirstPersonModelCompat）。
+	 *
+	 * <p>每次都是一次 HashMap 查询、无反射、null 安全：渲染期每帧都会问它
+	 * （{@code client/FirstPersonModelCompat} 注册给 First Person Model 的 {@code ActivationHandler}）。
+	 * 角度是 [0,360) 取模的，翻满一圈那一 tick 会读到 ≈0 —— 对「这一帧要不要画第一人称身体」无所谓
+	 * （那正是直立的一帧），真正需要「是否已开翻」的是 {@code flipStarted}，它只在状态机内部用。
+	 */
+	public static boolean isFlipping(int entityId) {
+		AirState state = CLIENT_STATES.get(entityId);
+		return state != null && state.angle != 0.0D;
+	}
+
+	/**
 	 * 这个实体现在是不是在摔倒的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。
 	 *
 	 * <p>两张表<b>任一</b> {@code stunTicks > 0} 即为 true：调用方（{@code SnowboardControl#isCarving}、
