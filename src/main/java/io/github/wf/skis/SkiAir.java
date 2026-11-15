@@ -33,7 +33,8 @@ import net.minecraft.world.phys.Vec3;
  *       角度<b>不在 360° 封顶</b>（可以多圈），内部按 360 取模保存（[0,360)，避免数值膨胀）。</li>
  *   <li><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
  *       {@code |a| ≤ FLIP_LANDING_TOLERANCE_DEGREES} ＝ <b>干净落地</b>（角度归零、不掉速）；
- *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、进入 {@code CRASH_STUN_TICKS} 的失控。
+ *       否则＝<b>摔倒</b>：水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、向上的速度归零、进入 {@code CRASH_STUN_TICKS}
+ *       的失控（<b>失控期间禁止起跳</b>：{@link #tryJump} 在 {@code stunTicks > 0} 时直接返回 false）。
  *       多翻了几圈只要停在直立附近也算净落。</li>
  *   <li><b>起跳（唯一入口，{@link #tryJump}）</b>：本模组接管 —— 原版 {@code jumpFromGround()} 在穿板时被取消
  *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
@@ -44,7 +45,10 @@ import net.minecraft.world.phys.Vec3;
  *       不会把客户端写下的冲量整份覆盖掉。
  *       只写 {@code deltaMovement.y} ＋ {@code hurtMarked} ＋ {@code needsSync}，不 setPos；
  *       <b>空翻中不补跳</b>（{@code !onGround && holdTicks > FLIP_HOLD_DELAY_TICKS} 直接返回，
- *       免得补跳把已经开翻的那一下打断）；起跳成功<b>不再动</b> {@code holdTicks}。</li>
+ *       免得补跳把已经开翻的那一下打断）；起跳成功<b>不再动</b> {@code holdTicks}。
+ *       <b>摔倒失控中禁止起跳</b>：{@code state.stunTicks > 0} 时在计时推进之后、判条件之前直接返回 false ——
+ *       客户端 {@code landClient} 与服务端 {@code applyLanding} 都会置这个计时，而 {@code tryJump} 两端各调一次，
+ *       所以一处闸门就是双侧禁跳（按住空格的人不会在摔倒的下一 tick 又从 0 开翻）。</li>
  * </ol>
  *
  * <p><b>两端分工</b>（角度只有客户端知道 —— 服务端拿不到「玩家这一 tick 有没有按住空格」）：
@@ -376,6 +380,10 @@ public final class SkiAir {
 		} else if (state.coyoteTicks > 0) {
 			state.coyoteTicks--;
 		}
+		if (state.stunTicks > 0) {
+			return false;                                       // 摔倒失控中：禁止起跳（两端都生效
+			//                                                     —— 客户端 landClient 与服务端 applyLanding 都会置这个计时）
+		}
 		if (!onGround && state.holdTicks > tuning.flipHoldDelayTicks()) {
 			return false;                                       // 空翻中：不再补跳（别打断已开翻的那一下）
 		}
@@ -540,9 +548,14 @@ public final class SkiAir {
 
 	/**
 	 * <b>服务端落地结算</b>（{@link SkiFlip} 的包处理器调这里）：用同一份 {@link #isCleanLanding} 判定；
-	 * 净落什么都不做；摔倒则水平速度 ×{@code CRASH_SPEED_MULTIPLIER} + {@code hurtMarked} 并进失控，
-	 * 且 {@code CRASH_DAMAGE_MAX > 0} 时按「与直立偏差 / 180」比例扣血。
+	 * 净落什么都不做；摔倒则水平速度 ×{@code CRASH_SPEED_MULTIPLIER}、<b>向上的速度归零</b>（{@code motion.y = min(motion.y, 0)}）
+	 * ＋ {@code hurtMarked} 并进失控，且 {@code CRASH_DAMAGE_MAX > 0} 时按「与直立偏差 / 180」比例扣血。
 	 * <b>只走 deltaMovement + hurtMarked + hurtServer，不 setPos</b>。
+	 *
+	 * <p><b>为什么还要抹掉向上的速度</b>：客户端与服务端的 tick 时序（客户端 {@code aiStep} HEAD 先跳、
+	 * 服务端 {@code START_SERVER_TICK} 后跳，落地包还要走一趟网络）可能让「落地那一 tick 的起跳」抢在
+	 * {@code stunTicks} 被置上之前发出 —— 那一下会把玩家再弹起来。这一行把那次弹起吃掉，保证摔倒就是往下走；
+	 * 之后的起跳由 {@link #tryJump} 的 {@code stunTicks > 0} 闸门拦住。
 	 *
 	 * <p>扣血用的伤害类型是 {@code damageSources().generic()}，不是 {@code fall()} ——
 	 * 本模组的 {@code SnowLanding} 在 {@code hurtServer} 的 ALLOW_DAMAGE 上会取消所有
@@ -559,9 +572,9 @@ public final class SkiAir {
 			return true;
 		}
 		AirState state = state(player);
-		state.stunTicks = tuning.crashStunTicks;
+		state.stunTicks = tuning.crashStunTicks();
 		Vec3 motion = player.getDeltaMovement();
-		player.setDeltaMovement(motion.x * tuning.crashSpeedMultiplier, motion.y,
+		player.setDeltaMovement(motion.x * tuning.crashSpeedMultiplier, Math.min(motion.y, 0.0D),
 				motion.z * tuning.crashSpeedMultiplier);
 		player.hurtMarked = true;   // 让客户端跟着服务端速度走（不 setPos）
 		if (tuning.crashDamageMax() > 0.0D) {
