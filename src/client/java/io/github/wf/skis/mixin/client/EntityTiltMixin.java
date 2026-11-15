@@ -27,9 +27,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(LivingEntityRenderer.class)
 public abstract class EntityTiltMixin {
-	/** 空翻的旋转轴高度（格，从脚底往上）—— 绕腰翻，不是绕脚底。 */
-	private static final float FLIP_PIVOT_HEIGHT = 1.0F;
-
 	@Inject(method = "setupRotations", at = @At("TAIL"))
 	private void skis$boardTilt(
 			LivingEntityRenderState state, PoseStack poseStack, float bodyRot, float scale, CallbackInfo ci) {
@@ -49,9 +46,9 @@ public abstract class EntityTiltMixin {
 		if (flip == 0.0F) {
 			return;
 		}
-		poseStack.translate(0.0D, FLIP_PIVOT_HEIGHT, 0.0D);
+		poseStack.translate(0.0D, SkiAir.FLIP_PIVOT_HEIGHT, 0.0D);
 		poseStack.mulPose(Axis.XP.rotationDegrees(flip));
-		poseStack.translate(0.0D, -FLIP_PIVOT_HEIGHT, 0.0D);
+		poseStack.translate(0.0D, -SkiAir.FLIP_PIVOT_HEIGHT, 0.0D);
 	}
 
 	/** 本帧的 partialTick（与相机 / 实体插值用的是同一个）。 */

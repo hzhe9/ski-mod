@@ -65,6 +65,17 @@ public final class SkiAir {
 	/** 客户端交上来的角度上限（度，＝10 圈）：超过直接当非法包丢掉。 */
 	public static final double MAX_NET_ANGLE_DEGREES = 3600.0D;
 
+	/**
+	 * 空翻的旋转轴高度（格，<b>从脚底往上</b>）：<b>绕腰翻，不是绕脚底</b>。
+	 *
+	 * <p>这个值同时决定两个人身上的位置同源：第三人称模型（{@code EntityTiltMixin} 转整个 poseStack）
+	 * 与第一人称相机（{@code CameraFlipMixin} 把相机位置绕它转）<b>必须用同一个值</b> ——
+	 * 否则相机会脱出头的圆弧：模型绕腰翻时头（眼，眼高 1.62）画在半径 {@code 1.62 − 1.0 = 0.62}
+	 * 的圆上，相机若留在竖直眼高那点原地转，翻到 180° 时眼睛不在头的位置，第一人称就看见自己的后背。
+	 * 所以常量只在这里记一处，两处引用它（改一处两边跟着走）。
+	 */
+	public static final float FLIP_PIVOT_HEIGHT = 1.0F;
+
 	/** 落地回调：把「最终角度 + 是否净落」交给调用方（客户端用它发包）。 */
 	@FunctionalInterface
 	public interface LandingListener {
