@@ -6,7 +6,7 @@ package io.github.wf.skis.client;
  * <p>两处必须用同一个值，否则脚分开了、板还在原地：
  * <ul>
  *   <li>{@code HumanoidModelMixin} 把玩家模型的左右腿各平移 {@code legOffsetX()}；</li>
- *   <li>{@code SkiBoardModel} 把雪鞋 + 板身也建在同样的横向上。</li>
+ *   <li>{@code AlpineSkiModel} 把雪鞋 + 板身也建在同样的横向上。</li>
  * </ul>
  */
 public final class SkiStance {
@@ -52,7 +52,7 @@ public final class SkiStance {
 	 *
 	 * <p><b>枢轴在靴口（模型 y=18）</b>：可见的腿只有上半段（腿局部 y=0…6，即模型 y=12…18，
 	 * 由 {@code PlayerModelThighMixin} 加的大腿子部件画出来），而<b>雪鞋就是竖直的下半段</b>
-	 * —— {@code SkiBoardModel} / {@code SnowboardModel} 的 boot 是 {@code addBox(-2,18,-2,4,6,4)}，
+	 * —— {@code AlpineSkiModel} / {@code SnowboardModel} 的 boot 是 {@code addBox(-2,18,-2,4,6,4)}，
 	 * 与腿下半段（模型 y=18…24）同形同位。所以绕靴口翻只把<b>膝盖</b>顶出去，
 	 * 脚底、板面、鞋一个都不动：不再有「整条腿绕髋倾、脚底甩出雪鞋」的穿模。
 	 *

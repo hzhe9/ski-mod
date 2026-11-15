@@ -13,7 +13,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * 脚部装备的自定义外观（Fabric ArmorRenderer）：双板用 {@link SkiBoardModel}、单板用 {@link SnowboardModel}。
+ * 脚部装备的自定义外观（Fabric ArmorRenderer）：双板用 {@link AlpineSkiModel}、单板用 {@link SnowboardModel}。
  *
  * <p><b>6 种款式共用同一套模型，贴图按物品栈的 {@code minecraft:item_model} 组件切换</b>：
  * <pre>

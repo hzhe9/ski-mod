@@ -15,7 +15,7 @@ import net.minecraft.world.phys.Vec3;
  * 结束时正好是原速，不会比原速慢（终值就是 from，由构造保证）。
  *
  * <p>冲刺期间方向不锁死：按 WASD 会让冲刺方向逐渐转到你要去的方向，松开方向键则沿当前方向继续滑。
- * 转向规则统一在 {@link SkiControl}（离地超过一格时锁方向）。连着右键 = 以“当时的速度”为基准再抬一次。
+ * 转向规则统一在 {@link GlideSteering}（离地超过一格时锁方向）。连着右键 = 以“当时的速度”为基准再抬一次。
  *
  * <p>可调旋钮：{@link #ADD}（抬高的量）、{@link #MIN_PEAK}（原地撑的起步下限）、
  * {@link #DURATION_TICKS}（持续多久）、{@link #CURVE}（衰减曲线，越大越“先猛后缓”）。
@@ -87,10 +87,10 @@ public final class SkiBoost {
 				double progress = 1.0D - boost.ticksLeft() / (double) DURATION_TICKS;   // 0 → 1
 				double speed = Math.min(
 						boost.from() + (boost.peak() - boost.from()) * Math.pow(1.0D - progress, CURVE),
-						SkiControl.maxGlideSpeed(player));
+						GlideSteering.maxGlideSpeed(player));
 
 				// 方向：按了 WASD 就朝那个方向转过去（离地超过一格则锁死），松手就沿当前方向继续滑
-				Vec3 direction = SkiControl.steer(boost.direction(), player);
+				Vec3 direction = GlideSteering.steer(boost.direction(), player);
 
 				Vec3 motion = player.getDeltaMovement();
 				player.setDeltaMovement(direction.x * speed, motion.y, direction.z * speed);
@@ -132,18 +132,18 @@ public final class SkiBoost {
 
 	/**
 	 * 延迟结束后的实际发力：以当前速度为基准抬高一截，随后在 DURATION_TICKS 内回到这个基准速度。
-	 * 峰值封顶在各板自己的速度上限（{@link SkiControl#maxGlideSpeed(ServerPlayer)}）。
+	 * 峰值封顶在各板自己的速度上限（{@link GlideSteering#maxGlideSpeed(ServerPlayer)}）。
 	 */
 	private static void applyBurst(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();
 		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 		double current = horizontal.length();
 
-		Vec3 desired = SkiControl.desiredDirection(player);
+		Vec3 desired = GlideSteering.desiredDirection(player);
 		Vec3 direction = desired != null ? desired
 				: (current > 0.01D ? horizontal.normalize() : horizontalLook(player));
 
-		double peak = Math.min(Math.max(current + ADD, MIN_PEAK), SkiControl.maxGlideSpeed(player));
+		double peak = Math.min(Math.max(current + ADD, MIN_PEAK), GlideSteering.maxGlideSpeed(player));
 		// 垂直分量原样保留：撑杖只给水平推力，不会把人蹦起来（原先 +LIFT 会时不时跳一下）
 		player.setDeltaMovement(direction.x * peak, motion.y, direction.z * peak);
 		player.hurtMarked = true;

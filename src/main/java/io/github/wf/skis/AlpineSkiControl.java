@@ -24,7 +24,7 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p><b>落地对齐</b>：贴地且没按 S 时，把<b>速度方向</b>朝身体前方每 tick 掰
  * {@link #ALIGN_DEGREES_PER_TICK} 度（{@link #shouldAlignOnGround} / {@link #alignVelocity}，
- * 由 {@link SkiGlide} 的双板分支调用）—— 转完身落地，方向立刻跟上，不靠 {@code SkiControl.steer} 慢慢摆。
+ * 由 {@link SkiGlide} 的双板分支调用）—— 转完身落地，方向立刻跟上，不靠 {@code GlideSteering.steer} 慢慢摆。
  *
  * <p><b>转向期间速度方向由身体朝向推导</b>（{@link #alignTurnHeading}）：只要这一 tick {@code BODY_YAW}
  * 真的被 {@link #turnBody} / {@link #turnTowardView} 转过，整 tick 末尾就把水平速度方向<b>直接写成</b>
@@ -38,7 +38,7 @@ import net.minecraft.world.phys.Vec3;
  * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
  * 不动（身体在下面转）；顶到之后头被身体拖着走。
  */
-public final class SkisControl {
+public final class AlpineSkiControl {
 	/** <b>客户端</b>那张表：实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
 	private static final IdMap<Float> BODY_YAW_CLIENT = new IdMap<>();
 	/** <b>服务端</b>那张表：同一份语义（为什么分两份见 {@link #table}）。 */
@@ -148,14 +148,11 @@ public final class SkisControl {
 	 * <b>双板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − g) × 0.98}）下
 	 * 正好落在 <b>1.50</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
 	 *
-	 * <p>这里的 g 分两段：<b>首 tick 用贴地档 0.120</b>（0.08 × {@link #GRAVITY_MULTIPLIER} 1.5）——
-	 * 跳跃写在同一 tick 的实体 tick 内，而 {@code SkiGlide.applyGravity} 上一 tick 末尾按 {@code onGround()}
-	 * 设的还是贴地档；<b>第二 tick 起</b>才换腾空档 <b>0.072</b>（0.08 × {@link #AIR_GRAVITY_MULTIPLIER} 0.9）。
+	 * <p>这里的 g 分两段：<b>首 tick 用贴地档 0.120</b>（0.08 × {@link #GRAVITY_MULTIPLIER} 1.5），
+	 * <b>第二 tick 起</b>换腾空档 <b>0.072</b>（0.08 × {@link #AIR_GRAVITY_MULTIPLIER} 0.9）。
 	 * <b>只是表的上限依据</b>：代码不拿它反推力度（表才是唯一事实源），改上限要整张表重算。
 	 */
 	private static final double JUMP_MAX_HEIGHT = 1.5D;
-	/** <b>双板</b>：速度→起法力查找表的点数（s = 0.0 / 0.1 / … / 1.0 共 11 点，步长 0.1）。 */
-	private static final int JUMP_CURVE_SAMPLES = 11;
 	/**
 	 * <b>双板：速度 → 起跳力度</b>（格/tick）的 11 点查找表，下标 = s × 10（s = 0.0 / 0.1 / … / 1.0，
 	 * s ＝ 水平速度 / {@link #MAX_SPEED}），两点之间由 {@link SkiAir.Tuning#jumpPower} <b>线性插值</b>。
@@ -167,18 +164,13 @@ public final class SkisControl {
 	 * 满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 1.50 格。
 	 *
 	 * <p>对应跳高（格）：0.36 / 0.68 / 0.87 / 1.01 / 1.12 / 1.20 / 1.28 / 1.34 / 1.40 / 1.45 / 1.50。
-	 * 与单板各一份：调这里不动单板。
+	 * 与单板各一份：调这里不动单板。表长（{@link AirTuningSpec#JUMP_CURVE_SAMPLES}）、插值口径与摔落结算
+	 * 等通用语义见 {@link AirTuningSpec}。
 	 */
 	private static final double[] JUMP_POWER_BY_SPEED_LUT = {
 			0.226D, 0.318D, 0.363D, 0.392D, 0.414D, 0.431D, 0.444D, 0.456D, 0.466D, 0.475D, 0.483D
 	};
-	static {
-		// 表长必须＝采样点数（插值步长 = 1 / (SAMPLES − 1) = 0.1）：长度写错在这里立刻炸，别带到游戏里
-		if (JUMP_POWER_BY_SPEED_LUT.length != JUMP_CURVE_SAMPLES) {
-			throw new IllegalStateException("JUMP_POWER_BY_SPEED_LUT 应有 " + JUMP_CURVE_SAMPLES + " 点");
-		}
-	}
-	/** <b>双板：离地后的逗留窗</b>（土狼时间，tick）：离地后 <b>6 tick</b> 内按空格仍算「刚离地」可起跳。 */
+	/** <b>双板：离地后的逗留窗</b>（土狼时间，tick）：离地后 <b>6 tick</b> 内按空格仍算「刚离地」可起跳（语义见 {@link AirTuningSpec}）。 */
 	private static final int COYOTE_TICKS = 6;
 	/** <b>双板：输入缓冲</b>（tick）：按下空格后 <b>5 tick</b> 内条件成立就自动发出起跳。 */
 	private static final int JUMP_BUFFER_TICKS = 5;
@@ -191,53 +183,33 @@ public final class SkisControl {
 	private static final double FLIP_MIN_SPEED = 0.15D;
 	/**
 	 * <b>双板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>16.0</b>°/tick ＝ 320°/s，
-	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）。
-	 *
-	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
-	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
-	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 4 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
-	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
-	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
+	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）；计数与静止段的完整口径见 {@link AirTuningSpec}。
 	 * <b>与单板同值（两板都是 16.0°/tick ＝ 22.5 tick ＝ 1.125 s）</b>，各一个常量、改一块不动另一块。
 	 */
 	private static final double FLIP_DEGREES_PER_TICK = 16.0D;
-	/**
-	 * <b>双板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>4</b> tick ＝ 0.2 s）。
-	 *
-	 * <p>判据是 {@code holdTicks > 它}（<b>严格大于</b>）：按住的前 4 个 tick 角度恒为 <b>0</b> ——
-	 * 这就是「静止段」（模型定住不动，之后才起翻）。计数从<b>按下那一刻</b>起算、<b>只由松手归零</b>
-	 * （落地 / 起跳成功 / 失控都不清），所以站着按住很久再起跳＝一离地就接着转。
-	 * 短按（≤ 4 tick）＝ 纯跳跃、一点不转。
-	 */
+	/** <b>双板</b>：连续按住空格 <b>4</b> tick <b>之后</b>才开始累加角度（判据严格大于；短按＝纯跳跃、一点不转）。 */
 	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
-	 * <b>双板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在这个范围（±35°）＝干净落地；
-	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
+	 * <b>双板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±35° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
+	 * 直立附近也算净落）。
 	 */
 	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 35.0D;
 	/** <b>双板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
 	/** <b>双板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
 	private static final int CRASH_STUN_TICKS = 20;
-	/**
-	 * <b>双板</b>：摔倒扣血的上限（4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心）。{@code > 0} 时服务端按
-	 * 「与直立偏差 / 180 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
-	 *
-	 * <p><b>为什么要用 {@code damageSources().generic()} 而不是 {@code fall()}</b>：本模组的
-	 * {@code SnowLanding} 挂在 Fabric {@code ServerLivingEntityEvents.ALLOW_DAMAGE}（＝{@code LivingEntity#hurtServer}）上，
-	 * 对 {@code DamageTypeTags.IS_FALL} 的伤害返回 {@code false} 直接取消（雪 / 冰面上、或 60 tick 内踩过雪）——
-	 * 摔落类型的「摔倒扣血」在雪地上会被整份吃掉。{@code minecraft:generic} 不在 {@code is_fall} tag 里，
-	 * 所以拦不到；同时它在 {@code bypasses_armor} tag 里，护甲不会把 4.0 点折掉，扣的就是标称值。
-	 * 只走 {@code hurtServer} + 现有偏移公式，不动 {@code deltaMovement} 以外的任何东西（不 setPos）。
-	 */
+	/** <b>双板</b>：摔倒扣血的上限（4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心）；为什么用 {@code generic()} 而不是 {@code fall()} 见 {@link AirTuningSpec}。 */
 	private static final double CRASH_DAMAGE_MAX = 4.0D;
 
-	/** 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
-	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
+	/**
+	 * 双板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里，容器、表长校验与
+	 * {@link SkiAir.Tuning} 的装配在 {@link AirTuningSpec}）。
+	 */
+	private static final SkiAir.Tuning AIR_TUNING = new AirTuningSpec(
 			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT,
 			COYOTE_TICKS, JUMP_BUFFER_TICKS, JUMP_COOLDOWN_TICKS, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
-			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
+			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX).toTuning();
 
 	/**
 	 * 动量每 tick 保留比例 ＝ 有效摩擦力：<b>0.998 ＝ 每 tick 保留 99.8%</b>（1 秒 −4%，半衰期 ≈ 17.3 s）；
@@ -271,7 +243,7 @@ public final class SkisControl {
 	 */
 	private static final double ALIGN_DEGREES_PER_TICK = 9.0D;
 
-	private SkisControl() {
+	private AlpineSkiControl() {
 	}
 
 	/**
@@ -516,7 +488,7 @@ public final class SkisControl {
 	 * 免得落地那一 tick 把空中累计的转角一次性算进速度方向、猛地一扭。
 	 *
 	 * <p>为什么要这一道：{@link #alignVelocity} 是 9°/tick 的限幅趋近，而且只在「贴地 + 没按 S」时跑
-	 * （{@link #shouldAlignOnGround}），空中 / 刹车时速度方向<b>一点都不转</b>；{@code SkiControl.steer}
+	 * （{@link #shouldAlignOnGround}），空中 / 刹车时速度方向<b>一点都不转</b>；{@code GlideSteering.steer}
 	 * 那条 0.2 的 lerp 又是另一套节奏。于是同一段转里模型转了 180°、速度才转 150°，两条路各按各的速率走。
 	 * 改成推导式之后，两者之差只剩<b>入弯那一刻固有的「身体−速度」偏角</b>，整段弯不变。
 	 *
@@ -533,7 +505,7 @@ public final class SkisControl {
 	 *       （客户端才吃得到）。</li>
 	 * </ul>
 	 *
-	 * <p>只改方向，不改大小、不改 y，也不碰动量；{@link #alignVelocity} / {@code SkiControl.steer} /
+	 * <p>只改方向，不改大小、不改 y，也不碰动量；{@link #alignVelocity} / {@code GlideSteering.steer} /
 	 * {@code desiredDirection} 的判据一个没动 —— 转向期间它们写的方向被这里覆盖只是<b>自然结果</b>。
 	 * <b>与单板的 {@code SnowboardControl#alignCarveHeading} 各写一套，不共用表、不共用方法。</b>
 	 */

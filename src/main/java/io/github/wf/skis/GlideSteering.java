@@ -26,16 +26,16 @@ import net.minecraft.world.phys.Vec3;
  *       在 MC 里会一 tick 穿过 3.5 格，直接漏过碰撞检测，所以只能取一个"游戏能承受"的值。</li>
  * </ul>
  */
-public final class SkiControl {
+public final class GlideSteering {
 	/** 每 tick 把方向朝按键方向转多少（0.2 ≈ 每 10 tick 转 90°）。 */
 	private static final double STEER_RATE = 0.2D;
 
-	/** 速度上限按板分开：单板 {@code SnowboardControl.maxSpeed()}、双板 {@code SkisControl.maxSpeed()}。 */
+	/** 速度上限按板分开：单板 {@code SnowboardControl.maxSpeed()}、双板 {@code AlpineSkiControl.maxSpeed()}。 */
 	public static double maxGlideSpeed(ServerPlayer player) {
-		return SnowboardControl.isSnowboard(player) ? SnowboardControl.maxSpeed() : SkisControl.maxSpeed();
+		return SnowboardControl.isSnowboard(player) ? SnowboardControl.maxSpeed() : AlpineSkiControl.maxSpeed();
 	}
 
-	private SkiControl() {
+	private GlideSteering() {
 	}
 
 	/**
@@ -65,7 +65,7 @@ public final class SkiControl {
 			return null;   // 单板：人板一体站定，按键不参与方向
 		}
 		// 双板：W 前进 / S 刹车或后退（沿**身体前方**），A / D 只转身体
-		// （身体朝向由 SkisControl.BODY_YAW 持有，客户端与服务端每 tick 各转一步；**视角完全不跟**）。
+		// （身体朝向由 AlpineSkiControl.BODY_YAW 持有，客户端与服务端每 tick 各转一步；**视角完全不跟**）。
 		// 这里只回答「想往哪个方向」：
 		//   W        → 沿身体前方；
 		//   S 且还在往前滑（速度与身体同向）→ 返回 null ＝ 交给 SkiGlide 的刹车分支减速，**不拨方向**；
@@ -76,7 +76,7 @@ public final class SkiControl {
 		double forward = (input.forward() ? 1.0D : 0.0D) - (input.backward() ? 1.0D : 0.0D);
 		if (forward < 0.0D) {
 			// S：还在往前滑（速度与身体同向）就当作刹车 —— 不返回方向，交给 SkiGlide 的刹车分支减速
-			if (SkisControl.isMovingForward(player)) {
+			if (AlpineSkiControl.isMovingForward(player)) {
 				return null;
 			}
 		}
@@ -84,7 +84,7 @@ public final class SkiControl {
 			return null;
 		}
 		double sign = forward == 0.0D ? 1.0D : forward;   // 只按 A/D ＝ 朝身体前方转过去
-		float yaw = SkisControl.bodyYaw(player.getId(), player.getYRot(), false) * Mth.DEG_TO_RAD;
+		float yaw = AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), false) * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(yaw) * sign, 0.0D, Mth.cos(yaw) * sign);
 	}
 }

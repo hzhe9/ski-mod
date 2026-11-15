@@ -1,6 +1,6 @@
 package io.github.wf.skis.mixin.client;
 
-import io.github.wf.skis.SkisControl;
+import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SnowboardControl;
 import net.minecraft.client.Minecraft;
@@ -48,11 +48,11 @@ public abstract class ClientInputMixin {
 		}
 		if (!SnowboardControl.isSnowboard(player)) {
 			// ——— 双板 ———
-			// A / D 只转身体（SkisControl.turnBody），横向分量在这里清掉；前后分量按 δ = 身体朝向 − 视角
+			// A / D 只转身体（AlpineSkiControl.turnBody），横向分量在这里清掉；前后分量按 δ = 身体朝向 − 视角
 			// 旋到视角坐标系 —— 原版是按视角解释输入的，转完之后 W / S 就是沿身体前后走
 			// （身体转过身后按 W 仍朝身体前方溜，而不是朝镜头前方）。δ = 0 时退化成 (0, move.y)。
 			// F(身体) = cos δ·F(视角) − sin δ·L(视角)：所以输入写成 (−y·sin δ, y·cos δ)。
-			float delta = (SkisControl.bodyYaw(player.getId(), player.getYRot(), true) - player.getYRot())
+			float delta = (AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), true) - player.getYRot())
 					* Mth.DEG_TO_RAD;
 			cir.setReturnValue(new Vec2(-move.y * Mth.sin(delta), move.y * Mth.cos(delta)));
 			return;

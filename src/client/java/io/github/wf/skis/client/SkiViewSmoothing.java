@@ -1,6 +1,6 @@
 package io.github.wf.skis.client;
 
-import io.github.wf.skis.SkisControl;
+import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SnowboardControl;
 import net.minecraft.client.player.LocalPlayer;
@@ -8,7 +8,7 @@ import net.minecraft.util.Mth;
 
 /**
  * <b>视角限位的唯一权威（单板 + 双板同一套）</b>：头相对锁定的身体朝向最多左右各
- * {@link SnowboardControl#VIEW_LIMIT_DEGREES} / {@link SkisControl#VIEW_LIMIT_DEGREES} 度。
+ * {@link SnowboardControl#VIEW_LIMIT_DEGREES} / {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 度。
  *
  * <p><b>状态只有一个</b>：{@code headOffset}（视角相对身体朝向的偏角，度）。两个入口改的都是<b>同一个标量</b>、
  * 夹的也是同一个限位，所以结构上不可能互相拉回：
@@ -88,7 +88,7 @@ public final class SkiViewSmoothing {
 		boolean snowboard = SnowboardControl.isSnowboard(player);
 		float bodyNow = snowboard
 				? SnowboardControl.bodyYaw(player.getId(), player.getYRot(), true)
-				: SkisControl.bodyYaw(player.getId(), player.getYRot(), true);
+				: AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), true);
 
 		if (!tracked || trackedId != player.getId() || trackedSnowboard != snowboard) {
 			// 刚穿板 / 换了另一块板 / 换了玩家：从当前视角接手，夹一次，避免视角跳变
@@ -163,7 +163,7 @@ public final class SkiViewSmoothing {
 
 	/** 这块板的视角限位（单板 / 双板各一份常量：双板 90 / 单板 135）。 */
 	private static float limit(boolean snowboard) {
-		return snowboard ? SnowboardControl.VIEW_LIMIT_DEGREES : SkisControl.VIEW_LIMIT_DEGREES;
+		return snowboard ? SnowboardControl.VIEW_LIMIT_DEGREES : AlpineSkiControl.VIEW_LIMIT_DEGREES;
 	}
 
 	/**

@@ -4,19 +4,24 @@ import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SkiAir;
 import io.github.wf.skis.SkiFlip;
 
-import io.github.wf.skis.SkisControl;
+import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SnowboardControl;
 import io.github.wf.skis.SwingHooks;
+import java.util.function.Function;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
+import net.minecraft.client.model.geom.ModelLayerLocation;
+import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 
 public class SkisClient implements ClientModInitializer {
 	/**
@@ -30,21 +35,13 @@ public class SkisClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		// 脚上的板：双板 SkiBoardModel、单板 SnowboardModel，各自一套层与贴图
-		ModelLayerRegistry.registerModelLayer(SkiBoardModel.LAYER, SkiBoardModel::createLayerDefinition);
+		// 脚上的板：双板 AlpineSkiModel、单板 SnowboardModel，各自一套层与贴图
+		ModelLayerRegistry.registerModelLayer(AlpineSkiModel.LAYER, AlpineSkiModel::createLayerDefinition);
 		ModelLayerRegistry.registerModelLayer(SnowboardModel.LAYER, SnowboardModel::createLayerDefinition);
-		ArmorRenderer.register(
-				context -> new BoardArmorRenderer(
-						new SkiBoardModel(context.bakeLayer(SkiBoardModel.LAYER)), SkiBoardModel.TEXTURE,
-						"item/modern_ski", "ski_board"),
-				SkisMod.MODERN_SKI
-		);
-		ArmorRenderer.register(
-				context -> new BoardArmorRenderer(
-						new SnowboardModel(context.bakeLayer(SnowboardModel.LAYER)), SnowboardModel.TEXTURE,
-						"item/snowboard", "snowboard"),
-				SkisMod.SNOWBOARD
-		);
+		registerBoard(SkisMod.MODERN_SKI, AlpineSkiModel.LAYER, AlpineSkiModel.TEXTURE,
+				AlpineSkiModel::new, "item/modern_ski", "ski_board");
+		registerBoard(SkisMod.SNOWBOARD, SnowboardModel.LAYER, SnowboardModel.TEXTURE,
+				SnowboardModel::new, "item/snowboard", "snowboard");
 
 		// 每 tick：推进「一次摆臂」的动画计时（手臂本身不做持续摆动）
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -66,7 +63,7 @@ public class SkisClient implements ClientModInitializer {
 			// 滑行时从板两侧溅起的雪粒子（纯客户端观感）+ 切雪声（间隔与音量随速度）
 			SnowSpray.tick(client);
 			GlideSounds.tick(client);
-			// 双板：A / D 只转**身体**（SkisControl.BODY_YAW），W 时身体再朝视角追 4.8°/tick；视角由鼠标转、并被限在身体 ±90°
+			// 双板：A / D 只转**身体**（AlpineSkiControl.BODY_YAW），W 时身体再朝视角追 4.8°/tick；视角由鼠标转、并被限在身体 ±90°
 			// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
 			for (Player player : client.level.players()) {
 				if (!SkisMod.isSkiMotionActive(player)) {
@@ -76,7 +73,7 @@ public class SkisClient implements ClientModInitializer {
 					// 传 true ＝ 只清客户端那一端的表：单机里服务端与客户端共用 entity id，
 					// 客户端清表不能把服务端的失控 / 起跳冷却一起抹掉（见 SkiAir#forgetClient）。
 					SnowboardControl.forget(player.getId(), true);
-					SkisControl.forgetBody(player.getId(), true);
+					AlpineSkiControl.forgetBody(player.getId(), true);
 					continue;
 				}
 				// 起跳力度 / 后空翻 / 落地：空翻角度与「有没有按住空格」只有本机知道（服务端读不到这个输入），
@@ -111,14 +108,14 @@ public class SkisClient implements ClientModInitializer {
 				} else {
 					// ——— 双板：A / D 转身体 4.0°/tick，W 再朝视角方向补 4.8°/tick ———
 					// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
-					SkisControl.ensureLocked(player.getId(), player.getYRot(), true);
-					SkisControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys), true);
+					AlpineSkiControl.ensureLocked(player.getId(), player.getYRot(), true);
+					AlpineSkiControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys), true);
 					// 越肩视角下跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）
 					if (keys != null && keys.forward() && !ShoulderSurfingCompat.isActive()) {
-						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), true);
+						AlpineSkiControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), true);
 					}
 					// yaw 必须在 turnTowardView 之后取
-					yaw = SkisControl.bodyYaw(player.getId(), player.getYRot(), true);
+					yaw = AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), true);
 				}
 				// 把身体写成锁定的朝向 —— 转视角只转头，不写这一句会被原版拉着跟视角转。
 				// <b>只写本机玩家</b>：远端玩家的 yBodyRot 由服务端同步，客户端每 tick 的写入基本是白做；
@@ -200,8 +197,27 @@ public class SkisClient implements ClientModInitializer {
 		SnowSpray.forgetAll();
 		SkiState.clear();
 		SnowboardControl.forgetAll(true);
-		SkisControl.forgetBodyAll(true);
+		AlpineSkiControl.forgetBodyAll(true);
 		SkiAir.forgetAllClient();
 		SkiViewSmoothing.reset();
+	}
+
+	/**
+	 * 给一块板注册脚部外观渲染器（{@link ArmorRenderer}）：两块板只有参数不同，装配逐字相同 ——
+	 * 烘焙该层的模型、带基础款贴图、再用物品模型 id 前缀去挑款式后缀（见 {@link BoardArmorRenderer}）。
+	 *
+	 * @param item             这块板对应的物品（{@code SkisMod.MODERN_SKI} / {@code SkisMod.SNOWBOARD}）
+	 * @param layer            模型层（决定 {@code bakeLayer} 取哪一份几何）
+	 * @param texture          基础款贴图（wood）
+	 * @param modelFactory     由烘焙好的 {@link ModelPart} 造模型（{@code AlpineSkiModel::new} / {@code SnowboardModel::new}）
+	 * @param itemModelPrefix  物品模型 id 前缀，用来取款式后缀：{@code "item/modern_ski"} / {@code "item/snowboard"}
+	 * @param textureBase      脚上贴图前缀：{@code "ski_board"} / {@code "snowboard"}
+	 */
+	private static void registerBoard(Item item, ModelLayerLocation layer, Identifier texture,
+			Function<ModelPart, BoardModel> modelFactory, String itemModelPrefix, String textureBase) {
+		ArmorRenderer.register(
+				context -> new BoardArmorRenderer(modelFactory.apply(context.bakeLayer(layer)), texture,
+						itemModelPrefix, textureBase),
+				item);
 	}
 }

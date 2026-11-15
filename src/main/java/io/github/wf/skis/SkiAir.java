@@ -69,7 +69,7 @@ import net.minecraft.world.phys.Vec3;
  * </ul>
  *
  * <p><b>数值不在这里</b>：两块板各一套 {@link Tuning}（单板 {@code SnowboardControl.airTuning()}、
- * 双板 {@code SkisControl.airTuning()}），本类只按 {@link SnowboardControl#isSnowboard} 选一份。
+ * 双板 {@code AlpineSkiControl.airTuning()}），本类只按 {@link SnowboardControl#isSnowboard} 选一份。
  */
 public final class SkiAir {
 
@@ -116,7 +116,7 @@ public final class SkiAir {
 	 *
 	 * <p><b>注释里的常量名都不在本类</b>：{@code COYOTE_TICKS} / {@code JUMP_BUFFER_TICKS} /
 	 * {@code JUMP_COOLDOWN_TICKS} / {@code FLIP_HOLD_DELAY_TICKS} / {@code FLIP_MIN_SPEED} /
-	 * {@code CRASH_STUN_TICKS} 等在两块板各自一份 —— 双板在 {@code SkisControl}、单板在
+	 * {@code CRASH_STUN_TICKS} 等在两块板各自一份 —— 双板在 {@code AlpineSkiControl}、单板在
 	 * {@code SnowboardControl}（都 private），本类只按构造参数保存它们的值，在这里 grep 找不到定义。
 	 */
 	public static final class Tuning {
@@ -135,7 +135,7 @@ public final class SkiAir {
 		 * 「真落地」＝连续腾空 ≥ {@code LANDING_LOCK_MIN_AIR_TICKS}（3）tick，坡面 1–2 tick 的贴面抖动不算。
 		 */
 		private final int jumpCooldownTicks;
-		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}，在 {@code SkisControl} / {@code SnowboardControl}）。 */
+		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}，在 {@code AlpineSkiControl} / {@code SnowboardControl}）。 */
 		private final double maxSpeed;
 		/** 空中每 tick 判一次：水平速度低于它就不转角（只是普通小跳）。 */
 		private final double flipMinSpeed;
@@ -299,7 +299,7 @@ public final class SkiAir {
 		private boolean jumpedThisAir;
 		/** 还剩多少 tick 的失控。0 = 正常。 */
 		private int stunTicks;
-		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}（在 {@code SkisControl} / {@code SnowboardControl}）。 */
+		/** 离地后还剩多少 tick 的「逗留窗」（土狼时间）：落地那 tick 重置为该板的 {@code COYOTE_TICKS}（在 {@code AlpineSkiControl} / {@code SnowboardControl}）。 */
 		private int coyoteTicks;
 		/** 输入缓冲：按下空格后还剩多少 tick 内条件满足就自动发出。 */
 		private int jumpBufferTicks;
@@ -346,7 +346,7 @@ public final class SkiAir {
 	}
 
 	/**
-	 * 按脚上的板取一份数值：单板 {@code SnowboardControl.airTuning()}、双板 {@code SkisControl.airTuning()}；
+	 * 按脚上的板取一份数值：单板 {@code SnowboardControl.airTuning()}、双板 {@code AlpineSkiControl.airTuning()}；
 	 * <b>没穿板返回 null</b>（＝这套机制完全不生效，原版跳跃 / 原版一切）。
 	 *
 	 * <p>这里只做「按板选值」，不含任何一块板的数 —— 与 {@link SnowboardControl#isSnowboard} 同一个交叉点。
@@ -359,7 +359,7 @@ public final class SkiAir {
 			return SnowboardControl.airTuning();
 		}
 		if (SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
-			return SkisControl.airTuning();
+			return AlpineSkiControl.airTuning();
 		}
 		return null;
 	}
@@ -392,7 +392,7 @@ public final class SkiAir {
 	 * 脚底离地本来就在 1 格内，服务端每 tick 都命中并把人再次弹起 —— 永远碰不到地，落地沿 / 落地判定 / 禁跳
 	 * 全不触发；而且服务端 {@code holdTicks} 恒为 0（只在客户端累加），「空翻中不补跳」那道门在服务端也形同虚设。
 	 * 它原本要兜的「坡面 {@code onGround} 抖动 → 按空格没反应」已由该板的 {@code COYOTE_TICKS}（6 tick，
-	 * {@code SkisControl} / {@code SnowboardControl} 各一份）覆盖：实测贴面抖动最多 3 tick。
+	 * {@code AlpineSkiControl} / {@code SnowboardControl} 各一份）覆盖：实测贴面抖动最多 3 tick。
 	 *
 	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
 	 * 自动发出。<b>防连发</b>：{@code JUMP_COOLDOWN_TICKS}（10 tick）在起跳成功时置满；<b>落地沿也重新起算，
@@ -729,7 +729,7 @@ public final class SkiAir {
 	 * 这个实体现在是不是在摔倒的失控里（转向 / 压刃 / carve / 追视角的入口按它跳闸）。
 	 *
 	 * <p>两张表<b>任一</b> {@code stunTicks > 0} 即为 true：调用方（{@code SnowboardControl#isCarving}、
-	 * {@code SkisControl} 的转向入口）两端都会调，而单机下两端共用同一 entity id ——
+	 * {@code AlpineSkiControl} 的转向入口）两端都会调，而单机下两端共用同一 entity id ——
 	 * 「任一端失控」就是原来的语义。
 	 */
 	public static boolean isStunned(int entityId) {

@@ -171,14 +171,11 @@ public final class SnowboardControl {
 	 * <b>单板：跳高上限</b>（格）。满速起跳在离散物理（每 tick 先位移、再 {@code vy = (vy − g) × 0.98}）下
 	 * 正好落在 <b>1.50</b> 格 —— 下面的 {@link #JUMP_POWER_BY_SPEED_LUT} 就是按它反解出来的。
 	 *
-	 * <p>这里的 g 分两段：<b>首 tick 用贴地档 0.104</b>（0.08 × {@link #GRAVITY_MULTIPLIER} 1.3）——
-	 * 跳跃写在同一 tick 的实体 tick 内，而 {@code SkiGlide.applyGravity} 上一 tick 末尾按 {@code onGround()}
-	 * 设的还是贴地档；<b>第二 tick 起</b>才换腾空档 <b>0.072</b>（0.08 × {@link #AIR_GRAVITY_MULTIPLIER} 0.9）。
+	 * <p>这里的 g 分两段：<b>首 tick 用贴地档 0.104</b>（0.08 × {@link #GRAVITY_MULTIPLIER} 1.3），
+	 * <b>第二 tick 起</b>换腾空档 <b>0.072</b>（0.08 × {@link #AIR_GRAVITY_MULTIPLIER} 0.9）。
 	 * <b>只是表的上限依据</b>：代码不拿它反推力度（表才是唯一事实源），改上限要整张表重算。
 	 */
 	private static final double JUMP_MAX_HEIGHT = 1.5D;
-	/** <b>单板</b>：速度→起法力查找表的点数（s = 0.0 / 0.1 / … / 1.0 共 11 点，步长 0.1）。 */
-	private static final int JUMP_CURVE_SAMPLES = 11;
 	/**
 	 * <b>单板：速度 → 起跳力度</b>（格/tick）的 11 点查找表，下标 = s × 10（s = 0.0 / 0.1 / … / 1.0，
 	 * s ＝ 水平速度 / {@link #MAX_SPEED}），两点之间由 {@link SkiAir.Tuning#jumpPower} <b>线性插值</b>。
@@ -189,27 +186,15 @@ public final class SnowboardControl {
 	 * 满速恰好卡在 {@link #JUMP_MAX_HEIGHT} 1.50 格。
 	 *
 	 * <p>对应跳高（格）：0.34 / 0.66 / 0.86 / 1.00 / 1.11 / 1.20 / 1.28 / 1.34 / 1.40 / 1.45 / 1.50。
-	 * 与双板各一份：调这里不动双板。
+	 * 与双板各一份：调这里不动双板。表长（{@link AirTuningSpec#JUMP_CURVE_SAMPLES}）、插值口径与摔落结算
+	 * 等通用语义见 {@link AirTuningSpec}。
 	 */
 	private static final double[] JUMP_POWER_BY_SPEED_LUT = {
 			0.208D, 0.302D, 0.348D, 0.377D, 0.400D, 0.417D, 0.430D, 0.442D, 0.452D, 0.461D, 0.470D
 	};
-	static {
-		// 表长必须＝采样点数（插值步长 = 1 / (SAMPLES − 1) = 0.1）：长度写错在这里立刻炸，别带到游戏里
-		if (JUMP_POWER_BY_SPEED_LUT.length != JUMP_CURVE_SAMPLES) {
-			throw new IllegalStateException("JUMP_POWER_BY_SPEED_LUT 应有 " + JUMP_CURVE_SAMPLES + " 点");
-		}
-	}
-	/**
-	 * <b>单板：离地后的「逗留窗」（土狼时间，coyote time）</b>：离开地面（{@code onGround} 由真变假）之后还有
-	 * <b>6 tick</b>（0.3 s）之内按空格仍算「刚离地」，照样起跳 —— 滑行时 {@code onGround} 在下坡 / 起伏上
-	 * 本来就会抖，不留这个窗口就会出现「明明还贴着雪面，按空格却不跳」。
-	 */
+	/** <b>单板：离地逗留窗</b>（土狼时间）：离地后 <b>6 tick</b>（0.3 s）内按空格仍算「刚离地」，照样起跳（语义见 {@link AirTuningSpec}）。 */
 	private static final int COYOTE_TICKS = 6;
-	/**
-	 * <b>单板：输入缓冲</b>（tick）：按下空格那一刻起 <b>5 tick</b>（0.25 s）内，只要起跳条件成立就自动发出，
-	 * 不用重新按 —— 解决「提前一点按下去没反应」。
-	 */
+	/** <b>单板：输入缓冲</b>（tick）：按下空格起 <b>5 tick</b>（0.25 s）内条件成立就自动发出。 */
 	private static final int JUMP_BUFFER_TICKS = 5;
 	/** <b>单板：起跳冷却</b>（tick）：一次起跳后 <b>10 tick</b> 内不再因「按住空格」重复起跳（落地后由贴地条件自然放行）。 */
 	private static final int JUMP_COOLDOWN_TICKS = 10;
@@ -220,53 +205,33 @@ public final class SnowboardControl {
 	private static final double FLIP_MIN_SPEED = 0.12D;
 	/**
 	 * <b>单板</b>：后空翻<b>按住空格</b>时每 tick 转多少度（<b>16.0</b>°/tick ＝ 320°/s，
-	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）。
-	 *
-	 * <p>口径是「<b>按住多久就转多少</b>」：{@code holdTicks} 从<b>按下那一刻</b>起算、<b>只由松手归零</b>
-	 * （落地 / 起跳成功 / 失控都不清），空中每 tick 实时判 {@code holdTicks > FLIP_HOLD_DELAY_TICKS}（4）
-	 * ＋ 速度够 ＋ 没失控才加这个值 —— 前 4 个按住的 tick 角度恒 0（模型静止段），短按＝纯跳跃；
-	 * 松手立刻定格（模型停在那偏角）、计数归零。角度不封顶，可以按住转多圈；
-	 * 落地看与直立差多少（见 {@code FLIP_LANDING_TOLERANCE_DEGREES}）。
+	 * 一圈 360° 要 <b>22.5 tick</b> ＝ <b>1.125 s</b>）；计数与静止段的完整口径见 {@link AirTuningSpec}。
 	 * <b>与双板同值（两板都是 16.0°/tick ＝ 22.5 tick ＝ 1.125 s）</b>，各一个常量、改一块不动另一块。
 	 */
 	private static final double FLIP_DEGREES_PER_TICK = 16.0D;
-	/**
-	 * <b>单板</b>：连续按住空格多少个 tick <b>之后</b>才开始累加角度（<b>4</b> tick ＝ 0.2 s）。
-	 *
-	 * <p>判据是 {@code holdTicks > 它}（<b>严格大于</b>）：按住的前 4 个 tick 角度恒为 <b>0</b> ——
-	 * 这就是「静止段」（模型定住不动，之后才起翻）。计数从<b>按下那一刻</b>起算、<b>只由松手归零</b>
-	 * （落地 / 起跳成功 / 失控都不清），所以站着按住很久再起跳＝一离地就接着转。
-	 * 短按（≤ 4 tick）＝ 纯跳跃、一点不转。
-	 */
+	/** <b>单板</b>：连续按住空格 <b>4</b> tick <b>之后</b>才开始累加角度（判据严格大于；短按＝纯跳跃、一点不转）。 */
 	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
-	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距就是这个范围（±35°）＝干净落地；
-	 * 超出＝摔倒（水平速度 ×{@code CRASH_SPEED_MULTIPLIER} ＋ 失控）。多翻几圈只要停在直立附近也算净落。
+	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±35° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
+	 * 直立附近也算净落）。
 	 */
 	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 35.0D;
 	/** <b>单板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
 	/** <b>单板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
 	private static final int CRASH_STUN_TICKS = 20;
-	/**
-	 * <b>单板</b>：摔倒扣血的上限（4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心）。{@code > 0} 时服务端按
-	 * 「与直立偏差 / 180 × 它」扣血，只在 {@code ServerPlayer} 分支、走 {@code hurtServer}。
-	 *
-	 * <p><b>为什么要用 {@code damageSources().generic()} 而不是 {@code fall()}</b>：本模组的
-	 * {@code SnowLanding} 挂在 Fabric {@code ServerLivingEntityEvents.ALLOW_DAMAGE}（＝{@code LivingEntity#hurtServer}）上，
-	 * 对 {@code DamageTypeTags.IS_FALL} 的伤害返回 {@code false} 直接取消（雪 / 冰面上、或 60 tick 内踩过雪）——
-	 * 摔落类型的「摔倒扣血」在雪地上会被整份吃掉。{@code minecraft:generic} 不在 {@code is_fall} tag 里，
-	 * 所以拦不到；同时它在 {@code bypasses_armor} tag 里，护甲不会把 4.0 点折掉，扣的就是标称值。
-	 * 只走 {@code hurtServer} + 现有偏移公式，不动 {@code deltaMovement} 以外的任何东西（不 setPos）。
-	 */
+	/** <b>单板</b>：摔倒扣血的上限（4.0 ＝ 偏差 180° 扣 2 颗心、90° 扣 1 颗心）；为什么用 {@code generic()} 而不是 {@code fall()} 见 {@link AirTuningSpec}。 */
 	private static final double CRASH_DAMAGE_MAX = 4.0D;
 
-	/** 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里）。 */
-	private static final SkiAir.Tuning AIR_TUNING = new SkiAir.Tuning(
+	/**
+	 * 单板这一份起跳 / 空翻数值（状态机在 {@link SkiAir}，数值留在这里，容器、表长校验与
+	 * {@link SkiAir.Tuning} 的装配在 {@link AirTuningSpec}）。
+	 */
+	private static final SkiAir.Tuning AIR_TUNING = new AirTuningSpec(
 			JUMP_POWER_BY_SPEED_LUT, JUMP_MAX_HEIGHT,
 			COYOTE_TICKS, JUMP_BUFFER_TICKS, JUMP_COOLDOWN_TICKS, MAX_SPEED,
 			FLIP_MIN_SPEED, FLIP_DEGREES_PER_TICK, FLIP_HOLD_DELAY_TICKS, FLIP_LANDING_TOLERANCE_DEGREES,
-			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX);
+			CRASH_SPEED_MULTIPLIER, CRASH_STUN_TICKS, CRASH_DAMAGE_MAX).toTuning();
 
 	/**
 	 * 单板：每下落 1 格加多少水平速度（方向沿当前水平速度，不跟随身体朝向 —— 只加大小、不掰方向）。
@@ -347,12 +312,12 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>为什么每张表都要两份</b>：单机（集成服务端与客户端在同一个 JVM）里 {@code LocalPlayer} 与
 	 * {@code ServerPlayer} <b>共用同一个 entity id</b>，而「每 tick 加一个增量」的方法
-	 * （{@link #applyCarve}、{@link SkisControl#turnBody} …）是<b>两端各调一次</b>。共用一张表时
+	 * （{@link #applyCarve}、{@link AlpineSkiControl#turnBody} …）是<b>两端各调一次</b>。共用一张表时
 	 * 同一份增量会被加两次 —— 单机的转向 / carve 速率因此是专用服务器的 2 倍。
 	 * {@link SkiAir} 早就为同一个坑拆过表，这里照它的样式把剩下的表全部拆开。
 	 *
 	 * <p><b>常量按「每端各跑一次」标定</b>：拆开之后单机每 tick 只有一次写入，所以每个<b>累加型</b>的
-	 * 每 tick 步长都在本批里 ×2（`TURN_*`、`VEER_*`、`SkisControl.TURN_RATE_DEGREES` /
+	 * 每 tick 步长都在本批里 ×2（`TURN_*`、`VEER_*`、`AlpineSkiControl.TURN_RATE_DEGREES` /
 	 * `VIEW_TURN_RATE_DEGREES`），这样单机手感与拆表前逐 tick 一致，专用服务器也终于和单机一样快。
 	 * <b>幂等写值型</b>（{@link #BOARD_SIDE_CLIENT}）、<b>只在一端跑</b>（{@code TILT_*}、{@code HEAD_OFFSET}、
 	 * {@code CARVE_*}）的表<b>不翻倍</b> —— 翻倍会让倾斜 / 头偏一次快一倍。
@@ -550,7 +515,7 @@ public final class SnowboardControl {
 		return table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).getOrDefault(entityId, 0.0F);
 	}
 
-	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link SkiControl} 的约定一致。 */
+	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link GlideSteering} 的约定一致。 */
 	public static Vec3 front(float yaw) {
 		float rad = yaw * Mth.DEG_TO_RAD;
 		return new Vec3(-Mth.sin(rad), 0.0D, Mth.cos(rad));

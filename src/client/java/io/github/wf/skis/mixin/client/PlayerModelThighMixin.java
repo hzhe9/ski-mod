@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <b>玩家腿切成两段：给每条腿加一个「大腿」子部件（枢轴在靴口）</b>。
  *
  * <p><b>为什么要切</b>：原版腿是一根 12 单位长的单节 box（髋 y=12 往下到 y=24），没有膝关节 ——
- * 站姿想屈膝就只能把整条腿绕髋倾，脚底（y=24）跟着往外甩、和雪鞋（{@code SkiBoardModel} /
+ * 站姿想屈膝就只能把整条腿绕髋倾，脚底（y=24）跟着往外甩、和雪鞋（{@code AlpineSkiModel} /
  * {@code SnowboardModel} 的 boot，模型 y=18…24，正好是腿的下半段）穿模。
  * 把可见的腿裁到<b>上半段</b>（腿局部 y=0…6，即模型 y=12…18）、枢轴放到<b>靴口</b>（y=18），
  * 大腿就绕靴口翻，而雪鞋天然成了「竖直的下半段」—— 脚底、板面、鞋都不动，只有膝盖被顶出去。

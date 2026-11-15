@@ -24,7 +24,7 @@ import net.minecraft.world.level.block.state.BlockState;
  *
  * <ul>
  *   <li><b>滑行惯性（低摩擦）</b>：原版玩家在地面每 tick 会掉掉约 45% 的水平速度（10 tick 就基本停住），
- *       所以这里自己维护一份“动量”，按该板的动量衰减（{@link SkisControl#momentumDecay()} /
+ *       所以这里自己维护一份“动量”，按该板的动量衰减（{@link AlpineSkiControl#momentumDecay()} /
  *       {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）慢慢衰减，
  *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
  *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算），<b>方向永远沿当前水平速度</b>
@@ -64,7 +64,7 @@ public final class SkiGlide {
 	 * 每格总量仍是 0.1（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
 	 */
 	private static final double STEP_BLOCKS = 0.5D;
-	// 各板的滑行数值不在这里 —— 双板在 {@link SkisControl}，单板在 {@link SnowboardControl}，
+	// 各板的滑行数值不在这里 —— 双板在 {@link AlpineSkiControl}，单板在 {@link SnowboardControl}，
 	// 两边完全独立，调一个不会动到另一个。这里只留两板共用的“物理骨架”常量。
 	/**
 	 * 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。
@@ -139,7 +139,7 @@ public final class SkiGlide {
 					exitSkiAttributes(player);
 					forgetPhysics(player.getId());
 					SnowboardControl.forget(player.getId(), false);
-					SkisControl.forgetBody(player.getId(), false);
+					AlpineSkiControl.forgetBody(player.getId(), false);
 					// 空中状态 / 失控计时由上面两个 forget 清各自那一端（这里传 false ＝ 只清服务端的表）
 					continue;
 				}
@@ -153,20 +153,20 @@ public final class SkiGlide {
 					carve(player);
 				} else {
 					// ——— 双板：A / D 转身体（4.0°/tick）；W 再朝视角方向补 4.8°/tick。视角一律不动 ———
-					SkisControl.ensureLocked(player.getId(), player.getYRot(), false);
+					AlpineSkiControl.ensureLocked(player.getId(), player.getYRot(), false);
 					Input input = player.getLastClientInput();
 					double side = SnowboardControl.sideSign(input);
 					if (side != 0.0D) {
-						SkisControl.turnBody(player.getId(), player.getYRot(), side, false);
+						AlpineSkiControl.turnBody(player.getId(), player.getYRot(), side, false);
 					}
 					// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛
 					if (input != null && input.forward()) {
-						SkisControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), false);
+						AlpineSkiControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), false);
 					}
 				}
 				// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）：只在进入穿板状态那一 tick 写一次
 				enterSkiAttributes(player);
-				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / SkisControl）
+				applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / AlpineSkiControl）
 				trackDescent(player);
 				applyMomentum(player);
 				if (SnowboardControl.isSnowboard(player)) {
@@ -179,7 +179,7 @@ public final class SkiGlide {
 				} else {
 					// 双板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」推导，
 					// 模型转多少、速度方向就转多少（上面 alignVelocity 是 9°/tick 限幅，空中 / 按 S 不跑）。
-					SkisControl.alignTurnHeading(player);
+					AlpineSkiControl.alignTurnHeading(player);
 				}
 				if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
 					glidePush(player);
@@ -229,12 +229,12 @@ public final class SkiGlide {
 		double steps = Math.floor(accumulated / step);
 		DESCEND_ACCUM.put(id, accumulated - steps * step);
 
-		// 各取各的（双板 SkisControl / 单板 SnowboardControl），互不影响
+		// 各取各的（双板 AlpineSkiControl / 单板 SnowboardControl），互不影响
 		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT
 		// 指数 < 1 时才边际递减；当前取 1（线性）—— 下坡加速不随下落距离打折，手感可预期。
 		// ⚠ 乘 step 是为了让“步长细”不等于“给得多”：总量仍是「每下降 1 格 = 基数」。
-		double cap = board ? SnowboardControl.fallGainPerTickMax() : SkisControl.fallGainPerTickMax();
-		double base = board ? SnowboardControl.fallGainPerBlock() : SkisControl.fallGainPerBlock();
+		double cap = board ? SnowboardControl.fallGainPerTickMax() : AlpineSkiControl.fallGainPerTickMax();
+		double base = board ? SnowboardControl.fallGainPerBlock() : AlpineSkiControl.fallGainPerBlock();
 		double gain = Math.min(Math.pow(steps, FALL_GAIN_EXPONENT) * base * step, cap);
 		Vec3 direction = descentDirection(player);
 		if (direction == null) {
@@ -299,7 +299,7 @@ public final class SkiGlide {
 	/**
 	 * <b>穿板时的重力</b>：26.2 里重力就是属性 {@link Attributes#GRAVITY}（默认 0.08 格/tick²），
 	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
-	 * 双板 {@link SkisControl#gravityMultiplier()}，各自一个值）。
+	 * 双板 {@link AlpineSkiControl#gravityMultiplier()}，各自一个值）。
 	 *
 	 * <p><b>贴地 / 腾空两档</b>，按 {@code player.onGround()} 二选一：
 	 * 贴地（滑行、落地压雪）用 {@code GRAVITY_MULTIPLIER}（单 1.3 / 双 1.5，下落干脆、不发飘），
@@ -324,8 +324,8 @@ public final class SkiGlide {
 		boolean grounded = player.onGround();
 		// 贴地 → 该板的 GRAVITY_MULTIPLIER；腾空 → 该板的 AIR_GRAVITY_MULTIPLIER（两板 0.9）
 		double multiplier = grounded
-				? (board ? SnowboardControl.gravityMultiplier() : SkisControl.gravityMultiplier())
-				: (board ? SnowboardControl.airGravityMultiplier() : SkisControl.airGravityMultiplier());
+				? (board ? SnowboardControl.gravityMultiplier() : AlpineSkiControl.gravityMultiplier())
+				: (board ? SnowboardControl.airGravityMultiplier() : AlpineSkiControl.airGravityMultiplier());
 		double value = Attributes.GRAVITY.value().getDefaultValue() * multiplier;
 		Double applied = APPLIED_GRAVITY.get(player.getId());
 		if (applied != null && applied == value) {
@@ -357,12 +357,12 @@ public final class SkiGlide {
 		}
 	}
 
-	/** 把水平速度压到 {@link SkiControl#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
+	/** 把水平速度压到 {@link GlideSteering#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
 	private static void clampToMaxSpeed(ServerPlayer player) {
 		// 上限按板取（单板 / 双板各自一个值）
 		Vec3 motion = player.getDeltaMovement();
 		double speed = motion.horizontalDistance();
-		double max = SkiControl.maxGlideSpeed(player);
+		double max = GlideSteering.maxGlideSpeed(player);
 		if (speed > max) {
 			double keep = max / speed;
 			player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
@@ -370,7 +370,7 @@ public final class SkiGlide {
 	}
 
 	/**
-	 * 低摩擦滑行：维护一份动量，每 tick 按该板的动量衰减（{@link SkisControl#momentumDecay()} /
+	 * 低摩擦滑行：维护一份动量，每 tick 按该板的动量衰减（{@link AlpineSkiControl#momentumDecay()} /
 	 * {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）缓慢衰减，并保证玩家水平速度不低于它。
 	 * 玩家自己（走路/冲刺/右键冲刺）比动量快时完全不插手。
 	 */
@@ -424,10 +424,10 @@ public final class SkiGlide {
 			// 按 S 且还在往前滑 ＝ 刹车：动量与速度一起按 BRAKE_DECAY 衰减，方向不翻。
 			// （以前的写法把 S 也当成「想往后走」，于是高速按 S 只会把速度方向拨反，一点没减下来。）
 			momentum = Math.max(momentum, speed);
-			boolean braking = keys != null && keys.backward() && SkisControl.isMovingForward(player);
+			boolean braking = keys != null && keys.backward() && AlpineSkiControl.isMovingForward(player);
 			if (braking) {
 				// 刹车：动量与当前速度一起按 BRAKE_DECAY 衰减，方向**不翻**
-				momentum = Math.max(momentum, speed) * SkisControl.brakeDecay();
+				momentum = Math.max(momentum, speed) * AlpineSkiControl.brakeDecay();
 				Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
 				if (horizontal.lengthSqr() > 1.0E-6D) {
 					double keep = momentum / horizontal.length();
@@ -438,16 +438,16 @@ public final class SkiGlide {
 				return;   // 刹车这一 tick 不走下面「朝视角方向重写速度」那套（否则就又拨方向了）
 			}
 			// ——— 落地对齐（只在双板分支）：A / D 转完身落地，速度方向要快速朝身体前方掰 ———
-			// 以前方向只在 speed < momentum 时经 SkiControl.steer（STEER_RATE 0.2 的 lerp）慢慢摆，
+			// 以前方向只在 speed < momentum 时经 GlideSteering.steer（STEER_RATE 0.2 的 lerp）慢慢摆，
 			// 玩家自己的速度不掉就直接 return，方向永远不跟 →「转完身落地不跟手」。
-			// 现在贴地（且没按 S、还有速度）就先掰一步方向，判定与执行都在 SkisControl。
-			if (SkisControl.shouldAlignOnGround(player, keys)) {
-				SkisControl.alignVelocity(player);
+			// 现在贴地（且没按 S、还有速度）就先掰一步方向，判定与执行都在 AlpineSkiControl。
+			if (AlpineSkiControl.shouldAlignOnGround(player, keys)) {
+				AlpineSkiControl.alignVelocity(player);
 				// 对齐只改方向、不改水平速度大小，但下面用的是 motion / speed —— 重读，别拿陈旧值往下走
 				motion = player.getDeltaMovement();
 				speed = motion.horizontalDistance();
 			}
-			decay = SkisControl.momentumDecay();
+			decay = AlpineSkiControl.momentumDecay();
 			// 没按 S（或已停下 / 在倒滑）时才走常规托底：动量原样托住速度。
 		}
 		// 撞墙减速（两条分支各一份口径，别共用门槛）：
@@ -457,7 +457,7 @@ public final class SkiGlide {
 		boolean hitDecay = player.horizontalCollision
 				&& (!board || hitTicks >= MOMENTUM_HIT_TICKS_BEFORE_DECAY);
 		momentum *= hitDecay ? MOMENTUM_DECAY_ON_HIT : decay;
-		momentum = Math.min(momentum, SkiControl.maxGlideSpeed(player));   // 速度上限（按板）
+		momentum = Math.min(momentum, GlideSteering.maxGlideSpeed(player));   // 速度上限（按板）
 
 		if (momentum < MOMENTUM_MIN) {
 			MOMENTUM.remove(id);
@@ -541,7 +541,7 @@ public final class SkiGlide {
 	/** 加速方向：在滑行方向的基础上按玩家按键转向（两块板在空中都锁死方向）；单板可能返回 null＝不给加速。 */
 	private static Vec3 steerDirection(ServerPlayer player) {
 		Vec3 travel = travelDirection(player);
-		return travel == null ? null : SkiControl.steer(travel, player);
+		return travel == null ? null : GlideSteering.steer(travel, player);
 	}
 	private static Vec3 travelDirection(ServerPlayer player) {
 		Vec3 motion = player.getDeltaMovement();

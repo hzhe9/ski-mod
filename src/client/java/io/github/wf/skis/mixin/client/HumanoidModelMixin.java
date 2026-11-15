@@ -40,7 +40,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 绕髋倾就会把脚底甩出去、和雪鞋穿模。所以 {@code PlayerModelThighMixin} 给每条腿加了一个
  * <b>大腿子部件</b>（枢轴在靴口，模型 y=18，往下 6 单位补回髋到靴口那一段），这里把原版整条腿
  * {@code skipDraw = true} 藏掉、只让那个大腿子部件绕靴口翻（{@code xRot = SQUAT_LEG_TILT}，
- * 负角＝膝往前顶）。雪鞋（{@code SkiBoardModel} / {@code SnowboardModel} 的 boot，模型 y=18…24，
+ * 负角＝膝往前顶）。雪鞋（{@code AlpineSkiModel} / {@code SnowboardModel} 的 boot，模型 y=18…24，
  * 与腿下半段同形同位）由此成为<b>竖直的下半段</b>：脚底、板面、鞋都不动，只有膝盖被顶出去。
  * 腿本身仍是原版的位置（{@code y} 恒 12、{@code yScale} 恒 1.0，一律不写），所以脚底与板面始终对齐。
  *

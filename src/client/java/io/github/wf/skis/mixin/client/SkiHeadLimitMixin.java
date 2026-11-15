@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * <b>视角限位（单板 + 双板同一套实现、各自一个值）</b>：头（视角）相对<b>锁定的身体朝向</b>最多左右各
- * 90 度（双板 {@code SkisControl.VIEW_LIMIT_DEGREES}）/ 135 度（单板 {@code SnowboardControl.VIEW_LIMIT_DEGREES}），
+ * 90 度（双板 {@code AlpineSkiControl.VIEW_LIMIT_DEGREES}）/ 135 度（单板 {@code SnowboardControl.VIEW_LIMIT_DEGREES}），
  * 扭不到背后去。脱下板就恢复自由。
  *
  * <p>拦的是鼠标转视角的入口 {@code Entity#turn(double, double)}：
