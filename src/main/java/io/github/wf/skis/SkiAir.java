@@ -39,7 +39,8 @@ import net.minecraft.world.phys.Vec3;
  *   <li><b>起跳（唯一入口，{@link #tryJump}）</b>：本模组接管 —— 原版 {@code jumpFromGround()} 在穿板时被取消
  *       （{@code mixin/LivingEntityJumpMixin}），起跳只从这里发：{@code onGround} 立即跳；离地 {@code COYOTE_TICKS}
  *       （6 tick）内仍可跳；否则 {@code vy ≤ 0} 且脚底到下方地面 ≤ {@link Tuning#jumpGroundRange()}（1.0 格）也跳。
- *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发。
+ *       带 {@code JUMP_BUFFER_TICKS}（5 tick）输入缓冲与 {@code JUMP_COOLDOWN_TICKS}（10 tick）防连发；
+ *       这个冷却<b>在每次落地沿也重新起算</b>（不论干净落地还是摔倒、不论有没有翻），所以<b>按住空格也不能落地即跳</b>。
  *       两端各调一次、<b>同一 tick 内、实体 tick 之前</b>（客户端 {@code LocalPlayer#aiStep} 的 HEAD、
  *       服务端 {@code START_SERVER_TICK}），这样服务端的 {@code ClientboundSetEntityMotionPacket} 带的就是起跳速度，
  *       不会把客户端写下的冲量整份覆盖掉。
@@ -104,7 +105,10 @@ public final class SkiAir {
 		private final int coyoteTicks;
 		/** 按下空格后多少 tick 内只要条件满足就自动发出（输入缓冲）。 */
 		private final int jumpBufferTicks;
-		/** 一次起跳后多少 tick 内不再因为「按住」重复起跳（防连发）。 */
+		/**
+		 * 起跳后多少 tick 内不再因为「按住」重复起跳（防连发）；<b>每次落地沿也按它重新起算</b>
+		 * —— 所以落地后这么久内跳不起来（不论干净落地还是摔倒）。
+		 */
 		private final int jumpCooldownTicks;
 		/** 归一化水平速度用的速度上限（格/tick，＝该板的 {@code MAX_SPEED}）。 */
 		private final double maxSpeed;
@@ -189,7 +193,7 @@ public final class SkiAir {
 			return jumpBufferTicks;
 		}
 
-		/** 一次起跳后多少 tick 内不再因「按住」重复起跳。 */
+		/** 起跳后（以及<b>每次落地沿</b>后）多少 tick 内不再因「按住」重复起跳。 */
 		public int jumpCooldownTicks() {
 			return jumpCooldownTicks;
 		}
@@ -268,6 +272,13 @@ public final class SkiAir {
 		private int jumpCooldownTicks;
 		/** 上一 tick 是否按住跳跃键（按下沿检测：缓冲只在「按下」那一刻充值）。 */
 		private boolean prevHoldingJump;
+		/**
+		 * 上一 tick 是否在地上（{@link #tryJump} 的落地沿检测）。
+		 *
+		 * <p><b>默认 true</b>：状态表刚建出来时玩家通常本来就站在地上（出生 / 刚穿板），
+		 * 默认 false 会把那一刻当成一次落地、白锁 {@code JUMP_COOLDOWN_TICKS}。
+		 */
+		private boolean wasOnGround = true;
 	}
 
 	/**
@@ -347,14 +358,17 @@ public final class SkiAir {
 	 * </ol>
 	 *
 	 * <p><b>输入缓冲</b>：按下沿把 {@code JUMP_BUFFER_TICKS}（5 tick）充上，提前一点按下、等条件成立那一 tick
-	 * 自动发出。<b>防连发</b>：起跳后 {@code JUMP_COOLDOWN_TICKS}（10 tick）内不再因「按住」重复起跳；
-	 * 落地后由 {@code onGround} / {@code vy ≤ 0} 条件自然放行，所以「按住空格＝落地即再跳」照旧。
+	 * 自动发出。<b>防连发 / 落地禁跳</b>：{@code JUMP_COOLDOWN_TICKS}（10 tick）两处重新起算 ——
+	 * 起跳成功时置满；<b>每次落地沿</b>（{@code onGround} 由假变真，见 {@code AirState#wasOnGround}）时
+	 * 也 {@code max()} 到满值。所以<b>按住空格也不能落地即跳</b>，要等冷却走完（摔倒另叠 {@code CRASH_STUN_TICKS} 失控）。
+	 * 落地沿的判定只读各自这一端的 {@code onGround}，两端每 tick 各调一次 {@code tryJump}，
+	 * 因此双方自然得到同一个落地沿、不需要额外发包。
 	 *
 	 * <p>力度<b>只</b>从该板 {@link Tuning#jumpPower(double)}（11 点表 + 线性插值）取，不另写公式；
 	 * 只写 {@code deltaMovement}（y ＝ 起力、水平不变）＋ {@code hurtMarked} ＋ {@code needsSync}，<b>不 setPos</b>。
 	 *
 	 * <p><b>空翻中不补跳</b>：{@code !onGround && holdTicks > FLIP_HOLD_DELAY_TICKS} 时直接返回 {@code false} ——
-	 * 已经开翻就别再补一次跳去打断它（也不会清计数）。贴地起跳与「落地即再跳」不受影响。
+	 * 已经开翻就别再补一次跳去打断它（也不会清计数）。贴地起跳照旧（仍受起跳冷却约束）。
 	 * 起跳成功<b>不再动</b> {@code holdTicks}：这个计数从按下沿起算，只由松手归零。
 	 *
 	 * @return 这一 tick 是否真的起跳了
@@ -380,6 +394,13 @@ public final class SkiAir {
 		} else if (state.coyoteTicks > 0) {
 			state.coyoteTicks--;
 		}
+		if (onGround && !state.wasOnGround) {
+			// 落地沿：每一次落地都重新起算起跳冷却（不论干净落地还是摔倒、不论这次腾空有没有翻）。
+			// tryJump 两端（客户端 aiStep HEAD / 服务端 START_SERVER_TICK）每 tick 各调一次，
+			// 两边读的都是自己的 onGround，所以双方得到同一个落地沿、不需要额外发包。
+			state.jumpCooldownTicks = Math.max(state.jumpCooldownTicks, tuning.jumpCooldownTicks());
+		}
+		state.wasOnGround = onGround;
 		if (state.stunTicks > 0) {
 			return false;                                       // 摔倒失控中：禁止起跳（两端都生效
 			//                                                     —— 客户端 landClient 与服务端 applyLanding 都会置这个计时）
@@ -527,7 +548,15 @@ public final class SkiAir {
 		return a;
 	}
 
-	/** 客户端落地：判定 → 回调（发包）→ 摔倒则本地也进失控（降速只在服务端做）。 */
+	/**
+	 * 客户端落地：判定 → 回调（发包）→ 摔倒则本地也进失控（降速只在服务端做）。
+	 *
+	 * <p>不管判定结果如何，这里都把 {@code angle} / {@code prevAngle} <b>归 0</b>（下一 tick 起
+	 * {@link SkiAir#angleDegrees} 读到的就是 0），<b>落地即归 0 是两件事共用的</b>：
+	 * ① 身体模型与相机翻转角回到直立（不留半圈的偏角）；② 第一人称相机退回原姿态。
+	 * 与「干净落地 / 摔倒」无关 —— 摔了也只是多进 {@code CRASH_STUN_TICKS} 的失控，角度同样归 0。
+	 * 落地禁跳不在这里做：{@link #tryJump} 的落地沿会把 {@code JUMP_COOLDOWN_TICKS} 重新起算（两端各算一次）。
+	 */
 	private static void landClient(AirState state, Tuning tuning, LandingListener listener) {
 		double angle = state.angle;
 		boolean clean = isCleanLanding(angle, tuning);
