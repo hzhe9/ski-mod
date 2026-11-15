@@ -552,13 +552,16 @@ public final class SnowboardControl {
 	 * <p>调用点是整 tick 里<b>最后一个</b>写速度的地方（{@code SkiGlide.register} 里 {@link #guardCarveSpeed}
 	 * 之后），所以同 tick 内别的写者造成的偏角不会累下去；只改方向，不改大小、不改 y。
 	 *
-	 * <p><b>撞到方块那一 tick 整段跳过</b>（{@code horizontalCollision} 为真）：原版碰撞已经把
-	 * 「进墙」的分量削掉了，剩下的是沿墙面的分量；此时若还按「入弯方向 + 身体累计转角」重写速度方向，
-	 * 就等于每 tick 把速度顶回墙上，与碰撞互相拉锯 —— 表现是「撞墙后方向被锁在墙面上、按 A 也改不回来」
-	 * （A / D 只是在那个被碰撞带偏的入弯基准上累加转角）。跳过之后还要把 {@link #CARVE_HEADING} /
-	 * {@link #CARVE_YAW0} 一起清掉：留着旧基准下一个自由 tick 会把速度继续顶向墙；清掉之后
-	 * {@link #applyCarve} 的 {@code CARVE_HEADING == null} 分支会从<b>碰撞后的实际速度</b>重新登记，
-	 * 之后的 A / D 就是在现实方向上转向，而不是在一个歪基准上累加。
+	 * <p><b>撞墙时也必须照样写</b>（{@code horizontalCollision} 为真）：原版碰撞把「进墙」的分量削掉了，
+	 * 剩下的是沿墙面的分量。这时<b>不能</b>跳过重写 —— 一跳过，碰撞剃过的这个方向就会在下一 tick 被
+	 * {@link #applyCarve} 的 {@code CARVE_HEADING == null} 分支当成<b>新的入弯基准</b>登记下来，
+	 * 「被弹歪的方向」于是变成基准：墙就这样把方向改了，之后 A / D 只是在那个歪基准上累加，拉不回来。
+	 * 反过来，每 tick 都按「入弯方向 + 身体累计转角」重写，等于把方向<b>按住</b>：墙只能削
+	 * <b>速度大小</b>（碰撞吃掉进墙分量），改不了方向；玩家顶住墙时的表现是<b>停住</b>，转身
+	 * （A / D 或 W / S 让 bodyYaw 变）之后方向自然滑开。
+	 *
+	 * <p>真正要挡的是「撞墙那一 tick 拿被剃过的速度当入弯基准」—— 那件事在 {@link #applyCarve} 的
+	 * 登记分支里挡（撞墙 tick 不登记，留着下一 tick 再试），不在这里。
 	 */
 	public static void alignCarveHeading(ServerPlayer player) {
 		int entityId = player.getId();
@@ -577,15 +580,6 @@ public final class SnowboardControl {
 		Float yaw0 = CARVE_YAW0.get(entityId);
 		if (heading == null || yaw0 == null || speed < 1.0E-6D) {
 			return;   // 没有入弯记录 / 没有方向可对齐
-		}
-		if (player.horizontalCollision) {
-			// 撞墙这一 tick 不要用「入弯方向 + 身体累计转角」去覆盖碰撞后的速度：那会把速度每 tick
-			// 顶回墙上（表现为「撞墙后方向被锁在墙面上、按 A 也改不回来」）。
-			// 同时把入弯口径丢掉 —— 下一 tick 由 applyCarve 从「碰撞后的实际速度」重新登记，
-			// 于是之后的 A / D 是在现实方向上转向，而不是在一个歪基准上累加。
-			CARVE_HEADING.remove(entityId);
-			CARVE_YAW0.remove(entityId);
-			return;
 		}
 
 		float yawNow = bodyYaw(entityId, player.getYRot());
@@ -612,6 +606,11 @@ public final class SnowboardControl {
 	 * {@link #alignCarveHeading} 在 tick 末尾按「入弯方向角 + 身体累计转角」重写 —— 这里的
 	 * {@link #rotateVelocity} 只是让同 tick 内的后续计算（客户端尤其）方向先对上。
 	 *
+	 * <p><b>撞墙那一 tick 不登记入弯基准</b>（{@code horizontalCollision} 为真）：这一 tick 的速度
+	 * 是被碰撞「剃过刀」的（进墙分量被削掉），拿它定义基准等于一开始就登记了一个歪方向，之后
+	 * {@link #alignCarveHeading} 每 tick 重写都会朝那个歪方向按。所以撞墙 tick 把 {@code null} 留着，
+	 * 下一个不撞的 tick 再登 —— 那时速度是真实的滑行方向。
+	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
 	public static float applyCarve(Entity entity, Input input, double speed) {
@@ -629,8 +628,11 @@ public final class SnowboardControl {
 			// 速度几乎为 0：没有方向可记（下面照旧转身体，原地压刃也照样摆姿态）
 			CARVE_HEADING.remove(entityId);
 			CARVE_YAW0.remove(entityId);
-		} else if (CARVE_HEADING.get(entityId) == null) {
+		} else if (CARVE_HEADING.get(entityId) == null && !entity.horizontalCollision) {
 			// 本 tick 开始 carve：记下入弯时的速度方向角（atan2(z, x)，弧度）与当时的 bodyYaw。
+			// 撞墙这一 tick 不登记（horizontalCollision 为真就留着 null，下一 tick 再试）：
+			// 这一 tick 的速度是「被碰撞剃过刀」的，用它定义基准，基准一开始就是歪的，
+			// 之后 alignCarveHeading 每 tick 重写方向都会朝那个歪方向按 —— 墙就把方向改了。
 			// 之后每 tick 由 alignCarveHeading 用「它 + 身体累计转角」直接算出期望方向 ——
 			// 不再靠每 tick 的增量，增量会被回落加速 / 动量托底一路拽回去，越滑越落后。
 			CARVE_HEADING.put(entityId, Math.atan2(entryHorizontal.z, entryHorizontal.x));
