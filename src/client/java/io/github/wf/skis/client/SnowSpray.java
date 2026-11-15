@@ -592,69 +592,99 @@ public final class SnowSpray {
 		// 高速散得更开：1 + 1.6 × 归一化速度（低速 ≈1 倍、顶速 ≈2.6 倍），只放大扬起层的横向速度。
 		double fan = 1.0D + 1.6D * Mth.clamp((speed - MIN_SPEED) / (APEX_SPEED_HI - MIN_SPEED), 0.0D, 1.0D);
 		for (int side = -1; side <= 1; side += 2) {
-			// side 的含义由 rightX/rightZ 决定：+1 = 沿右向量（身体右侧）、-1 = 身体左侧。
-			// 弯外侧（双板按 A / D；单板按 W / S 且在转向 = 本 tick 转弯的外侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
-			// biasSide = 0（没按键 / 别人 / 单板没在转向）时 side 永远不等于它 ＝ 完全对称。
-			int biased = side == biasSide ? 1 : 0;
-			int fleckCount = biased != 0 ? (int) (flecks * BIAS_COUNT_MUL) : flecks;
-			// 转向那份额外 4 颗：有按键偏向时**只给受力侧**（弯里侧不加，否则两侧一起变厚、看不出偏向）；
-			// 没有任何按键偏向时（symmetricTurn）两侧照旧都加 —— 与改前的对称行为一致。
-			int turnExtra = biased != 0 ? (turning ? TURN_EXTRA_PER_SIDE : 0)
-					: (symmetricTurn ? TURN_EXTRA_PER_SIDE : 0);
-			int flurryCount = (biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries) + turnExtra;
-			// 单板转向时**弯内侧一颗都不喷**（SINGLE_SIDE_SPRAY）：贴地层与扬起层都归零，只剩弯外侧一条雪线。
-			// 只在 snowboard && biasSide != 0（单板按着 W / S 且真在转向）时生效 —— 双板按 A / D 走不到这里
-			// （它的 biasSide 来自 sideSign(keys)，但 snowboard 为假），没在转向时 biasSide == 0 也走不到，
-			// 所以双板与「两侧对称」的旧行为一行不变；置 false 就整段失效、回到两侧都喷。
-			if (SINGLE_SIDE_SPRAY && snowboard && biasSide != 0 && side != biasSide) {
-				fleckCount = 0;
-				flurryCount = 0;
-			}
-			for (int i = 0; i < fleckCount; i++) {
-				// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
-				// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
-				double lateral = side * fleckLateral(random);
-				// 横向速度：基值 + 只朝外的抖动，再乘左右符号 —— 抖动不再有「朝内」那一半，落点与速度恒同号。
-				// 受力侧（弯外侧）再 ×BIAS_OUTWARD_MUL，与 BIAS_COUNT_MUL / BIAS_APEX_BONUS 成套。
-				double out = side * (fleckOutward(random) + random.nextDouble() * FLECK_OUTWARD_JITTER);
-				if (biased != 0) {
-					out *= BIAS_OUTWARD_MUL;
-				}
-				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
-				double up = UPWARD * (FLECK_UPWARD_MIN
-						+ random.nextDouble() * (FLECK_UPWARD_MAX - FLECK_UPWARD_MIN));
-				spawn(player.getX() + rightX * lateral + fleckJitter(random),
-						spawnY + yJitter(random),
-						player.getZ() + rightZ * lateral + fleckJitter(random),
-						rightX * out + dirX * along,
-						up,
-						rightZ * out + dirZ * along, 0);
-			}
-			for (int i = 0; i < flurryCount; i++) {
-				// 每颗自己抽顶点高度（随速度长、两档分层）+ 自己抽横向落点与横向速度。
-				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
-				// 顶点：对称转向加成只在无按键偏向时给（symmetricTurn）；有偏向时它归受力侧，
-				// 受力侧另外再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
-				double apex = randomApex(random, high, symmetricTurn, speed);
-				if (biased != 0) {
-					apex = Math.min(apex + BIAS_APEX_BONUS, FLURRY_APEX_CAP);   // 受力侧再抬高，仍封顶
-				}
-				double vy = riseFor(apex);
-				double lateral = side * lateralOffset(random);
-				// 同样：抖动只朝外（[0, OUTWARD_JITTER]），受力侧 ×BIAS_OUTWARD_MUL，最后再按速度扇开（fan）。
-				double out = side * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan;
-				if (biased != 0) {
-					out *= BIAS_OUTWARD_MUL;
-				}
-				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
-				// 高飞档要活到顶点（≈26 tick），默认寿命均值才 10 tick —— 只抬这一档。
-				spawn(player.getX() + rightX * lateral + jitter(random),
-						spawnY + yJitter(random),
-						player.getZ() + rightZ * lateral + jitter(random),
-						rightX * out + dirX * along, vy, rightZ * out + dirZ * along,
-						high ? FLURRY_HIGH_LIFETIME : 0);
-			}
+			spawnSide(player, random, side, biasSide, snowboard, turning, symmetricTurn, speed, flecks, flurries,
+					spawnY, fan, rightX, rightZ, dirX, dirZ);
 		}
+		if (biasEnd != 0) {
+			spawnBoardEnd(player, random, biasEnd, biasSide, turning, speed, spawnY, fan, rightX, rightZ, dirX, dirZ);
+		}
+	}
+
+	/** 一侧（身体左 / 右）：先按偏向摊出这一侧的颗数，再发贴地层与扬起层。 */
+	private static void spawnSide(Player player, RandomSource random, int side, int biasSide, boolean snowboard,
+			boolean turning, boolean symmetricTurn, double speed, int flecks, int flurries, double spawnY, double fan,
+			double rightX, double rightZ, double dirX, double dirZ) {
+		// side 的含义由 rightX/rightZ 决定：+1 = 沿右向量（身体右侧）、-1 = 身体左侧。
+		// 弯外侧（双板按 A / D；单板按 W / S 且在转向 = 本 tick 转弯的外侧）数量 ×BIAS_COUNT_MUL，内侧保持原公式；
+		// biasSide = 0（没按键 / 别人 / 单板没在转向）时 side 永远不等于它 ＝ 完全对称。
+		int biased = side == biasSide ? 1 : 0;
+		int fleckCount = biased != 0 ? (int) (flecks * BIAS_COUNT_MUL) : flecks;
+		// 转向那份额外 4 颗：有按键偏向时**只给受力侧**（弯里侧不加，否则两侧一起变厚、看不出偏向）；
+		// 没有任何按键偏向时（symmetricTurn）两侧照旧都加 —— 与改前的对称行为一致。
+		int turnExtra = biased != 0 ? (turning ? TURN_EXTRA_PER_SIDE : 0)
+				: (symmetricTurn ? TURN_EXTRA_PER_SIDE : 0);
+		int flurryCount = (biased != 0 ? (int) (flurries * BIAS_COUNT_MUL) : flurries) + turnExtra;
+		// 单板转向时**弯内侧一颗都不喷**（SINGLE_SIDE_SPRAY）：贴地层与扬起层都归零，只剩弯外侧一条雪线。
+		// 只在 snowboard && biasSide != 0（单板按着 W / S 且真在转向）时生效 —— 双板按 A / D 走不到这里
+		// （它的 biasSide 来自 sideSign(keys)，但 snowboard 为假），没在转向时 biasSide == 0 也走不到，
+		// 所以双板与「两侧对称」的旧行为一行不变；置 false 就整段失效、回到两侧都喷。
+		if (SINGLE_SIDE_SPRAY && snowboard && biasSide != 0 && side != biasSide) {
+			fleckCount = 0;
+			flurryCount = 0;
+		}
+		spawnFlecks(player, random, side, biased, fleckCount, spawnY, rightX, rightZ, dirX, dirZ);
+		spawnFlurries(player, random, side, biased, flurryCount, symmetricTurn, speed, spawnY, fan,
+				rightX, rightZ, dirX, dirZ);
+	}
+
+	/** 贴地层：落点更外更宽、向外速度更大、抖动更猛（低速也看得出横向铺开）。 */
+	private static void spawnFlecks(Player player, RandomSource random, int side, int biased, int fleckCount,
+			double spawnY, double rightX, double rightZ, double dirX, double dirZ) {
+		for (int i = 0; i < fleckCount; i++) {
+			// 贴地层用自己那套（FLECK_*）：落点更外、更宽，向外速度更大、抖动更猛 —— 低速也看得出横向铺开。
+			// 扬起层继续用 LATERAL_* / OUTWARD_*（下面那个循环），两层互不影响。
+			double lateral = side * fleckLateral(random);
+			// 横向速度：基值 + 只朝外的抖动，再乘左右符号 —— 抖动不再有「朝内」那一半，落点与速度恒同号。
+			// 受力侧（弯外侧）再 ×BIAS_OUTWARD_MUL，与 BIAS_COUNT_MUL / BIAS_APEX_BONUS 成套。
+			double out = side * (fleckOutward(random) + random.nextDouble() * FLECK_OUTWARD_JITTER);
+			if (biased != 0) {
+				out *= BIAS_OUTWARD_MUL;
+			}
+			double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
+			double up = UPWARD * (FLECK_UPWARD_MIN
+					+ random.nextDouble() * (FLECK_UPWARD_MAX - FLECK_UPWARD_MIN));
+			spawn(player.getX() + rightX * lateral + fleckJitter(random),
+					spawnY + yJitter(random),
+					player.getZ() + rightZ * lateral + fleckJitter(random),
+					rightX * out + dirX * along,
+					up,
+					rightZ * out + dirZ * along, 0);
+		}
+	}
+
+	/** 扬起层：每颗自己抽顶点高度（随速度长、两档分层）+ 自己的横向落点与横向速度。 */
+	private static void spawnFlurries(Player player, RandomSource random, int side, int biased, int flurryCount,
+			boolean symmetricTurn, double speed, double spawnY, double fan,
+			double rightX, double rightZ, double dirX, double dirZ) {
+		for (int i = 0; i < flurryCount; i++) {
+			// 每颗自己抽顶点高度（随速度长、两档分层）+ 自己抽横向落点与横向速度。
+			boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
+			// 顶点：对称转向加成只在无按键偏向时给（symmetricTurn）；有偏向时它归受力侧，
+			// 受力侧另外再 +BIAS_APEX_BONUS（仍夹 FLURRY_APEX_CAP）。
+			double apex = randomApex(random, high, symmetricTurn, speed);
+			if (biased != 0) {
+				apex = Math.min(apex + BIAS_APEX_BONUS, FLURRY_APEX_CAP);   // 受力侧再抬高，仍封顶
+			}
+			double vy = riseFor(apex);
+			double lateral = side * lateralOffset(random);
+			// 同样：抖动只朝外（[0, OUTWARD_JITTER]），受力侧 ×BIAS_OUTWARD_MUL，最后再按速度扇开（fan）。
+			double out = side * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan;
+			if (biased != 0) {
+				out *= BIAS_OUTWARD_MUL;
+			}
+			double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
+			// 高飞档要活到顶点（≈26 tick），默认寿命均值才 10 tick —— 只抬这一档。
+			spawn(player.getX() + rightX * lateral + jitter(random),
+					spawnY + yJitter(random),
+					player.getZ() + rightZ * lateral + jitter(random),
+					rightX * out + dirX * along, vy, rightZ * out + dirZ * along,
+					high ? FLURRY_HIGH_LIFETIME : 0);
+		}
+	}
+
+	/** 单板「板端」额外那一簇（W 前倾 → 人物背后 / S 后倾 → 人物正前方）。 */
+	private static void spawnBoardEnd(Player player, RandomSource random, int biasEnd, int biasSide, boolean turning,
+			double speed, double spawnY, double fan, double rightX, double rightZ, double dirX, double dirZ) {
 		// 单板「板端」额外那一簇（W 前倾 → 人物背后 / S 后倾 → 人物正前方；biasEnd = 0 就整段跳过）：
 		// 出生点在「身体位置 + 身体前方 × biasEnd × END_OFFSET」处 —— 前后轴用的是**身体朝向**（frontLocked），
 		// 不是行进方向：单板横着滑，行进方向几乎与身体正面垂直，拿它当轴那簇雪会拍到侧面去。
@@ -662,42 +692,40 @@ public final class SnowSpray {
 		// 横向落点：**不转向时**围绕身体中线 ±END_LATERAL；**单板转向时**（SINGLE_SIDE_SPRAY && biasSide != 0）
 		// 只朝弯外侧单侧 0.15–1.0 × END_LATERAL（≈0.08–0.55 格），横向速度同向 —— 板端这簇不再左右开花。
 		// 顶点走与扬起层同一套 randomApex（这里仍传 turning：板端簇自己吃转向的加成）再 +BIAS_APEX_BONUS，仍夹 FLURRY_APEX_CAP。
-		if (biasEnd != 0) {
-			Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot(), true);   // 沿锁定的身体朝向，不是视角
-			double frontX = front.x;
-			double frontZ = front.z;
-			double endRightX = -frontZ;   // 身体右手边（与上面 rightX/rightZ 同一定义）
-			double endRightZ = frontX;
-			double endX = player.getX() + frontX * (biasEnd * END_OFFSET);
-			double endZ = player.getZ() + frontZ * (biasEnd * END_OFFSET);
-			// 转向时这一簇自己多吃 TURN_EXTRA_PER_SIDE 颗（8 → 12）：两侧的对称转向加成已被 symmetricTurn 收走。
-			int endCount = END_EXTRA_PER_TICK + (turning ? TURN_EXTRA_PER_SIDE : 0);
-			// 单板转向时这一簇也只朝一侧（弯外侧）飞：起点仍是对的（板那一端），只是不再向两边开花。
-			// biasSide == 0（没在转向 / 拿不到按键 / 其它玩家）或开关关闭 → 保持原来的 ±END_LATERAL 对称行为。
-			boolean endOneSide = SINGLE_SIDE_SPRAY && biasSide != 0;
-			for (int i = 0; i < endCount; i++) {
-				// 单侧：biasSide × [0.15, 1.0] × END_LATERAL ＝ 0.08–0.55 格，永远落在弯外侧那一边。
-				double lateral = endOneSide
-						? biasSide * (0.15D + random.nextDouble() * 0.85D) * END_LATERAL
-						: (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;            // 横向 ±END_LATERAL
-				double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿身体前后轴 ±END_SPREAD
-				boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
-				double apex = Math.min(randomApex(random, high, turning, speed) + BIAS_APEX_BONUS, FLURRY_APEX_CAP);
-				// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数；
-				// 单板转向时（endOneSide）与侧循环同一写法：biasSide × (基值 + [0, OUTWARD_JITTER] 只朝外抖动)，
-				// 与上面的 lateral 恒同号（都朝弯外侧）—— 不再有 randomSign 把一部分粒子甩向内侧。
-				// 速度方向仍按行进方向（dir）往后带 —— 只改出生点的轴向，粒子怎么飞保持原样。
-				double out = endOneSide
-						? biasSide * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan
-						: ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
-								+ randomSign(random) * OUTWARD_JITTER) * fan;
-				double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
-				spawn(endX + endRightX * lateral + frontX * alongOffset + jitter(random),
-						spawnY + yJitter(random),
-						endZ + endRightZ * lateral + frontZ * alongOffset + jitter(random),
-						rightX * out + dirX * along, riseFor(apex), rightZ * out + dirZ * along,
-						high ? FLURRY_HIGH_LIFETIME : 0);
-			}
+		Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot(), true);   // 沿锁定的身体朝向，不是视角
+		double frontX = front.x;
+		double frontZ = front.z;
+		double endRightX = -frontZ;   // 身体右手边（与上面 rightX/rightZ 同一定义）
+		double endRightZ = frontX;
+		double endX = player.getX() + frontX * (biasEnd * END_OFFSET);
+		double endZ = player.getZ() + frontZ * (biasEnd * END_OFFSET);
+		// 转向时这一簇自己多吃 TURN_EXTRA_PER_SIDE 颗（8 → 12）：两侧的对称转向加成已被 symmetricTurn 收走。
+		int endCount = END_EXTRA_PER_TICK + (turning ? TURN_EXTRA_PER_SIDE : 0);
+		// 单板转向时这一簇也只朝一侧（弯外侧）飞：起点仍是对的（板那一端），只是不再向两边开花。
+		// biasSide == 0（没在转向 / 拿不到按键 / 其它玩家）或开关关闭 → 保持原来的 ±END_LATERAL 对称行为。
+		boolean endOneSide = SINGLE_SIDE_SPRAY && biasSide != 0;
+		for (int i = 0; i < endCount; i++) {
+			// 单侧：biasSide × [0.15, 1.0] × END_LATERAL ＝ 0.08–0.55 格，永远落在弯外侧那一边。
+			double lateral = endOneSide
+					? biasSide * (0.15D + random.nextDouble() * 0.85D) * END_LATERAL
+					: (random.nextDouble() * 2.0D - 1.0D) * END_LATERAL;            // 横向 ±END_LATERAL
+			double alongOffset = (random.nextDouble() * 2.0D - 1.0D) * END_SPREAD;  // 沿身体前后轴 ±END_SPREAD
+			boolean high = random.nextDouble() < FLURRY_HIGH_FRACTION;
+			double apex = Math.min(randomApex(random, high, turning, speed) + BIAS_APEX_BONUS, FLURRY_APEX_CAP);
+			// 横向速度跟着落点朝外（lateral 的符号就是这一颗在身体哪一侧），其余与扬起层同参数；
+			// 单板转向时（endOneSide）与侧循环同一写法：biasSide × (基值 + [0, OUTWARD_JITTER] 只朝外抖动)，
+			// 与上面的 lateral 恒同号（都朝弯外侧）—— 不再有 randomSign 把一部分粒子甩向内侧。
+			// 速度方向仍按行进方向（dir）往后带 —— 只改出生点的轴向，粒子怎么飞保持原样。
+			double out = endOneSide
+					? biasSide * (outwardSpeed(random) + random.nextDouble() * OUTWARD_JITTER) * fan
+					: ((lateral >= 0.0D ? 1.0D : -1.0D) * outwardSpeed(random)
+							+ randomSign(random) * OUTWARD_JITTER) * fan;
+			double along = (random.nextDouble() - 0.5D) * 2.0D * ALONG_JITTER - BACKWARD;
+			spawn(endX + endRightX * lateral + frontX * alongOffset + jitter(random),
+					spawnY + yJitter(random),
+					endZ + endRightZ * lateral + frontZ * alongOffset + jitter(random),
+					rightX * out + dirX * along, riseFor(apex), rightZ * out + dirZ * along,
+					high ? FLURRY_HIGH_LIFETIME : 0);
 		}
 	}
 

@@ -438,6 +438,24 @@ public final class SkiAir {
 		}
 		AirState state = state(player);
 		// 计时先走：冷却 / 缓冲 / 逗留窗都是「每 tick 掉一格」的计数
+		tickTimers(state, tuning, holdingJump, onGround);
+		detectLandingEdge(state, tuning, onGround);
+		if (!canStartJump(state, tuning, holdingJump, onGround)) {
+			return false;
+		}
+		Vec3 motion = player.getDeltaMovement();
+		player.setDeltaMovement(motion.x, tuning.jumpPower(motion.horizontalDistance()), motion.z);
+		player.hurtMarked = true;                               // 把这份速度同步出去（不 setPos）
+		player.needsSync = true;                                // 原版 jumpFromGround 也这么写：本 tick 末重算碰撞/同步
+		state.jumpBufferTicks = 0;
+		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
+		state.coyoteTicks = 0;
+		state.jumpedThisAir = true;                             // 这一趟腾空里真的起过跳（落地沿据此才禁跳）
+		return true;
+	}
+
+	/** 冷却 / 输入缓冲 / 逗留窗：三个「每 tick 掉一格」的计数，外加按住沿充值。 */
+	private static void tickTimers(AirState state, Tuning tuning, boolean holdingJump, boolean onGround) {
 		if (state.jumpCooldownTicks > 0) {
 			state.jumpCooldownTicks--;
 		}
@@ -453,6 +471,10 @@ public final class SkiAir {
 		} else if (state.coyoteTicks > 0) {
 			state.coyoteTicks--;
 		}
+	}
+
+	/** 贴地 / 腾空两个方向的记录：落地沿判罚（这一趟起过跳或开过翻才重新起算冷却）＋ 腾空计数。 */
+	private static void detectLandingEdge(AirState state, Tuning tuning, boolean onGround) {
 		if (onGround) {
 			// 真落地 = 上一次不贴地、且这一趟连续腾空够长（≥ LANDING_LOCK_MIN_AIR_TICKS），与下面「这一趟起过跳/开过翻」分开判
 			boolean realLanding = !state.wasOnGround && state.airTicks >= LANDING_LOCK_MIN_AIR_TICKS;
@@ -474,6 +496,10 @@ public final class SkiAir {
 			state.airTicks = Math.min(state.airTicks + 1, LANDING_LOCK_MIN_AIR_TICKS);
 		}
 		state.wasOnGround = onGround;
+	}
+
+	/** 起跳的五道闸门：失控中 / 空翻中 / 没按住也没缓冲 / 冷却未走完 / 脚不在起跳位置。 */
+	private static boolean canStartJump(AirState state, Tuning tuning, boolean holdingJump, boolean onGround) {
 		if (state.stunTicks > 0) {
 			return false;                                       // 摔倒失控中：禁止起跳（两端都生效
 			//                                                     —— 客户端 landClient 与服务端 applyLanding 都会置这个计时）
@@ -490,14 +516,6 @@ public final class SkiAir {
 		if (!canJump(onGround, state)) {
 			return false;
 		}
-		Vec3 motion = player.getDeltaMovement();
-		player.setDeltaMovement(motion.x, tuning.jumpPower(motion.horizontalDistance()), motion.z);
-		player.hurtMarked = true;                               // 把这份速度同步出去（不 setPos）
-		player.needsSync = true;                                // 原版 jumpFromGround 也这么写：本 tick 末重算碰撞/同步
-		state.jumpBufferTicks = 0;
-		state.jumpCooldownTicks = tuning.jumpCooldownTicks();
-		state.coyoteTicks = 0;
-		state.jumpedThisAir = true;                             // 这一趟腾空里真的起过跳（落地沿据此才禁跳）
 		return true;
 	}
 
