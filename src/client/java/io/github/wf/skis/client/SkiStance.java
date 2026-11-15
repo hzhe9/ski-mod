@@ -36,6 +36,20 @@ public final class SkiStance {
 	 */
 	public static final float BOARD_LEG_SPREAD = 2.8F;   // = 双板的 legOffsetX()（1.9 + 0.9），两板腿部同宽
 
+	/**
+	 * 穿板站姿的「双腿微蹲」：髋部下沉多少（模型单位，16 = 1 格）。
+	 *
+	 * <p>原版 biped 只有单节腿、不能屈膝，所以蹲是用「缩短腿 + 髋下沉」做的：
+	 * 腿枢轴下沉这个量、腿的 {@code yScale} 缩到 {@code (12 - SQUAT_UNITS) / 12}，
+	 * 于是<b>脚底面仍恰好在 y = 0</b>（{@code (12-1.5) - 12*0.875 = 0}），不浮空也不插进板；
+	 * 上半身（body / head / 双臂）跟着下移同样的量，否则身体会悬在变短的腿上。
+	 *
+	 * <p>两块板（双板 / 单板）共用同一个值；蹲行时整段跳过（保持原版蹲姿）。
+	 * 纯外观：不碰物理 / 碰撞箱 / poseStack。1.5/16 ≈ 0.094 格，属于「稍微」的量级
+	 * （调参参考：2.0 → 0.125 格、3.0 → 0.1875 格）。
+	 */
+	public static final float SQUAT_UNITS = 1.5F;
+
 	private SkiStance() {
 	}
 
