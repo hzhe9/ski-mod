@@ -1,5 +1,6 @@
 package io.github.wf.skis.mixin.client;
 
+import io.github.wf.skis.client.SkiStance;
 import net.minecraft.client.model.geom.PartPose;
 import net.minecraft.client.model.geom.builders.CubeDeformation;
 import net.minecraft.client.model.geom.builders.CubeListBuilder;
@@ -47,8 +48,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(PlayerModel.class)
 public abstract class PlayerModelThighMixin {
-	/** 大腿子部件的名字（{@code HumanoidModelMixin} 靠它 {@code hasChild} / {@code getChild}）。 */
-	public static final String THIGH = "skis_thigh";
+	// 本类只放 private 字段：Mixin 会把非 private 字段当成「要合并进目标类的成员」，非 private static
+	// 字面量会被校验器直接拒掉（contains non-private static field）→ 资源重载失败、启动黑屏。
+	// 所以大腿子部件的名字（跨类共享的常量）放在 SkiStance.THIGH_PART，不在这里。
 
 	/** 靴口在<b>腿局部坐标</b>里的高度：髋往下 6 单位（模型 y = 12 + 6 = 18）＝ 雪鞋顶面。 */
 	private static final float BOOT_TOP_Y = 6.0F;
@@ -78,6 +80,6 @@ public abstract class PlayerModelThighMixin {
 				.texOffs(pantsU, pantsV)
 				.addBox(-2.0F, -THIGH_HEIGHT, -2.0F, 4.0F, THIGH_HEIGHT, 4.0F, new CubeDeformation(PANTS_GROW));
 		// 局部 y=6 ＝ 靴口：往下 6 单位的 cube 正好补回髋到靴口那一段
-		leg.addOrReplaceChild(THIGH, cubes, PartPose.offset(0.0F, BOOT_TOP_Y, 0.0F));
+		leg.addOrReplaceChild(SkiStance.THIGH_PART, cubes, PartPose.offset(0.0F, BOOT_TOP_Y, 0.0F));
 	}
 }

@@ -10,6 +10,16 @@ package io.github.wf.skis.client;
  * </ul>
  */
 public final class SkiStance {
+	/**
+	 * 大腿子部件的名字（{@code PlayerModelThighMixin} 建、{@code HumanoidModelMixin} 取；两边必须同一个值）。
+	 *
+	 * <p><b>为什么放在这里而不是混入类里</b>：Mixin 类里只允许 {@code private} 字段 —— 非 private 字段会被当成
+	 * 「要合并进目标类的成员」交给校验器，非 private 的 static 字面量会直接被
+	 * {@code InvalidMixinException: contains non-private static field} 拒掉（1.21.9+ 的校验会因此让整个资源重载失败、
+	 * 启动黑屏）。普通类里的 {@code public static final} 才是能跨类共享常量的正确位置。
+	 */
+	public static final String THIGH_PART = "skis_thigh";
+
 	/** 玩家模型里腿部枢轴的原始横向位置（HumanoidModel/PlayerModel 都是 1.9）。 */
 	public static final float BASE_LEG_X = 1.9F;
 	/**

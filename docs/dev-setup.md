@@ -31,6 +31,7 @@ git diff --stat main swing               # 带行数
 - 同一个 mod id 的两个 jar **不能同时启用**：不用的那个改名成 `xxx.jar.disabled` 即可随时切换
 - 只改数值常量时**编译通过即可**；改到 Mixin / 模型层注册 / 装备注册这类"只有启动才暴露"的东西才需要真启动一次自检
 - **只改注释 / javadoc 时主 jar 不会重编**（Gradle 按 class 哈希判 up-to-date，只有 sources jar 更新）—— 这是正常的，别以为改动没生效
+- **Mixin 类里只能有 `private` 字段**（`@Shadow` 的除外，它本来就要和目标类同修饰符）：非 private 字段会被当成「要合并进目标类的成员」，其中非 private 的 **static** 字段会被校验器直接拒掉 —— `InvalidMixinException: ... contains non-private static field`，抛出点在资源重载的 worker 线程里，表现就是**启动黑屏**（日志里只提 `Mixin apply ... failed`）。要跨 mixin / 跨类共享的常量（如子部件名字），放到普通类（`SkiStance` 一类）里再引用；别指望「常量会被内联所以引用没事」—— `javap -c` 的常量池仍会留下那个类名，且重构一次就炸
 
 ## 准备 Python 环境（生成器 / 文档守卫）
 
@@ -74,12 +75,12 @@ python -m venv .venv
 | `mixin/client/LocalPlayerJumpMixin.java` | **客户端 mixin**（`skis.client.mixins.json`）：`LocalPlayer#aiStep` 的 HEAD 调一次 `SkiAir.tryJump`（读 `input.keyPresses.jump()`）—— **必须在 `travel()` 之前**：原版是「这一 tick 写速度 → 这一 tick 位移」，挂在 `END_CLIENT_TICK` 时玩家已经 tick 完，冲量要晚一 tick；配合服务端 `START_SERVER_TICK` 的同 tick 起跳，服务端的 `ClientboundSetEntityMotionPacket` 带的才是起跳速度而不是把它覆盖掉 |
 | `client/SkiViewSmoothing.java` | **单板「身体拖视角」的每帧插值 + `turnView` 工具**：在 `Camera#alignWithEntity` 的 HEAD 每帧跑一次，把**锁定的身体朝向按 `partialTick` 插值**、用插值后的朝向把视角夹回各自限位（**双板 90° / 单板 135°**，`limit(snowboard)` 从两块板各自的常量取）；`renderBodyYaw` 供 `SnowboardHeadLimitMixin` 共用同一基准；`turnView` 给 `yRot / yRotO / yHeadRot / yHeadRotO` 同量偏移。**单板双板共用**：限位状态只有一个 `headOffset`，鼠标入口（`SkiHeadLimitMixin`）只按 `headOffset` 记账并撤掉越界那点，`frame` 是**唯一**的每帧写入点（目标 = 插值后的身体朝向 + `headOffset`），所以不会出现「两处各夹一次、基准差一帧互相拉回」。**为什么必须每帧**：`LocalPlayer#getViewYRot(float)` 不是乘客时直接返回裸 `getYRot()`，本地镜头没有任何帧间插值 |
 | `client/SkiState.java` | 客户端动画计时（摆臂倒计时） |
-| `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角） |
+| `client/SkiStance.java` | 站姿几何常量（腿/板的横向与前后位置、外撇角）＋ **大腿子部件名 `THIGH_PART`（`"skis_thigh"`）**：`PlayerModelThighMixin` 建、`HumanoidModelMixin` 取，名字必须同一个值；它**不能**放在 mixin 类里（mixin 只允许 private 字段） |
 | `client/SnowSpray.java` | 滑行雪粒子：每 tick 从板**两侧**（垂直于滑行方向）`addParticle` —— 贴地雪屑 + 扬起雪屑（都随速度变多，后者随速度抛得更高）+ **一 tick 掉速超过 `BURST_DROP` 时炸一团雪屑**（急刹/撞墙/压刃刹车）；只用 `ITEM_SNOWBALL` 一种粒子（不用雾/烟类），纯客户端观感 |
 | `client/HumanoidModelMixin.java` | 模型姿态：腿的站姿 + 手臂撑杖姿势。**腿分两段**（`PlayerModelThighMixin` 加的大腿子部件挂在 `leg` 下、`leg.skipDraw = true` 藏原版整条 12 单位的腿，只画 6 单位的大腿），**枢轴在靴口（模型 y=18）**：大腿绕靴口翻 `SQUAT_LEG_TILT`，雪鞋（y=18…24）就是竖直的下半段，脚底 / 板面 / 鞋不动；外层 `leftPants` / `rightPants` 同样只置 `skipDraw`（它们本来就跟着腿的位姿走）；护甲模型（没有大腿子部件）站姿生效时整条腿 `visible = false`、用一个实例字段记住「是我们藏的」才恢复 |
 | `client/SkiBoardModel.java` / `SnowboardModel.java` | 脚上板的外观（层定义 + 贴图）；单板整组绕 Y 转 90° 横在脚下 |
 | `client/BoardArmorRenderer.java` | Fabric `ArmorRenderer`：把板模型渲染到脚部 |
-| `mixin/client/PlayerModelThighMixin.java` | **腿的两段化（建模阶段）**：`PlayerModel#createMesh`（static，PLAYER 与 PLAYER_SLIM 都走它）的 **RETURN** 处给 `left_leg` / `right_leg` 各挂一个子部件 `skis_thigh`（`PartPose.offset(0, 6, 0)` ＝ 靴口，往下 6 单位补回髋到靴口那一段）。UV 取原版腿 / 裤腿的同一 `texOffs`：4×6×4 的侧面正好是 4×12 原腿侧面图的上 6 行，朝靴口那端面读到的鞋底像素埋在雪鞋里看不见 —— 所以**就是原版皮肤的上半段**，不是另画的贴图。`HumanoidModelMixin` 靠 `skipDraw` 藏原版整条腿、只画它 |
+| `mixin/client/PlayerModelThighMixin.java` | **腿的两段化（建模阶段）**：`PlayerModel#createMesh`（static，PLAYER 与 PLAYER_SLIM 都走它）的 **RETURN** 处给 `left_leg` / `right_leg` 各挂一个子部件 `skis_thigh`（名字取自 `SkiStance.THIGH_PART`，**不在 mixin 里定义常量**：mixin 只允许 private 字段）（`PartPose.offset(0, 6, 0)` ＝ 靴口，往下 6 单位补回髋到靴口那一段）。UV 取原版腿 / 裤腿的同一 `texOffs`：4×6×4 的侧面正好是 4×12 原腿侧面图的上 6 行，朝靴口那端面读到的鞋底像素埋在雪鞋里看不见 —— 所以**就是原版皮肤的上半段**，不是另画的贴图。`HumanoidModelMixin` 靠 `skipDraw` 藏原版整条腿、只画它 |
 | `mixin/client/EntityTiltMixin.java` | 单板 W / S 时在 `LivingEntityRenderer#setupRotations` 的 TAIL 转整个 poseStack —— 人与板一起倾（只改模型部件的话板不跟）；后空翻也在这里绕「脚底往上 `SkiAir.FLIP_PIVOT_HEIGHT`（1.0 格）」转，**该常量已从本 mixin 挪到 `SkiAir`**，第一人称相机（`CameraFlipMixin`）引用同一个值 |
 | `mixin/client/CameraTiltMixin.java` | 单板 W / S 时把相机**位置**挂到倾斜后的头上：`alignWithEntity` 里 `setPosition`(**两个重载都要拦**) 加绕脚底旋转后的眼高偏移；视线朝向不动 |
 | `mixin/client/CameraFlipMixin.java` | **第一人称相机随空翻翻滚（位置也跟）**：`Camera#alignWithEntity(F)V` 的 **TAIL** 再 `setRotation(yRot, xRot − flip)`，**并把位置绕 `SkiAir.FLIP_PIVOT_HEIGHT`（1.0 格，脚底往上）转过去（跟模型同一条圆弧）** —— 模型绕腰翻时头画在半径 `1.62 − 1.0 = 0.62` 的圆上，相机留在竖直眼高那点原地转、翻到 180° 就会看见自己后背。`flip = SkiAir.angleDegrees(id, partialTick)`（与第三人称 `EntityTiltMixin` 同一套符号：`Axis.XP.rotationDegrees(flip)` 正角＝向后翻，相机 `xRot` 正＝俯视，所以减）；刚体旋转的局部轴用**身体朝向** `Mth.rotLerp(pt, yBodyRotO, yBodyRot)`（模型的翻转发生在 `180 − bodyRot` 之后的局部系，局部 +z＝背后；用视角偏航会在歪头时把圆弧转错平面），枢轴取插值后的脚底点 + `FLIP_PIVOT_HEIGHT`。只在第一人称 + 穿本模组的板 + 角度非 0 时动手，读的是 `CameraTiltMixin` 已经写好的 `position()`，所以是「先倾斜修正、再把整份偏移一起旋过去」；第三人称那条链一点不动 |

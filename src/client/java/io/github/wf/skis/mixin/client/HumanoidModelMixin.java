@@ -191,7 +191,8 @@ public abstract class HumanoidModelMixin {
 
 	/** 取腿上的大腿子部件；没有（护甲模型等）返回 null。 */
 	private static ModelPart thighOf(ModelPart leg) {
-		return leg.hasChild(PlayerModelThighMixin.THIGH) ? leg.getChild(PlayerModelThighMixin.THIGH) : null;
+		// 名字从 SkiStance 取（不能引用 PlayerModelThighMixin.THIGH：Mixin 类里不允许非 private 字段）
+		return leg.hasChild(SkiStance.THIGH_PART) ? leg.getChild(SkiStance.THIGH_PART) : null;
 	}
 
 	/** 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。 */
