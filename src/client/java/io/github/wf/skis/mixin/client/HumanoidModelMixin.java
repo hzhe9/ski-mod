@@ -18,29 +18,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <ul>
  *   <li>双腿：取消走路摆腿、不做外撇，只把左右腿各向外平移 {@link SkiStance#LEG_SPREAD}
- *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>微蹲</b> —— 腿枢轴下沉
- *       {@link SkiStance#SQUAT_UNITS}、腿缩短同样的量（脚底仍贴 y = 0），上半身同步下沉（蹲行时跳过）；</li>
+ *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>角度微蹲</b> ——
+ *       腿往后斜 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
+ *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>不缩腿、不挪 y</b>（腿长与枢轴都是原版的）。</li>
  *   <li>双臂：<b>静止</b>固定在划动的中间位置，不随移动摆动；</li>
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
  * </ul>
  *
+ * <p><b>为什么用角度而不是缩腿</b>：原版 biped 的腿是单节 box（枢轴往下 12 单位），没有膝关节，
+ * 缩腿也弯不出膝、反而让脚离开板面；而腿后倾 + 上身前压 + 头低 三个角度就足够读成「微蹲」，
+ * 且脚底位置与不穿板时完全一致（{@code yScale} 恒 1.0、{@code leg.y} 恒 12，一律不写）。
+ *
  * 游泳 / 鞘翅 / 骑乘时保持原版姿势。
  */
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
-	/**
-	 * 单板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
-	 * 与双板的 {@link #SKI_LEG_TILT} 同值：两块板共用同一个「身体略向后斜」的站姿，差别只在外观与脚位；
-	 * 单板单独一套腿角会让两块板的人影高度对不上。
-	 * （原来是 {@code GLIDE_KNEE_BEND} 的屈膝 0.08，已去掉。）
-	 */
-	private static final float BOARD_LEG_TILT = -0.15F;
-	/**
-	 * 双板：腿（身体下半部分）往后倾出去的角度（弧度，负值＝往后）——
-	 * 上半身由 {@link #GLIDE_LEAN} 前倾，合起来就是“上身压在前、下身留在后”的滑行姿势。
-	 */
-	private static final float SKI_LEG_TILT = -0.15F;
 	/** 腿部枢轴的原始高度。 */
 	private static final float LEG_PIVOT_Y = 12.0F;
 	/** 划动中心角度（最高处与最低处由它加减幅度得到）。 */
@@ -57,8 +50,6 @@ public abstract class HumanoidModelMixin {
 	private static final float ARM_BOTTOM = ROW_CENTER + ROW_AMPLITUDE;
 	/** 下摆占整段动画的比例，剩下的时间收回最高处。 */
 	private static final float DOWN_FRACTION = 0.6F;
-	/** 滑行前倾。 */
-	private static final float GLIDE_LEAN = 0.05F;
 	/** 手臂向外的滚转角（正负对称，保证两根滑雪杖平行、不向内倾斜）。 */
 	private static final float ARM_OUTWARD_ROLL = 0.10F;
 	/** 单板滑行时两只手的前后角（弧度）：0 = 垂在身侧，负值 = 向前抬。不要前抬，保持 0。 */
@@ -78,13 +69,6 @@ public abstract class HumanoidModelMixin {
 
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
-		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
-
-		// 腿的 y 缩放是本模组自己加的（原版 biped 从不写 yScale，只写旋转与位置）：
-		// 每帧先复位成 1.0，这样「脱板 / 游泳 / 骑乘 / 蹲行」时不会沿用上一帧的短腿。
-		self.rightLeg.yScale = 1.0F;
-		self.leftLeg.yScale = 1.0F;
-
 		if (!SkisMod.isSkiFeet(state.feetEquipment)) {
 			return;
 		}
@@ -92,30 +76,18 @@ public abstract class HumanoidModelMixin {
 			return;
 		}
 
-		// 「双腿微蹲」的下沉量：蹲行时整段跳过（leg 恢复原长、髋不下沉、上半身不下移），保持原版蹲姿。
-		float squat = state.isCrouching ? 0.0F : SkiStance.SQUAT_UNITS;
+		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
 
 		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
 		if (board) {
-			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开、下半身往后倾（BOARD_LEG_TILT）
+			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开、下半身往后倾（SQUAT_LEG_TILT）
 			// （横向偏移与 SnowboardModel 的鞋位同值，否则脚会与鞋错开）
-			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, BOARD_LEG_TILT, squat);
-			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, BOARD_LEG_TILT, squat);
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, SkiStance.SQUAT_LEG_TILT);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, SkiStance.SQUAT_LEG_TILT);
 		} else {
-			// 双板：两腿只横向拉开、保持平行；下半身往后倾出去一点（SKI_LEG_TILT）
-			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), SKI_LEG_TILT, squat);
-			placeLeg(self.leftLeg, SkiStance.legOffsetX(), SKI_LEG_TILT, squat);
-		}
-
-		// 上半身跟着下沉同样的量（腿缩短了，身体不能悬在半空）。
-		// vanilla 模型坐标 y 轴向下为正（对照 HumanoidModel.setupAnim 的潜行段：body.y += 3.2 是把身体压低），
-		// 所以「往下」是加。head / 双臂与 body 是同一个根节点下的兄弟（不是 body 的子节点），
-		// 各自都要加，否则只有躯干下沉、头和手臂留在原处。
-		if (squat > 0.0F) {
-			self.body.y += squat;
-			self.head.y += squat;
-			self.rightArm.y += squat;
-			self.leftArm.y += squat;
+			// 双板：两腿只横向拉开、保持平行；下半身往后倾出去一点（同一个 SQUAT_LEG_TILT）
+			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), SkiStance.SQUAT_LEG_TILT);
+			placeLeg(self.leftLeg, SkiStance.legOffsetX(), SkiStance.SQUAT_LEG_TILT);
 		}
 
 		// 手臂：只有拿着滑雪杖的那只手才抬起来摆（左手持杖抬左手、右手持杖抬右手；只穿板不抬）
@@ -153,11 +125,12 @@ public abstract class HumanoidModelMixin {
 			}
 		}
 
-		// 身体前倾（潜行时保持原版的弯腰）。
+		// 上身与头：微蹲的另外两条角度（蹲行时保持原版的弯腰与头角，整段不覆盖）。
 		// 单板按 W / S 的“整个人 + 板一起倾”不在模型里做 —— 板是独立提交的模型，只改部件它不跟，
 		// 统一在 EntityTiltMixin 里转整个 poseStack。
 		if (!state.isCrouching) {
-			self.body.xRot = GLIDE_LEAN;
+			self.body.xRot = SkiStance.SQUAT_BODY_LEAN;    // 躯干前压（与腿的后倾配对＝屈身）
+			self.head.xRot = SkiStance.SQUAT_HEAD_PITCH;   // 头随上身略前低（只在站姿生效分支里写）
 		}
 	}
 
@@ -181,19 +154,17 @@ public abstract class HumanoidModelMixin {
 	/**
 	 * 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）；xRot 决定前后倾。
 	 *
-	 * <p>{@code squat} 是髋部下沉量（模型单位）：枢轴往下挪这么多，同时把腿的 y 缩放缩到
-	 * {@code (LEG_PIVOT_Y - squat) / LEG_PIVOT_Y}。原版腿是单节 box（从枢轴往下 12 单位），
-	 * 缩放绕枢轴进行，所以脚底面 = {@code leg.y + 12 * yScale = (12 + squat) + (12 - squat) = 24}
-	 * —— 与 squat = 0 时完全一样，脚底仍贴 y = 0，不浮空也不会插进板里。
+	 * <p><b>不缩腿、不挪 y</b>：枢轴恒在 {@link #LEG_PIVOT_Y}（12）、{@code yScale} 恒为 1.0 ——
+	 * 原版 biped 是单节腿（枢轴往下 12 单位的一根 box），没有膝关节，缩腿弯不出膝、还会把脚
+	 * 从板面上抬起来。微蹲的观感全部由角度表达（腿后倾 + 上身前压 + 头略低）。
 	 */
-	private static void placeLeg(ModelPart leg, float x, float xRot, float squat) {
+	private static void placeLeg(ModelPart leg, float x, float xRot) {
 		leg.x = x;
-		leg.y = LEG_PIVOT_Y + squat;   // 枢轴下沉（vanilla y 向下为正）
+		leg.y = LEG_PIVOT_Y;
 		leg.z = 0.0F;
 		leg.xRot = xRot;
 		leg.yRot = 0.0F;
 		leg.zRot = 0.0F;
-		leg.yScale = (LEG_PIVOT_Y - squat) / LEG_PIVOT_Y;   // 腿缩短同样的量 → 脚底仍在 y = 0
 	}
 
 }

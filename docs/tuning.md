@@ -281,7 +281,9 @@
 | `LEG_SPREAD` | `SkiStance` | 0.9 | 双板：单侧腿向外平移（两板间隔随之变化） |
 | `BOARD_YAW_DEGREES` | `SkiStance` | 90 | 单板**外观**：板组（板身 + 板头）绕 Y 转的角度 —— 90 = 板横在脚下（与视线垂直）；-90 = 板头朝另一侧 |
 | `BOARD_LEG_SPREAD` | `SkiStance` | 2.8 | 单板：两腿（以及鞋）在**模型坐标**里的横向偏移 —— 平行并列、向外岔开；腿与鞋必须同值（4.0 被用户嫌“间隔太宽”） |
-| `SQUAT_UNITS` | `SkiStance` | 1.5 | **穿板站姿的“双腿微蹲”**（双板 / 单板同值，纯外观）：腿枢轴下沉 1.5 模型单位（≈**0.094 格**）、腿的 `yScale` 缩到 (12−1.5)/12 ≈ 0.875 —— 原版 biped 单节腿不能屈膝，蹲只能用「缩腿 + 髋下沉」做；几何上**脚底面仍恰好在 y=0**（`(12−1.5) − 12×0.875 = 0`，不浮空、不插进板），body / head / 双臂同步下移同样的量。**蹲行（潜行）时整段跳过**（保持原版蹲姿，`yScale` 复位 1.0）。调参：2.0 → 0.125 格、3.0 → 0.1875 格 |
+| `SQUAT_LEG_TILT` | `SkiStance` | -0.20 | **穿板站姿的“角度微蹲”①：双腿后倾角**（弧度，负值＝下半身往后斜）。两块板共用这一个值（旧的双板 `SKI_LEG_TILT` / 单板 `BOARD_LEG_TILT` 两个 -0.15 的同值常量已删除，同一个旋钮不再记两处）。**不缩腿、不挪 y**：`yScale` 恒 1.0、`leg.y` 恒 12 —— 原版 biped 是单节腿、没有膝关节，缩腿弯不出膝还会把脚抬离板面，蹲感只能用角度表达。脚相对髋后移 ≈ 12×\|sin 0.05\| ≈ 0.6 模型单位（≈0.04 格）、抬高 ≈0.015 单位，视觉可忽略，脚底仍在原来那点（板不浮空、不插雪） |
+| `SQUAT_BODY_LEAN` | `SkiStance` | 0.12 | **角度微蹲②：躯干前倾角**（弧度，正值＝向前压）。与 `SQUAT_LEG_TILT` 配对才有“屈身压刃”的样子（只做腿后倾会读成直挺挺往后倒）。原来 `HumanoidModelMixin` 里的 `GLIDE_LEAN` 0.05 已删除、统一用这一个 |
+| `SQUAT_HEAD_PITCH` | `SkiStance` | 0.10 | **角度微蹲③：头随上身略前低**（弧度，0.10 rad ≈ 5.7°）。只在站姿生效的分支、且**非蹲行**时写 `head.xRot`；蹲行整段跳过（保持原版弯腰与头角，不干扰原版渲染） |
 | `TILT_LERP` | `SnowboardControl` | 0.25 | 俯仰姿态每 tick 向目标靠拢的比例（≈10 tick 到位）—— 倾斜是渐进的 |
 | `TILT_DEGREES` | `SnowboardControl` | 15.0 度 | 单板 W / S 时**整个人 + 板**的倾斜角（`EntityTiltMixin` 转模型 poseStack；`CameraTiltMixin` 用同一角度把相机位置沿旋转后的眼高向量前移，视线不跟着转） |
 | `SNOWBOARD_HEAD_NEUTRAL_DEGREES` / `SNOWBOARD_HEAD_FORWARD_DEGREES` / `SNOWBOARD_HEAD_BACKWARD_DEGREES` | `SnowboardControl` | 75.0 / 90.0 / 60.0 度 | **越肩视角模式下单板的头**相对身体朝向的**偏角幅度**（恒正，符号看横移方向）：默认 75°（没按 W / S 或两者同按）、按 W 前倾 90°、按 S 后倾 60°。方向：**+ 朝身体右侧（yaw 增大，与 D 同向）、− 朝左侧（yaw 减小）**，由 `headSide` 判定（实际横移方向 → A / D → 锁存）。双板在该模式下是 0°（正前方，不设常量）。只在越肩开启时生效 |
@@ -292,8 +294,6 @@
 | `CARVE_MIN_SPEED` | `SnowboardControl` | 0.05 格/tick | 没按 A/D 时，光靠前/后倾触发 carve 所需的最低滑速 |
 | `ROW_CENTER` / `ROW_AMPLITUDE` | `HumanoidModelMixin` | -0.35 / 0.95 | 手臂划动中心角与幅度（最高处 = 中心 − 幅度） |
 | `DOWN_FRACTION` | `HumanoidModelMixin` | 0.6 | 一次摆臂里"下摆"占的比例（其余是收回） |
-| `BOARD_LEG_TILT` / `GLIDE_LEAN` | `HumanoidModelMixin` | -0.15 / 0.05 | **单板**腿位：腿（下半身）往后倾的角度（与双板的 `SKI_LEG_TILT` 同值 —— 用户 2026-10-13 要求「单板站姿改成跟双板一样、身体稍微向后斜」；原来的屈膝 `GLIDE_KNEE_BEND` 0.08 已删）/ 上身微前倾 |
-| `SKI_LEG_TILT` | `HumanoidModelMixin` | -0.15 | **双板**：腿（身体下半部分）往后倾出去的角度，配合前倾的上身 |
 | `ARM_REST` / `RAISE_FRACTION` | `HumanoidModelMixin` | -0.55 / 0.25 | 持杖静止时手的位置（**不举到最高**）/ 右键动画里“先举到最高”所占比例 |
 | `DELAY_TICKS` | `SkiBoost` | 5 | **按右键到手杖真正发力之间的延迟**：动画总长 12 tick，这里等 5 tick 再发力，动作与冲劲才对得上 |
 | `ARM_OUTWARD_ROLL` | `HumanoidModelMixin` | 0.10 | 持杖那只手的向外滚转（保证杖是平行线） |
@@ -325,7 +325,7 @@
 | 转向 | **A / D 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 2.0°/tick ≈ 40°/s，180° 需 90 tick ＝ 4.5 s；yaw 减小＝左、增大＝右）；**按 W 时身体再朝视角方向补 `VIEW_TURN_RATE_DEGREES` 2.4°/tick**（`turnTowardView`，限幅不越过，残余 90° 约 38 tick ≈ 1.9 s 追上；S 不触发）。两种转法都**不碰视角**（只有顶到 ±90° 限位时视角才被身体拖着走）；客户端与服务端每 tick 各跑一步（先 A/D 再 W），客户端写 `yBodyRot / yBodyRotO`。速度方向由服务端 `SkiControl` 按**身体前方**摆过去：**地上跟着转、空中不跟**（空中身体随便转，速度方向一点都不动）；**落地后速度方向按 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速朝身体前方对齐**（`SkisControl.shouldAlignOnGround` + `alignVelocity`，**按 S 时不对齐**）—— 转完身落地方向立刻跟上，不靠 `SkiControl.steer` 慢慢摆；**真正把两条路钉在一起的是 `SkisControl.alignTurnHeading`**（`SkiGlide` 里双板分支、整 tick 最后一个写速度的点，**只在贴地 `onGround()` 时生效**）：只要这一 tick `turnBody` / `turnTowardView` 真的转过身体，就把水平速度方向直接写成「入弯方向角（`TURN_HEADING`，`atan2(-x, z)` 口径，与 `alignVelocity` 同一套）+ 身体累计转角（`bodyYaw 现在 − TURN_YAW0`）」—— **身体转多少速度就转多少**，只剩入弯那一刻固有的「身体−速度」偏角；这一 tick 没转身体就清表（`forgetBody` / 脱板路径一起清）。**空中直接跳闸**（身体 / 视角照旧转，速度方向由惯性保持，两份入弯记录一起清）；按 S 时 `alignVelocity` 不跑、这条照样锁 | 压刃（W/S）＋侧压（A/D），`TURN_RATE_DEGREES` 1.2°/tick |
 | 前进 | **W 前进**；**按住 S 且还在往前滑 = 刹车**（`BRAKE_DECAY` 0.92，只减速、不拨方向）；**静止 / 后退时才往后走**（速度与**身体前方**点积 ≤ `BRAKE_MIN_ALIGN` 0.3）。**W / S 一律沿身体前后**（`ClientInputMixin` 把前后分量按 `δ = 身体朝向 − 视角` 旋到视角坐标系），所以视角转到哪都不影响溜的方向 | W/S 只做前倾 / 后倾（**不加推力**） |
 | 左右 | **A 左 / D 右 只转身体**（`SkisControl.turnBody`，`TURN_RATE_DEGREES` 2.0°/tick ≈ 40°/s），**视角不跟着动**（顶到 ±90° 限位才被拖）；横向输入被清掉（不横移），滑行方向在地上跟着身体转（落地后另有 `ALIGN_DEGREES_PER_TICK` 9°/tick 快速对齐）、空中不跟 | A / D 沿身体左右**平移** |
-| 站姿 | 腿往后倾 `SKI_LEG_TILT` -0.15 ＋ 双腿微蹲（`SQUAT_UNITS` 1.5 单位，脚底贴 y=0） | 腿往后倾 `BOARD_LEG_TILT` -0.15（**与双板同值**，用户 2026-10-13 定）＋ 同一个 `SQUAT_UNITS` 1.5（两板共用一个值） |
+| 站姿 | 腿往后倾 `SQUAT_LEG_TILT` -0.20 ＋ 躯干前压 `SQUAT_BODY_LEAN` 0.12 ＋ 头略低 `SQUAT_HEAD_PITCH` 0.10（三个都是**角度**，`SkiStance` 里两板共用；**不缩腿**、`yScale` 恒 1.0、`leg.y` 恒 12，脚底与板面不动）；蹲行时躯干 / 头保持原版 | 与双板**完全同一套角度**（同一个 `SQUAT_LEG_TILT` / `SQUAT_BODY_LEAN` / `SQUAT_HEAD_PITCH`，差别只在外观与脚位） |
 | 视角限位 | **±`VIEW_LIMIT_DEGREES` 90°**（`SkisControl`）：鼠标能转，但相对锁定的身体朝向最多左右各 90°（合计 180°，刚好到正侧方）；没顶到限位时视角**留在世界坐标里不动**（身体在下面转），顶到之后头被身体拖着走。**按 W 时身体朝视角方向追 2.4°/tick**（`VIEW_TURN_RATE_DEGREES`）—— 追的是身体，视角在世界坐标里仍然不动 | **±`VIEW_LIMIT_DEGREES` 135°**（`SnowboardControl`）：同一套实现（`client/SkiViewSmoothing` 的唯一 `headOffset`，鼠标只记账、相机每帧写一次）、**各自一个常量** |
 | 音效 / 粒子 | 同一套：滑行雪粒子 + 随速度变密的切雪声（暂停即停，无风声） | 同左 |
 | 摩擦（动量每 tick 保留） | `SkisControl.MOMENTUM_DECAY` **0.998** | `SnowboardControl.MOMENTUM_DECAY` **0.998**（直行）/ **0.999**（carve 转向期间）—— 两板同值，用户 2026-10-13 定；单板 carve 另有速度下限 `guardCarveSpeed`（转向期间实际不衰减） |
