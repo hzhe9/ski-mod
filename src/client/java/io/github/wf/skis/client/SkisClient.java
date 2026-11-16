@@ -3,6 +3,7 @@ package io.github.wf.skis.client;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SkiAir;
 import io.github.wf.skis.SkiFlip;
+import io.github.wf.skis.SnowboardAxis;
 
 import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SnowboardControl;
@@ -20,6 +21,7 @@ import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -151,6 +153,11 @@ public class SkisClient implements ClientModInitializer {
 				SnowboardControl.alignCarveHeading(player, keys);
 			}
 			yaw = SnowboardControl.bodyYaw(player.getId(), player.getYRot(), true);
+			// 板轴只有本机一份权威：把这个锁定值发给服务端（板轴包，覆盖式）。
+			// 不发的话两端各积分各的，会以 2–4°/tick 分叉成一个永不自愈的固定夹角（见 SnowboardAxis 的 javadoc）。
+			if (player == self) {
+				sendBoardAxis(self, yaw);
+			}
 		} else {
 			// ——— 双板：A / D 转身体 4.0°/tick，W 再朝视角方向补 4.8°/tick ———
 			// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
@@ -193,6 +200,57 @@ public class SkisClient implements ClientModInitializer {
 		}
 	}
 
+	/**
+	 * 板轴同步的<b>发送门槛</b>（度）：与上一次发出去的值差这么多才再发一份。
+	 *
+	 * <p>取 {@code 0.05} 与 {@code SnowboardControl.ALIGN_DEAD_ZONE_DEGREES} 同量级 —— 比死区更小的轴变化
+	 * 本来就进不了回正（那边差 0.05° 以内直接返回），发上去也没有消费者。压刃转向时每 tick 转角 ≥ 2.0°，
+	 * 所以这一条**不省任何带宽**（照样每 tick 一份），它省的是「板轴几乎不动」的那些 tick。
+	 */
+	private static final float AXIS_SYNC_MIN_STEP_DEGREES = 0.05F;
+
+	/**
+	 * 板轴同步的<b>保活间隔</b>（tick）：就算本机的轴一点没变，也每隔这么久重发一次。
+	 *
+	 * <p>为什么要保活：真值只由这一端维护，而服务端那张表可能<b>单方面</b>被清掉 / 重锁（骑乘时
+	 * {@code SkiGlide} 会 {@code forget} 服务端那份、换维度时服务端不清而客户端清）。只按「变化」发的话，
+	 * 这种一端重置的偏差会一直留着 —— 1 秒一次的重发能在用户察觉之前把它拉平，代价是 1 包/秒。
+	 */
+	private static final int AXIS_SYNC_KEEPALIVE_TICKS = 20;
+
+	/** 上一次发出去的板轴（度）与发它的时刻（{@code tickCount}）；{@code axisSent = false} ＝ 本段还没发过。 */
+	private static float lastSentAxisDegrees;
+	private static int lastAxisSentTick;
+	private static boolean axisSent;
+
+	/**
+	 * 把本机锁定的板轴发给服务端（{@link SnowboardAxis.Payload}，C2S）。
+	 *
+	 * <p>发送策略（为什么不是「每 tick 无条件发」）：<b>轴有变化（≥ {@link #AXIS_SYNC_MIN_STEP_DEGREES}）才发，
+	 * 外加每 {@link #AXIS_SYNC_KEEPALIVE_TICKS} tick 一次保活</b>。压刃转向时每 tick 都变（≥ 2.0°/tick），
+	 * 等价于每 tick 一份 —— 也就是转向时 20 包/秒（约 440 B/s，见 SnowboardAxis 的包体：1 字节包头长度 +
+	 * 1 字节包 id + 16 字节通道名 + 4 字节 float），比原版玩家移动包（同一 tick 里本来就有一份 position 包）
+	 * 还小，完全可以接受；不转向时降到 1 包/秒。
+	 */
+	private static void sendBoardAxis(LocalPlayer self, float yaw) {
+		if (!ClientPlayNetworking.canSend(SnowboardAxis.Payload.TYPE)) {
+			// 服务端没登记这条通道（对方没装模组 / 通道注册包还没到）：不发，下一 tick 再试。
+			// 也正因为「穿得上本模组的单板」本身就要求两端都装了模组，这一条是纯兜底。
+			return;
+		}
+		boolean changed = !axisSent
+				|| Math.abs(Mth.wrapDegrees(yaw - lastSentAxisDegrees)) >= AXIS_SYNC_MIN_STEP_DEGREES;
+		boolean keepalive = !axisSent || self.tickCount - lastAxisSentTick >= AXIS_SYNC_KEEPALIVE_TICKS
+				|| self.tickCount < lastAxisSentTick;   // tickCount 归零（换实体 / 重生）时立刻重发一次
+		if (!changed && !keepalive) {
+			return;
+		}
+		ClientPlayNetworking.send(new SnowboardAxis.Payload(yaw));
+		axisSent = true;
+		lastSentAxisDegrees = yaw;
+		lastAxisSentTick = self.tickCount;
+	}
+
 	/** 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体。 */
 	private static void tickAttitude(LocalPlayer self) {
 		if (self != null) {
@@ -232,6 +290,8 @@ public class SkisClient implements ClientModInitializer {
 		AlpineSkiControl.forgetBodyAll(true);
 		SkiAir.forgetAllClient();
 		SkiViewSmoothing.reset();
+		// 板轴同步的「上一份发出去的值」也作废：新世界里本机那份轴会重新锁，必须整份重发一次
+		axisSent = false;
 	}
 
 	/**

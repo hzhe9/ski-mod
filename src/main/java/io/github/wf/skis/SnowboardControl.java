@@ -35,8 +35,25 @@ import net.minecraft.world.phys.Vec3;
 public final class SnowboardControl {
 	/** <b>客户端</b>那张表：实体 id → 穿上单板时锁定的身体朝向（度）。 */
 	private static final IdMap<Float> BODY_YAW_CLIENT = new IdMap<>();
-	/** <b>服务端</b>那张表：同一份语义（为什么分两份见 {@link #table}）。 */
+	/**
+	 * <b>服务端</b>那张表：同一份语义，<b>但值是客户端交上来的</b>。
+	 *
+	 * <p>板轴只有客户端一份权威（{@link SnowboardControl#acceptClientAxis}）：本机每 tick 把锁定的轴
+	 * 通过 {@link SnowboardAxis.Payload} 发上来，这里被<b>覆盖式</b>写入。它仍是 {@link #table} 里那张
+	 * 「服务端表」（{@code sideLocked} / {@code boardSide} / 远端玩家的板子都读它），只是不再自己积分出
+	 * 一份独立的数 —— 两端因此永远是同一个轴。包还没到的那些 tick（延迟、丢包、客户端没装模组）仍由
+	 * {@link #applyCarve} 本地推进兜底，一旦收到包整体覆盖，所以误差不会累积。
+	 */
 	private static final IdMap<Float> BODY_YAW_SERVER = new IdMap<>();
+	/**
+	 * <b>只在服务端写</b>：实体 id → 上一次从客户端收到板轴的游戏时间（tick）。
+	 *
+	 * <p>用途只有一处：收到包的那一 tick <b>服务端不再自己往 {@link #BODY_YAW_SERVER} 上加一步</b>
+	 * （见 {@link #applyCarve}）。否则「客户端值 + 服务端自己那一步」会比客户端领先一个 tick，下一份包
+	 * 再把它拉回去 —— 轴会在两个值之间锯齿轮动，而{@link #alignCarveHeading} 每 tick 都按这个轴掰速度，
+	 * 锯齿会直接变成可见的抖。
+	 */
+	private static final IdMap<Long> CLIENT_AXIS_TICK = new IdMap<>();
 	/** <b>客户端</b>那张表：实体 id → 俯仰姿态（当前值，平滑后；正 = 前倾 / 负 = 后倾），供模型与相机读取。 */
 	private static final IdMap<Float> TILT_VALUE_CLIENT = new IdMap<>();
 	/** <b>服务端</b>那张表：同一份语义（{@link #tickTilt} 只在客户端跑，见 {@link #table}）。 */
@@ -359,6 +376,11 @@ public final class SnowboardControl {
 		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).remove(entityId);
 		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).remove(entityId);
 		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).remove(entityId);
+		if (!clientSide) {
+			// 「上次收到客户端板轴」的时间戳跟着服务端那张表一起清：单机里两端共用 id，
+			// 客户端清表不能顺手把服务端的时间戳也抹掉（那只影响服务端要不要再加一步自己那步）
+			CLIENT_AXIS_TICK.remove(entityId);
+		}
 		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
 		if (clientSide) {
 			SkiAir.forgetClient(entityId);
@@ -390,6 +412,30 @@ public final class SnowboardControl {
 	 */
 	public static float bodyYaw(int entityId, float fallback, boolean clientSide) {
 		return table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).getOrDefault(entityId, fallback);
+	}
+
+	/**
+	 * <b>服务端</b>收到客户端交上来的板轴（{@link SnowboardAxis.Payload} 的接收器调这里）：
+	 * <b>覆盖式</b>写入 {@link #BODY_YAW_SERVER}，并记下这一 tick「已经有一份权威值」。
+	 *
+	 * <p>为什么必须覆盖而不是平均 / 混合：两端各自积分出的轴会以 2–4°/tick 分叉（转角取决于本端速度、
+	 * {@code onGround()} 与脚下方块摩擦），差值是<b>隐藏状态</b>，没有任何一项会把它拉回 0；这正是
+	 * 「板轴与位移方向永远差一个固定角」的根因。覆盖之后两端读同一个数，差值恒为 0。
+	 *
+	 * <p>取模到 (−180°, 180°]：客户端那份是累加值（可以长到几千度），两端只按 {@code sin / cos} 用它，
+	 * 取模不影响方向，但能把服务端这张表的数值限制在有界范围内（网络来的数不无限增长）。
+	 *
+	 * @param gameTime 收到的这一 tick（{@code level.getGameTime()}），配 {@link #CLIENT_AXIS_TICK} 用
+	 */
+	public static void acceptClientAxis(int entityId, float bodyYaw, long gameTime) {
+		BODY_YAW_SERVER.put(entityId, Mth.wrapDegrees(bodyYaw));
+		CLIENT_AXIS_TICK.put(entityId, gameTime);
+	}
+
+	/** 这个实体这一 tick 是不是刚收到过客户端交上来的板轴（是就不再自己累加，见 {@link #applyCarve}）。 */
+	private static boolean clientAxisThisTick(int entityId, long gameTime) {
+		Long last = CLIENT_AXIS_TICK.get(entityId);
+		return last != null && last == gameTime;
 	}
 
 	/** 客户端每 tick 记录俯仰姿态<b>目标</b>：+1 前倾 / 0 直立 / -1 后倾。 */
@@ -666,7 +712,8 @@ public final class SnowboardControl {
 	 *   <li>不在失控里（{@link SkiAir#isStunned}）—— 摔了就不掰，让惯性自己滑停；</li>
 	 *   <li>水平速度 &gt; 1e-4（没有方向可掰）；</li>
 	 *   <li><b>近地</b>：{@code onGround()} <b>或</b>脚底往下 {@link #ALIGN_GROUND_RANGE} 1.5 格内有碰撞方块
-	 *       —— 滑下坡 / 掠过起伏时 {@code onGround} 会抖，1.5 格内一律照拉；真腾空就保持惯性。</li>
+	 *       —— 滑下坡 / 掠过起伏时 {@code onGround} 会抖，1.5 格内一律照拉；真腾空就保持惯性；</li>
+	 *   <li><b>没在顶墙</b>：{@code horizontalCollision} 为假（理由见下）。</li>
 	 * </ul>
 	 *
 	 * <p><b>怎么掰</b>：用 {@link Mth#wrapDegrees} 取「板轴方向角 − 当前速度方向角」的最短角差
@@ -674,8 +721,13 @@ public final class SnowboardControl {
 	 * 不写也不发包；否则把角差夹到 ±12.5° 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
 	 * （大小与 y 都不动、{@code hurtMarked = true}）—— 不是一步写成目标角，所以偏差可见、可追、不瞬移。
 	 *
-	 * <p><b>撞墙 tick 也照拉</b>（不再因 {@code horizontalCollision} 提前返回）：限幅 12.5°/tick 本身够温和，
-	 * 撞墙那一 tick 顶多把被碰撞逐轴裁过的方向往板轴掰 12.5°，方向不会没完没了地歪着。
+	 * <p><b>撞墙那一 tick 不掰</b>（{@code horizontalCollision} 为真就原样返回）：{@code Entity#move} 对碰撞
+	 * 方向做<b>逐轴裁剪</b> —— 这一 tick 刚掰过去的那点转角会在同一 tick 的 {@code move()} 里被整个削掉，
+	 * 位移一点没变，却把「板轴 vs 实际位移」的夹角白白拉开一次（法线垂直于板轴时最坏 90°：沿轴分量被清掉、
+	 * 只剩垂直分量）。更糟的是它还会打断 {@code SkiGlide} 的 {@code HIT_TICKS} 连续撞墙计数（板轴被掰歪后
+	 * 下一 tick 的速度方向不再撞同一条法线），{@code MOMENTUM_HIT_TICKS_BEFORE_DECAY} 3 tick 的门槛永远攒不满，
+	 * 顶墙连该有的减速都收不到。所以顶墙期间让板轴与速度都保持原样，离开墙那一 tick 再按 12.5°/tick 收。
+	 * 注意这<b>只跳回正</b>：carve 的「身体与速度同量旋转」（{@link #applyCarve}）照跑，那不会制造夹角。
 	 *
 	 * <p><b>服务端与客户端各跑一遍</b>（{@link SkiGlide} 的单板分支 + {@code client/SkisClient} 的
 	 * {@code END_CLIENT_TICK}，客户端只对<b>本机玩家</b>跑）：26.2 里玩家位置是<b>客户端权威</b>
@@ -704,6 +756,11 @@ public final class SnowboardControl {
 		if (!entity.onGround() && SkiGlide.groundDistance(entity, ALIGN_GROUND_RANGE) > ALIGN_GROUND_RANGE) {
 			return;   // 真腾空了：速度方向由惯性保持，不在空中把路线掰弯
 		}
+		if (entity.horizontalCollision) {
+			// 顶墙这一 tick 不掰：本 tick 掰出去的角度会被同 tick 的 move() 逐轴裁剪吃掉，
+			// 位移不变、只把「板轴 vs 位移」的夹角白白拉开一次（最坏 90°），还会打断连续撞墙计数。
+			return;
+		}
 
 		Vec3 axis = sideLocked(entityId, entity.getYRot(), boardSide(entity, keys), clientSide);
 		double curRad = Math.atan2(horizontal.z, horizontal.x);
@@ -730,12 +787,22 @@ public final class SnowboardControl {
 	 * 同一份增量（等效 2 倍角速度），拆表后每端只写自己那张表，所以 {@code TURN_*} / {@code VEER_*}
 	 * 都翻倍，单机每 tick 的转角与拆表前逐 tick 相同（见 {@link #table}）。
 	 *
+	 * <p><b>板轴谁说了算</b>：客户端。<b>客户端这一端</b>照旧往 {@link #BODY_YAW_CLIENT} 累加（它是权威）；
+	 * <b>服务端这一端</b>在「收到客户端板轴的那一 tick」<b>不再累加自己的</b> —— 那份值已经是最终值
+	 * （{@link #acceptClientAxis}），再加一步会比客户端领先一个 tick、下一份包又把它拉回来，轴会在两个值之间
+	 * 锯齿，而 {@link #alignCarveHeading} 每 tick 都按这个轴掰速度，锯齿会变成可见的抖。其它 tick
+	 * （包还没到 / 延迟 / 丢包 / 客户端没装模组）仍按本地推进兜底，收到下一份包整体覆盖，误差不累积。
+	 *
+	 * <p><b>速度旋转照旧两端各转一次</b>：{@code delta} 只影响本端那份速度，两端各自算出的 {@code delta}
+	 * 稍有差别也没关系 —— {@link #alignCarveHeading} 每 tick 会把速度方向朝（同一根）板轴收，差量被吃掉。
+	 *
 	 * <p>这里<b>不登记任何「入弯基准」</b>（旧版那两张入弯方向角 / 入弯朝向的表已删）：
 	 * 速度方向最终对不对，由 {@link #alignCarveHeading} 在 tick 末尾每 tick 朝<b>板轴</b>限幅拉回来，
 	 * 与「从哪个方向进的弯」无关 —— 所以撞墙、蹭墙、从任意角度起弯都不用特殊处理。
 	 *
-	 * <p><b>撞墙那一 tick 也照转速度</b>（不再判 {@code horizontalCollision}）：身体转多少速度就转多少，
-	 * 这一 tick 顶多多歪一点，下一个 tick 由 {@link #alignCarveHeading} 按 12.5°/tick 收回去。
+	 * <p><b>撞墙那一 tick 也照转速度</b>（不判 {@code horizontalCollision}）：身体与速度是<b>同一个旋转</b>，
+	 * 相对夹角不变，所以不会制造离轴；回正那一步在顶墙 tick 是跳过的（见 {@link #alignCarveHeading}），
+	 * 等离开墙再收。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
@@ -776,9 +843,13 @@ public final class SnowboardControl {
 			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES);
 		}
 		float delta = (float) turn;
-		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
-				.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
-		rotateVelocity(entity, delta);   // 撞墙这一 tick 也照转：偏角由 alignCarveHeading 每 tick 收回
+		// 服务端：客户端这一 tick 刚把板轴交上来 —— 那份就是最终值，别再自己加一步（见本方法 javadoc）。
+		// 客户端（clientSide）永远自己累加：它是权威，而单机里两端共用 entity id，不能拿服务端的时间戳把自己挡住。
+		if (clientSide || !clientAxisThisTick(entityId, entity.level().getGameTime())) {
+			table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
+					.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
+		}
+		rotateVelocity(entity, delta);   // 撞墙这一 tick 也照转：身体与速度同量旋转，夹角不变
 		return delta;
 	}
 
