@@ -619,7 +619,8 @@ public final class SkiGlide {
 	 *
 	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它。
 	 * 判定一律是「离地 ≤ range」而不是 {@code onGround}（滑下坡时人常常一两 tick 没踩着地）。
-	 * 单板的速度回正<b>不用它了</b>（{@code SnowboardControl#alignCarveHeading} 现在只认 {@code onGround}）。
+	 * 单板的速度回正 / carve 转速度也用它：{@code SnowboardControl.isSpeedAlignable} 在
+	 * {@code onGround} 为假时按「1.0 格内且 vy ≤ 0」再判一次（兜坡面抖动）。
 	 */
 	public static double groundDistance(Entity entity, double range) {
 		Level level = entity.level();

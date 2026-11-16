@@ -25,10 +25,12 @@ import net.minecraft.world.phys.Vec3;
  *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>12.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 2.0）；
  *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反），摆动上限
  *       {@link #VEER_MAX_DEGREES} 4.8°/tick。W / S 只转向、<b>不加力</b>。</li>
- *   <li><b>速度方向自动回正</b>：<b>只在 {@code onGround()} 时</b>，水平速度方向每 tick 朝<b>板轴</b>
+ *   <li><b>速度方向自动回正</b>：只要处于<b>可改速度方向</b>的状态（贴地，或脚底 1.0 格内有方块且
+ *       {@code vy ≤ 0} —— 见 {@link #isSpeedAlignable}），水平速度方向每 tick 朝<b>板轴</b>
  *       （身体左右轴，也就是单板真正的行进方向）按 {@code max(9.0°/tick, |本 tick 身体转角|)} 掰，
  *       硬上限 45°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，也没有「入弯基准」这种状态。
- *       空中速度方向一点不动（身体 / 模型照转），落地后才开始追 —— 与双板同一条口径、同一个基准速度。</li>
+ *       起跳上升段 / 真腾空 / 长距离坠落速度方向一点不动（身体 / 模型照转），落地后才开始追 ——
+ *       与双板同一条口径、同一个基准速度。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -180,6 +182,26 @@ public final class SnowboardControl {
 	private static final float ALIGN_MAX_STEP_DEGREES = 45.0F;
 	/** 与板轴的角差小于它就当作已经对上（死区：不写、不发包，防抖也防每 tick 多发一份同步）。 */
 	private static final float ALIGN_DEAD_ZONE_DEGREES = 0.05F;
+	/**
+	 * <b>可改速度方向的「近地」容差</b>（格）：{@code onGround()} 为假时，脚底往下这么多格内有碰撞方块
+	 * <b>且</b> {@code vy ≤ 0}，仍算「贴着坡面在滑」，照旧回正（判据见 {@link #isSpeedAlignable}）。
+	 *
+	 * <p><b>为什么要它</b>：滑下坡时 {@code onGround()} 会每几 tick 抖成 false（实体 tick 里先位移再落地，
+	 * 斜面上下坠那一 tick 就没踩着方块）。只认 {@code onGround} 的话回正跟着断续 —— 坡上方向一顿一顿，
+	 * 像每隔几 tick 松一次手。这层宽容兜的就是抖动那几 tick，<b>不是</b>用来在空中转速度的。
+	 *
+	 * <p><b>为什么是 1.0 而不是 1.5</b>：满速起跳（力度 0.470）的离地高度逐 tick 是
+	 * <b>0.47 / 0.83 / 1.11 / 1.31 / 1.45 / 1.50</b>（顶点）—— 1.5 格把整段上升都盖住，1.0 格只盖住前
+	 * 两 tick，窗口小一半多。真正把上升段挡在外面的其实是下面的 {@code vy ≤ 0}（前两 tick 靠它，第三 tick
+	 * 起靠距离），1.0 只是让这段窗口尽可能短；反过来也不能更小 —— 坡面抖动的实测距离常在 0.5–0.7 格，
+	 * 收到 0.5 就会漏掉一部分抖动 tick，回正又开始断续。
+	 *
+	 * <p><b>为什么还要 {@code vy ≤ 0}</b>：这是把「近地」和「空中」分开的那一刀。只看距离时，起跳第一 tick
+	 * 与抛物线顶点附近都在 1.0 格内 —— 但那时 {@code vy > 0}，人在<b>上升</b>，速度方向必须由惯性保持，
+	 * 否则每 tick 收一点，空中轨迹就成了弧线、落点被拽偏。{@code vy ≤ 0}（下落 / 平飞）才是「贴着坡面
+	 * 往下跑」的形状，也正是 {@code onGround} 抖动时唯一可能出现的形状（坡面向下时不产生向上的速度）。
+	 */
+	private static final double NEAR_GROUND_RANGE = 1.0D;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
@@ -707,6 +729,42 @@ public final class SnowboardControl {
 	}
 
 	/**
+	 * <b>这一 tick 能不能改速度方向</b>（单板专用）：单板的 {@link #alignCarveHeading}（回正）与
+	 * {@link #applyCarve}（carve 时让速度跟着身体转）<b>共用这一处判定</b>：两处各写一份一定会漂移。
+	 *
+	 * <p>判据（按顺序）：
+	 * <ol>
+	 *   <li>{@code entity.onGround()} → <b>能</b>（正常贴地滑行）；</li>
+	 *   <li>否则：{@link SkiGlide#groundDistance}(entity, {@link #NEAR_GROUND_RANGE} 1.0) ≤ 1.0
+	 *       <b>且</b> {@code entity.getDeltaMovement().y ≤ 0}（下落或平飞）→ <b>能</b>；</li>
+	 *   <li>其余 → <b>不能</b>。</li>
+	 * </ol>
+	 *
+	 * <p><b>第 2 条兜的是「坡面 onGround 抖动」</b>：滑下坡时 {@code onGround()} 会每几 tick 抖成 false
+	 * （实体 tick 里先位移再落地，斜面上下坠那一 tick 就没踩着方块）。没有这层宽容，回正会跟着断续 ——
+	 * 坡上方向一顿一顿。它不是「在空中转速度」。
+	 *
+	 * <p><b>它不会把真腾空放进来</b>：
+	 * <ul>
+	 *   <li><b>起跳上升段 / 抛物线上升段</b>：{@code vy > 0} → 第 2 条直接不成立（哪怕离地只有半格）。
+	 *       这两段改速度方向会让空中轨迹变成弧线、落点被拽偏；</li>
+	 *   <li><b>跳下悬崖 / 长距离坠落</b>：下方 1.0 格内没有碰撞方块（{@link SkiGlide#groundDistance} 返回
+	 *       {@code Double.MAX_VALUE}）→ 不成立；</li>
+	 *   <li><b>抛物线落地前一 tick</b>：距离已在 1.0 格内且 {@code vy ≤ 0} → 成立 —— 这是<b>故意的</b>：
+	 *       落地前一 tick 已经在往雪面下落，此时回正与「落地那一 tick 就回正」在视觉上没有区别，
+	 *       却避免了落地瞬间方向猛地一顿。</li>
+	 * </ul>
+	 * 所以「空中不改速度方向」这条规则完好 —— 只是不再把坡面抖动那几 tick 误判成空中。
+	 */
+	public static boolean isSpeedAlignable(Entity entity) {
+		if (entity.onGround()) {
+			return true;
+		}
+		return entity.getDeltaMovement().y <= 0.0D
+				&& SkiGlide.groundDistance(entity, NEAR_GROUND_RANGE) <= NEAR_GROUND_RANGE;
+	}
+
+	/**
 	 * <b>速度方向自动回正到板轴</b>（整 tick 最后一个写速度的点）：每 tick 把水平速度方向朝
 	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，步长与上限见下面「每 tick 的步长」。
 	 *
@@ -720,10 +778,11 @@ public final class SnowboardControl {
 	 *   <li>穿着单板（调用点只在单板分支，另用 {@link #isSnowboard} 兜一层）；</li>
 	 *   <li>不在失控里（{@link SkiAir#isStunned}）—— 摔了就不掰，让惯性自己滑停；</li>
 	 *   <li>水平速度 &gt; 1e-4（没有方向可掰）；</li>
-	 *   <li><b>贴地：只认 {@code onGround()}</b> —— 空中（跳跃 / 坠落）速度方向由惯性保持，
-	 *       身体 / 模型照转（{@link #applyCarve} 只转 {@code BODY_YAW}），滑行路线一点都不弯。
-	 *       旧版那条「脚底往下 1.5 格内有方块也算近地」的宽容已删：与双板 {@code AlpineSkiControl}
-	 *       同一条口径 —— 空中只让视角 / 身体转、速度方向一点不动；</li>
+	 *   <li><b>可改速度方向</b>：{@link #isSpeedAlignable} —— {@code onGround()} 为真，<b>或</b>脚底往下
+	 *       {@link #NEAR_GROUND_RANGE} 1.0 格内有碰撞方块且 {@code vy ≤ 0}。前一种＝正常贴地；后一种兜的是
+	 *       滑下坡时 {@code onGround} 每几 tick 抖成 false（不兜就会断续、坡上方向一顿一顿）。起跳上升段 /
+	 *       真腾空 / 长距离坠落三种都不满足（详见那个方法），速度方向由惯性保持 —— 身体 / 模型照转
+	 *       （{@link #applyCarve} 只转 {@code BODY_YAW}），滑行路线一点都不弯；</li>
 	 *   <li><b>没在顶墙</b>：{@code horizontalCollision} 为假（理由见下）。</li>
 	 * </ul>
 	 *
@@ -778,8 +837,8 @@ public final class SnowboardControl {
 		if (horizontal.length() <= 1.0E-4D) {
 			return;   // 没速度可掰
 		}
-		if (!entity.onGround()) {
-			return;   // 腾空：速度方向由惯性保持（身体 / 模型照转），滑行路线一点都不弯
+		if (!isSpeedAlignable(entity)) {
+			return;   // 真腾空（起跳上升 / 跳崖 / 坠落）：速度方向由惯性保持，滑行路线一点都不弯
 		}
 		if (entity.horizontalCollision) {
 			// 顶墙这一 tick 不掰：本 tick 掰出去的角度会被同 tick 的 move() 逐轴裁剪吃掉，
@@ -808,11 +867,16 @@ public final class SnowboardControl {
 	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）；腾空只转身体 / 模型。
 	 * 服务端与客户端各跑一次，两边朝向与速度方向保持一致。
 	 *
-	 * <p><b>腾空时身体 / 模型照转、速度方向一点不动</b>：从高处落下时照样能转板（视角 / 身体都跟手），
+	 * <p><b>真腾空时身体 / 模型照转、速度方向一点不动</b>：从高处落下时照样能转板（视角 / 身体都跟手），
 	 * 但这一 tick 的 {@code delta} <b>只写进 {@code BODY_YAW}，不旋转速度</b> —— 空中改速度方向会把人
 	 * 「拽」着走（落点跟着偏），这条口径与双板完全一致（{@code AlpineSkiControl} 空中只转身体 / 视角）。
 	 * 落地后由 {@link #alignCarveHeading} 朝<b>板轴</b>按 {@code max(9.0, |本 tick 转角|)} 追赶，
 	 * 「落地方向跟上」的手感与双板同一个基准速度。
+	 *
+	 * <p><b>「能不能转速度」与回正共用同一个判据 {@link #isSpeedAlignable}</b>（不在这里另写一份
+	 * {@code onGround()}）：贴地，或脚底 {@link #NEAR_GROUND_RANGE} 1.0 格内有方块且 {@code vy ≤ 0}。
+	 * 只认 {@code onGround()} 的话，滑下坡时它每几 tick 抖成 false，carve 的身体转角就会隔几 tick
+	 * 没同步到速度上 —— 速度方向被回正拉着走一小步、又被身体甩开，坡上转起来一顿一顿。
 	 *
 	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 4 格给定
 	 * （{@link #turnDegreesPerTick}，满速算出 14.43°/tick、被上限夹到 12.0，下限 2.0）。
@@ -836,7 +900,7 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>撞墙那一 tick 也照转速度</b>（不判 {@code horizontalCollision}）：身体与速度是<b>同一个旋转</b>，
 	 * 相对夹角不变，所以不会制造离轴；回正那一步在顶墙 tick 是跳过的（见 {@link #alignCarveHeading}），
-	 * 等离开墙再收。（只对贴地成立 —— 腾空那一段上面说了，速度一动不动。）
+	 * 等离开墙再收。（只对可改速度方向的状态成立 —— 真腾空那一段上面说了，速度一动不动。）
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
@@ -890,11 +954,11 @@ public final class SnowboardControl {
 			table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
 					.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		}
-		if (entity.onGround()) {
-			// 贴地：身体与速度同量旋转（撞墙这一 tick 也照转，夹角不变）
+		if (isSpeedAlignable(entity)) {
+			// 可改速度方向（贴地，或坡面 onGround 抖动那一 tick）：身体与速度同量旋转（撞墙这一 tick 也照转，夹角不变）
 			rotateVelocity(entity, delta);
 		}
-		// 腾空：这里什么都不做 —— 身体 / 模型已经转过了（BODY_YAW），速度方向由惯性保持，
+		// 真腾空：这里什么都不做 —— 身体 / 模型已经转过了（BODY_YAW），速度方向由惯性保持，
 		// 落地后由 alignCarveHeading 朝板轴追赶（与双板「空中只转身体、速度不动」同一条口径）。
 		return delta;
 	}
