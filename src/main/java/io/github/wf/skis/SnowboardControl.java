@@ -21,10 +21,10 @@ import net.minecraft.world.phys.Vec3;
  *       {@code EntityTiltMixin}），相机位置也跟着（{@code CameraTiltMixin}）；倾斜是<b>渐进</b>的
  *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
  *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 速度方向跟着转同样的角度；
- *       固定半径 {@link #TURN_RADIUS_BLOCKS} 4 格 → 满速算出 14.43°/tick、夹到
- *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>12.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 2.0）；
+ *       固定半径 {@link #TURN_RADIUS_BLOCKS} 2 格 → 满速算出 28.86°/tick、夹到
+ *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>24.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 4.0）；
  *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反），摆动上限
- *       {@link #VEER_MAX_DEGREES} 4.8°/tick。W / S 只转向、<b>不加力</b>。</li>
+ *       {@link #VEER_MAX_DEGREES} 9.6°/tick。W / S 只转向、<b>不加力</b>。</li>
  *   <li><b>速度方向自动回正</b>：只要处于<b>可改速度方向</b>的状态（贴地，或脚底 1.0 格内有方块且
  *       {@code vy ≤ 0} —— 见 {@link #isSpeedAlignable}），水平速度方向每 tick 朝<b>板轴</b>
  *       （身体左右轴，也就是单板真正的行进方向）按 {@code max(9.0°/tick, |本 tick 身体转角|)} 掰，
@@ -137,34 +137,41 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>carve（切雪转向）的固定转弯半径</b>（格）：角速度不再是常数，而是由<b>本 tick 真正用于位移的速度</b>
-	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 4.0)} 度，一直按着就是在雪地上画同一个圆。
+	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 2.0)} 度，一直按着就是在雪地上画同一个圆。
 	 *
-	 * <p>满速 0.55 格/tick 时算出来 <b>14.43°/tick</b>，被 {@link #TURN_MAX_DEGREES_PER_TICK} 12.0 夹住
-	 * （≈240°/s，半圈 15 tick ≈ 0.75 s）；中速 0.30 格/tick 时 <b>7.87°/tick</b>，极慢 0.05 格/tick 时触底 2.0。
+	 * <p>满速 0.55 格/tick 时算出来 <b>28.86°/tick</b>，被 {@link #TURN_MAX_DEGREES_PER_TICK} 24.0 夹住
+	 * （≈480°/s，半圈 7.5 tick ≈ 0.375 s）；中速 0.30 格/tick 时 <b>15.74°/tick</b>，极慢 0.05 格/tick 时触底 4.0。
 	 * 慢滑自然转得慢、快滑自然转得快，不会出现「慢滑也按满速角速度剃头」那种手感。
 	 *
-	 * <p><b>半径 4 而不是 8 —— 这个常量按「每端各跑一次」标定</b>（见 {@link #table}）：拆表前单机里
-	 * 客户端与服务端各往同一张 {@code BODY_YAW} 加一次同样的增量（等效半径 8 的 2 倍角速度），
-	 * 拆表后每端只写自己那张表，半径取 4 才能在单机里逐 tick 复现同样的转角；
-	 * 专用服务器也随之从「一半」变成和单机一样。
+	 * <p><b>半径 2 而不是 8 —— 同一个「每 tick 转角」被翻过两次倍</b>（见 {@link #table}）：
+	 * ①「状态表按端拆分」把同一份增量从加两次变成加一次 → 8.0 减半到 4.0；
+	 * ②{@code af42725} 又把板轴改成<b>客户端权威并同步</b>，两端从此共用同一根轴、每 tick 只前进一次。
+	 * 同步前两端各积分各的，且服务端那份旋转会经 motion 包回到客户端 —— 玩家每 tick 实际感受到的是
+	 * <b>两次之和</b>；同步后只剩一次，转速因此掉了一半（低速还被下限卡住，尤其明显）。
+	 * 所以半径再减半到 <b>2.0</b>，把「同步之前的手感」按 1:1 复原。
 	 */
-	private static final double TURN_RADIUS_BLOCKS = 4.0D;
+	private static final double TURN_RADIUS_BLOCKS = 2.0D;
 	/**
-	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 2° 以下，而
+	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 4° 以下，而
 	 * {@code client/SnowSpray} 判「在转向」的门槛是 {@code TURN_DEGREES_PER_TICK} 1.0°/tick ——
-	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 2.0（＝拆表前单机里每 tick 实际生效的 1.0 ×2）。
+	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 <b>4.0</b>。
+	 *
+	 * <p><b>这一项就是「初始速度低时转向非常慢」的病灶</b>：同步前两端各转 2.0°/tick，玩家每 tick 拿到
+	 * <b>4.0°</b>（90° 只需 23 tick）；{@code af42725} 之后只剩一次积分，同样的 2.0 就变成 90° 要 45 tick
+	 * （2.25 s）。封底直接写成 4.0 ＝ 同步前的每 tick 实际值，低速段一步到位复原。
 	 */
-	private static final double TURN_MIN_DEGREES_PER_TICK = 2.0D;
+	private static final double TURN_MIN_DEGREES_PER_TICK = 4.0D;
 	/**
-	 * 每 tick 身体转角的<b>上限</b>（度）：满速算出 14.43°/tick，这里夹到 <b>12.0</b>（拆表前单机里每 tick
-	 * 实际生效的 6.0 ×2；半径 4 格下 12° 对应 0.84 格/tick，高于单板上限 {@link #MAX_SPEED} 0.55，
-	 * 所以只在满速附近封顶）。
+	 * 每 tick 身体转角的<b>上限</b>（度）：满速算出 28.86°/tick，这里夹到 <b>24.0</b>（＝同步前两端各 12.0 之和，
+	 * 见 {@link #TURN_RADIUS_BLOCKS} 的说明；半径 2 格下 24° 对应 0.84 格/tick，高于单板上限
+	 * {@link #MAX_SPEED} 0.55，所以只在满速附近封顶）。
 	 *
 	 * <p><b>它不是回正步长的来源</b>：{@link #alignCarveHeading} 的步长是
 	 * {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK 9.0, |本 tick 身体转角|)}（见那个方法），
-	 * 所以「速度追不上身体」那条老问题由构造保证 —— 身体转角上限就是本常量。
+	 * 所以「速度追不上身体」那条老问题由构造保证 —— 身体转角上限就是本常量，步长自动跟到 24.0，
+	 * 仍远小于 {@link #ALIGN_MAX_STEP_DEGREES} 45.0。
 	 */
-	private static final double TURN_MAX_DEGREES_PER_TICK = 12.0D;
+	private static final double TURN_MAX_DEGREES_PER_TICK = 24.0D;
 	/**
 	 * <b>落地回正的单步硬上限</b>（度）：{@link #alignCarveHeading} 每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
 	 *
@@ -173,9 +180,9 @@ public final class SnowboardControl {
 	 * {@link #alignCarveHeading} 的 javadoc，那里写着为什么不能写死 9.0）。本常量只兜一个
 	 * <b>单次不越过半圈</b>的上限：45° &lt; 90°，所以一次旋转永远走短弧、不会绕远路。
 	 *
-	 * <p>正常滑行碰不到它 —— 身体转角上限 {@link #TURN_MAX_DEGREES_PER_TICK} 12.0 &lt; 45（旧版那条
+	 * <p>正常滑行碰不到它 —— 身体转角上限 {@link #TURN_MAX_DEGREES_PER_TICK} 24.0 &lt; 45（旧版那条
 	 * 「回正步长必须严格大于 12.0」的不变量（12.5）在新方案下<b>由构造保证</b>：步长取自本 tick 的实际转角，
-	 * 恒 ≥ 身体转角，不再需要一条「12.5 &gt; 12.0」的余量）。
+	 * 恒 ≥ 身体转角，不再需要一条「余量」）。
 	 *
 	 * <p>它作用在<b>实体自己的速度方向</b>上（每端每实体各一次、不写共享表），所以<b>不属于翻倍清单</b>。
 	 */
@@ -332,17 +339,19 @@ public final class SnowboardControl {
 	/**
 	 * 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。
 	 *
-	 * <p><b>0.58 ≈ 1 − (1 − 0.35)² = 0.5775，按「每端各跑一次」标定</b>（见 {@link #table}）：
-	 * 拆表前单机里客户端与服务端各吃一次 0.35（两次复合 ＝ 每 tick 吃掉 57.75%），拆表后每端只写自己那张表，
-	 * 取 0.58 才能让单机每 tick 的收敛量与拆表前一致，专用服务器也随之从 35% 提到 57.75%。
+	 * <p><b>0.82 ≈ 1 − (1 − 0.58)² = 0.8236，翻过两次倍</b>（见 {@link #table}）：
+	 * ①「状态表按端拆分」把两端各吃的 0.35 合成一次 → 0.58 ≈ 1 − (1 − 0.35)²；
+	 * ②{@code af42725} 板轴改为客户端权威并同步后每 tick 只收敛一次（同步前两端各收敛一次），
+	 * 所以再复合一次：1 − (1 − 0.58)² = 0.8236 → 取 <b>0.82</b>，单机每 tick 的收敛量与同步前一致。
+	 * 两次复合逐 tick 等价于「连做两步同样的收敛」，这正是同步前两端各跑一遍的效果。
 	 */
-	private static final double VEER_SMOOTHING = 0.58D;
+	private static final double VEER_SMOOTHING = 0.82D;
 	/**
 	 * 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。
-	 * <b>4.8</b>°/tick ＝ 96°/s（转满 180° 需 37.5 tick ≈ 1.9 s）；拆表前单机里两端各 2.4（合计 4.8），
-	 * 这一项是<b>饱和步长</b>、两次复合正好等于一次 4.8，所以 ×2 是精确等价的。
+	 * <b>9.6</b>°/tick ＝ 192°/s（转满 180° 需 18.75 tick ≈ 0.94 s）；同步前两端各 4.8（合计 9.6），
+	 * 这一项是<b>饱和步长</b>、两次复合正好等于一次 9.6，所以 ×2 是精确等价的。
 	 */
-	private static final double VEER_MAX_DEGREES = 4.8D;
+	private static final double VEER_MAX_DEGREES = 9.6D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -365,6 +374,12 @@ public final class SnowboardControl {
 	 * <p><b>常量按「每端各跑一次」标定</b>：拆开之后单机每 tick 只有一次写入，所以每个<b>累加型</b>的
 	 * 每 tick 步长都在本批里 ×2（`TURN_*`、`VEER_*`、`AlpineSkiControl.TURN_RATE_DEGREES` /
 	 * `VIEW_TURN_RATE_DEGREES`），这样单机手感与拆表前逐 tick 一致，专用服务器也终于和单机一样快。
+	 * <b>{@code af42725}（板轴客户端权威并同步）之后单板的这几个量又翻了一次倍</b>：两端从此共用同一根轴、
+	 * 每 tick 只积分一次，而同步前服务端那份旋转会经 motion 包回到客户端，玩家感受到的是两次之和。
+	 * 所以单板的 {@code TURN_*} / {@code VEER_*} 在原值上再 ×2（半径 4.0 → 2.0、下限 2.0 → 4.0、
+	 * 上限 12.0 → 24.0、{@code VEER_MAX} 4.8 → 9.6、{@code VEER_SMOOTHING} 0.58 → 0.82），
+	 * <b>只动单板</b> —— 双板的 {@code TURN_RATE_DEGREES} 4.0 / {@code VIEW_TURN_RATE_DEGREES} 4.8
+	 * 与 {@code ALIGN_DEGREES_PER_TICK} 9.0 保持拆表那批的值不变。
 	 * <b>幂等写值型</b>（{@link #BOARD_SIDE_CLIENT}）、<b>只在一端跑</b>（{@code TILT_*}、{@code HEAD_OFFSET}、
 	 * {@code CARVE_*}）的表<b>不翻倍</b> —— 翻倍会让倾斜 / 头偏一次快一倍。
 	 *
@@ -816,15 +831,15 @@ public final class SnowboardControl {
 	 * 不是身体前后。
 	 *
 	 * <p><b>为什么不能写死 9.0（为什么是 max 而不是常量）</b>：单板的身体每 tick 最多转
-	 * {@link #TURN_MAX_DEGREES_PER_TICK} 12.0°（carve 按固定转弯半径算，满速就顶到 12.0），而 carve 贴地时
+	 * {@link #TURN_MAX_DEGREES_PER_TICK} 24.0°（carve 按固定转弯半径算，满速就顶到 24.0），而 carve 贴地时
 	 * <b>同一份速度</b>已经被按身体转角转过一次（{@link #applyCarve}）；回正再把它朝板轴追一步。若步长恒为
-	 * 9.0 &lt; 12.0，每 tick 都留下 12.0 − 9.0 的残量、越累越多，速度方向会<b>永久</b>落在身体后面
+	 * 9.0 &lt; 24.0，每 tick 都留下 24.0 − 9.0 的残量、越累越多，速度方向会<b>永久</b>落在身体后面
 	 * （旧版是靠「回正上限 12.5 必须严格大于 12.0」这种两个常量的大小关系来堵）。取
 	 * {@code max(9.0, |本 tick 身体转角|)} 之后，速度每 tick 至少追上身体转过的量，残量不累积 ——
 	 * 不变量由构造保证。直行 / 没在 carve 时本 tick 转角是 0，步长就退回 9.0，与双板落地对齐完全一样。
 	 *
 	 * <p><b>为什么上限是 45°</b>：残差最多 180°，单步必须 &lt; 90° 才能保证走短弧；45° 同时远大于实际可能的
-	 * 步长（身体转角上限 12.0），所以正常滑行永远碰不到它，纯粹是兜底。
+	 * 步长（身体转角上限 24.0），所以正常滑行永远碰不到它，纯粹是兜底。
 	 */
 	public static void alignCarveHeading(Entity entity, Input keys) {
 		int entityId = entity.getId();
@@ -878,12 +893,15 @@ public final class SnowboardControl {
 	 * 只认 {@code onGround()} 的话，滑下坡时它每几 tick 抖成 false，carve 的身体转角就会隔几 tick
 	 * 没同步到速度上 —— 速度方向被回正拉着走一小步、又被身体甩开，坡上转起来一顿一顿。
 	 *
-	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 4 格给定
-	 * （{@link #turnDegreesPerTick}，满速算出 14.43°/tick、被上限夹到 12.0，下限 2.0）。
+	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 2 格给定
+	 * （{@link #turnDegreesPerTick}，满速算出 28.86°/tick、被上限夹到 24.0，下限 4.0）。
 	 *
-	 * <p><b>累加型，常量已按「每端各跑一次」×2</b>：拆表前单机里两端各往同一张 {@code BODY_YAW} 加一次
-	 * 同一份增量（等效 2 倍角速度），拆表后每端只写自己那张表，所以 {@code TURN_*} / {@code VEER_*}
-	 * 都翻倍，单机每 tick 的转角与拆表前逐 tick 相同（见 {@link #table}）。
+	 * <p><b>累加型，常量被翻过两次倍</b>：①拆表前单机里两端各往同一张 {@code BODY_YAW} 加一次
+	 * 同一份增量（等效 2 倍角速度），拆表后每端只写自己那张表，所以当时 {@code TURN_*} / {@code VEER_*}
+	 * 翻了一倍；②{@code af42725} 之后板轴只剩客户端一份、并同步给服务端，两端共用一根轴、每 tick 只积分
+	 * 一次，同步前那份「服务端自己再转一次、经 motion 包回到客户端」的额外旋转没有了，于是又 ×2
+	 * （半径 4.0 → 2.0 等）。两次翻倍都只有一个目的：让玩家每 tick 看到的总转角与上一次「两处同时生效」
+	 * 时一致（见 {@link #table}）。
 	 *
 	 * <p><b>板轴谁说了算</b>：客户端。<b>客户端这一端</b>照旧往 {@link #BODY_YAW_CLIENT} 累加（它是权威）；
 	 * <b>服务端这一端</b>在「收到客户端板轴的那一 tick」<b>不再累加自己的</b> —— 那份值已经是最终值
@@ -977,11 +995,11 @@ public final class SnowboardControl {
 	 * 的 {@code getBlock().getFriction()}（雪 0.6、冰 0.98、石头 0.6、灵魂沙 0.6）。算出来的 factor
 	 * 不在 (0, 1] 就认为拿不到方块摩擦，退回用原始 speed（宁可角速度偏小，也不要除出个爆表值）。
 	 *
-	 * <p><b>摩擦换算保持不变，倍率由 {@link #TURN_RADIUS_BLOCKS} 承担</b>：半径取 4 格 ＝ 拆表前 8 格 ×2，
-	 * 因为两者都只乘在同一个除法上，等效于把每 tick 的转角整体 ×2（clamp 的两端也同步 ×2，
-	 * 所以 {@code 2 × clamp(x, 1, 6) ≡ clamp(2x, 2, 12)} 逐点相等）。
-	 * <p>实际值（雪面，摩擦 0.6 → factor 0.546）：满速 0.55 → 算 14.43 → 夹到 <b>12.0</b>；
-	 * 0.30 → <b>7.87</b>；0.14 → <b>3.67</b>；0.05 → 夹到下限 <b>2.0</b>。
+	 * <p><b>摩擦换算保持不变，倍率由 {@link #TURN_RADIUS_BLOCKS} 承担</b>：半径取 2 格（两次翻倍的结果，
+	 * 见该常量的 javadoc），因为三者都只乘在同一个除法 / 同一个 clamp 上，等效于把每 tick 的转角整体 ×4
+	 * 相对最初那版（clamp 的两端也同步缩放，所以 {@code k × clamp(x, lo, hi) ≡ clamp(kx, klo, khi)} 逐点相等）。
+	 * <p>实际值（雪面，摩擦 0.6 → factor 0.546）：满速 0.55 → 算 28.86 → 夹到 <b>24.0</b>；
+	 * 0.30 → <b>15.74</b>；0.14 → <b>7.35</b>；0.10 → <b>5.25</b>；0.05 → 夹到下限 <b>4.0</b>。
 	 */
 	private static double turnDegreesPerTick(Entity entity, double speed) {
 		double factor = 0.91D;

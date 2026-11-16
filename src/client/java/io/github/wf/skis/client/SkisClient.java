@@ -227,7 +227,7 @@ public class SkisClient implements ClientModInitializer {
 	 * 把本机锁定的板轴发给服务端（{@link SnowboardAxis.Payload}，C2S）。
 	 *
 	 * <p>发送策略（为什么不是「每 tick 无条件发」）：<b>轴有变化（≥ {@link #AXIS_SYNC_MIN_STEP_DEGREES}）才发，
-	 * 外加每 {@link #AXIS_SYNC_KEEPALIVE_TICKS} tick 一次保活</b>。压刃转向时每 tick 都变（≥ 2.0°/tick），
+	 * 外加每 {@link #AXIS_SYNC_KEEPALIVE_TICKS} tick 一次保活</b>。压刃转向时每 tick 都变（≥ 4.0°/tick），
 	 * 等价于每 tick 一份 —— 也就是转向时 20 包/秒（约 440 B/s，见 SnowboardAxis 的包体：1 字节包头长度 +
 	 * 1 字节包 id + 16 字节通道名 + 4 字节 float），比原版玩家移动包（同一 tick 里本来就有一份 position 包）
 	 * 还小，完全可以接受；不转向时降到 1 包/秒。
