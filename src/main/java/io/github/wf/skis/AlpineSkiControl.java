@@ -190,10 +190,10 @@ public final class AlpineSkiControl {
 	/** <b>双板</b>：连续按住空格 <b>4</b> tick <b>之后</b>才开始累加角度（判据严格大于；短按＝纯跳跃、一点不转）。 */
 	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
-	 * <b>双板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±35° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
-	 * 直立附近也算净落）。
+	 * <b>双板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±45° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
+	 * 直立附近也算净落）。<b>±45° 与单板同值</b>（两块板各一个常量，改一块不动另一块）。
 	 */
-	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 35.0D;
+	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 45.0D;
 	/** <b>双板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
 	/** <b>双板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
@@ -240,8 +240,12 @@ public final class AlpineSkiControl {
 	 *
 	 * <p>只转方向、不动大小；按 S（刹车 / 倒滑）那一 tick 不对齐（见 {@link #shouldAlignOnGround}）。
 	 * 调手感：调「落地后方向跟上得多快」—— 180°/s 是「立刻跟上但不闪」的档；嫌跳改 5、嫌拖改 14。
+	 *
+	 * <p><b>单板也读这个值</b>：{@code SnowboardControl#alignCarveHeading} 落地后的追赶步长基准就是它
+	 * （两块板落地后回正同一个基准速度，见那边的常量 {@code ALIGN_MAX_STEP_DEGREES} 的注释）。
+	 * 所以这里不加 {@code private}（同包可见），改这个数两块板一起动。
 	 */
-	private static final double ALIGN_DEGREES_PER_TICK = 9.0D;
+	static final double ALIGN_DEGREES_PER_TICK = 9.0D;
 
 	private AlpineSkiControl() {
 	}

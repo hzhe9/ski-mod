@@ -44,7 +44,7 @@ import net.minecraft.world.phys.Vec3;
  * （[0,360)，避免数值膨胀）。
  *
  * <p><b>落地判定</b>：按「与直立的最小角距」—— a ＝ 角度对 360 取模后映射到 (−180,180]，
- * {@code |a| ≤ 该板的 FLIP_LANDING_TOLERANCE_DEGREES}（±35°）＝干净落地（角度归零、不掉速）；
+ * {@code |a| ≤ 该板的 FLIP_LANDING_TOLERANCE_DEGREES}（±45°）＝干净落地（角度归零、不掉速）；
  * 否则＝摔倒：水平速度 ×该板的 {@code CRASH_SPEED_MULTIPLIER}、向上速度归零、进入该板的
  * {@code CRASH_STUN_TICKS}（20）失控（<b>失控期间禁止起跳</b>）。多翻了几圈只要停在直立附近也算净落。
  *

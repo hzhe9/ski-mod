@@ -170,7 +170,8 @@ public final class SkiGlide {
 		if (SnowboardControl.isSnowboard(player)) {
 			SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
 			// 单板：整 tick 最后一个写速度的点 —— 速度方向每 tick 朝**板轴**限幅回正
-			// （近地 1.5 格内就生效，不需要在 carve 里，也没有入弯基准这种状态）。
+			// （只在贴地时生效 —— 空中速度方向一点都不动，落地后再朝板轴追，与双板同一条口径；
+			// 不需要在 carve 里，也没有入弯基准这种状态）。
 			// 客户端（SkisClient，只对本机玩家）跑的是同一个方法：位置是客户端权威，
 			// 客户端歪掉的方向只能由客户端自己掰回来。
 			SnowboardControl.alignCarveHeading(player, player.getLastClientInput());
@@ -513,8 +514,8 @@ public final class SkiGlide {
 	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
 	 */
 	private static void carve(ServerPlayer player) {
-		// 注意：腾空时也允许“转”（从高处落下时前后倾要能带着速度拐弯），
-		// 只有“前冲”那一口力限制在贴地时给。
+		// 注意：腾空时也允许「转」——但只转身体 / 模型（BODY_YAW 照常推进），速度方向一点不动，
+		// 落地后由 alignCarveHeading 朝板轴追（与双板同一条口径：空中改速度方向会把人拽偏）。
 		Input input = player.getLastClientInput();
 		double speed = player.getDeltaMovement().horizontalDistance();
 		if (SnowboardControl.applyCarve(player, input, speed) == 0.0F) {
@@ -616,9 +617,9 @@ public final class SkiGlide {
 	/**
 	 * 脚底到下方地面的距离（格）；往下 {@code range + 0.1} 格内探不到东西就返回一个很大的值。
 	 *
-	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它，
-	 * 单板的速度回正（{@code SnowboardControl#alignCarveHeading} 的 1.5 格近地判定）也用它。
+	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它。
 	 * 判定一律是「离地 ≤ range」而不是 {@code onGround}（滑下坡时人常常一两 tick 没踩着地）。
+	 * 单板的速度回正<b>不用它了</b>（{@code SnowboardControl#alignCarveHeading} 现在只认 {@code onGround}）。
 	 */
 	public static double groundDistance(Entity entity, double range) {
 		Level level = entity.level();

@@ -25,9 +25,10 @@ import net.minecraft.world.phys.Vec3;
  *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>12.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 2.0）；
  *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反），摆动上限
  *       {@link #VEER_MAX_DEGREES} 4.8°/tick。W / S 只转向、<b>不加力</b>。</li>
- *   <li><b>速度方向自动回正</b>：只要还贴着地（离地 1.5 格内），水平速度方向每 tick 朝<b>板轴</b>
- *       （身体左右轴，也就是单板真正的行进方向）掰 ≤12.5°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，
- *       也没有「入弯基准」这种状态。</li>
+ *   <li><b>速度方向自动回正</b>：<b>只在 {@code onGround()} 时</b>，水平速度方向每 tick 朝<b>板轴</b>
+ *       （身体左右轴，也就是单板真正的行进方向）按 {@code max(9.0°/tick, |本 tick 身体转角|)} 掰，
+ *       硬上限 45°，见 {@link #alignCarveHeading} —— 不需要在 carve 里，也没有「入弯基准」这种状态。
+ *       空中速度方向一点不动（身体 / 模型照转），落地后才开始追 —— 与双板同一条口径、同一个基准速度。</li>
  * </ul>
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
@@ -90,6 +91,17 @@ public final class SnowboardControl {
 	private static final IdMap<Integer> CARVE_TICKS_SERVER = new IdMap<>();
 	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
 	private static final IdMap<Integer> CARVE_TICKS_CLIENT = new IdMap<>();
+	/**
+	 * <b>服务端</b>那张表：实体 id → <b>本 tick 身体转过的角度</b>（度，带符号；{@link #applyCarve} 每 tick 写一次，
+	 * 没在 carve 写 0）。
+	 *
+	 * <p>只给 {@link #alignCarveHeading} 算落地回正步长用：步长取
+	 * {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK, |这个值|)} —— 速度每 tick 至少要追上身体转过的量，
+	 * 否则会重现「速度永久落在身体后面」的老 bug。两端各一张（见 {@link #table}）。
+	 */
+	private static final IdMap<Float> TURN_STEP_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：同一份语义（{@link #applyCarve} 在客户端也跑，见 {@link #table}）。 */
+	private static final IdMap<Float> TURN_STEP_CLIENT = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
@@ -146,33 +158,28 @@ public final class SnowboardControl {
 	 * 实际生效的 6.0 ×2；半径 4 格下 12° 对应 0.84 格/tick，高于单板上限 {@link #MAX_SPEED} 0.55，
 	 * 所以只在满速附近封顶）。
 	 *
-	 * <p><b>{@link #ALIGN_MAX_DEGREES_PER_TICK} 12.5 必须严格大于它</b> —— 见那个常量的注释。
+	 * <p><b>它不是回正步长的来源</b>：{@link #alignCarveHeading} 的步长是
+	 * {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK 9.0, |本 tick 身体转角|)}（见那个方法），
+	 * 所以「速度追不上身体」那条老问题由构造保证 —— 身体转角上限就是本常量。
 	 */
 	private static final double TURN_MAX_DEGREES_PER_TICK = 12.0D;
 	/**
-	 * <b>限幅回正</b>（{@link #alignCarveHeading}）每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
+	 * <b>落地回正的单步硬上限</b>（度）：{@link #alignCarveHeading} 每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
 	 *
-	 * <p><b>必须严格大于每 tick 最大身体转角</b>（{@link #TURN_MAX_DEGREES_PER_TICK} 12.0），否则速度方向
-	 * 每 tick 只能追上身体的一部分、残量越累越多，速度方向会永久落在身体后面。
+	 * <p><b>实际步长不是这个值</b>，而是 {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK 9.0, |本 tick 身体转角|)}
+	 * —— 与双板同一个基准速度（9°/tick），再让「速度不能落后于身体」这条硬性条件兜底（见
+	 * {@link #alignCarveHeading} 的 javadoc，那里写着为什么不能写死 9.0）。本常量只兜一个
+	 * <b>单次不越过半圈</b>的上限：45° &lt; 90°，所以一次旋转永远走短弧、不会绕远路。
 	 *
-	 * <p>取 <b>12.5 ＝ 12.0 + 0.5 余量</b>：拆表前这条不变量在专用服务器上<b>刚好取等</b>（6.0 vs 6.0）、
-	 * 在单机里根本<b>没成立</b>（6.0 vs 12.0 —— 身体朝向被两端各写一次，掰正步长却只有一个 6.0）。
-	 * 本批拆表 + 翻倍之后两边都满足，12.5°/tick 也意味着 180° 的偏角最多 15 tick（0.75 s）掰正 ——
-	 * 观感仍是「顺着板的方向自己滑回来了」。
+	 * <p>正常滑行碰不到它 —— 身体转角上限 {@link #TURN_MAX_DEGREES_PER_TICK} 12.0 &lt; 45（旧版那条
+	 * 「回正步长必须严格大于 12.0」的不变量（12.5）在新方案下<b>由构造保证</b>：步长取自本 tick 的实际转角，
+	 * 恒 ≥ 身体转角，不再需要一条「12.5 &gt; 12.0」的余量）。
 	 *
 	 * <p>它作用在<b>实体自己的速度方向</b>上（每端每实体各一次、不写共享表），所以<b>不属于翻倍清单</b>。
 	 */
-	private static final float ALIGN_MAX_DEGREES_PER_TICK = 12.5F;
+	private static final float ALIGN_MAX_STEP_DEGREES = 45.0F;
 	/** 与板轴的角差小于它就当作已经对上（死区：不写、不发包，防抖也防每 tick 多发一份同步）。 */
 	private static final float ALIGN_DEAD_ZONE_DEGREES = 0.05F;
-	/**
-	 * <b>回正只在近地时生效</b>：{@code onGround()} 为真，<b>或</b>脚底往下这么多格内有碰撞方块。
-	 *
-	 * <p>1.5 格是个「还贴着雪面」的宽容值 —— 滑下坡、掠过起伏时 {@code onGround} 常常一两 tick 是假，
-	 * 但这时速度方向当然还该回正；真腾空（跳跃 / 坠落）就让它保持惯性，别在空中把方向掰弯。
-	 * 探针复用 {@link SkiGlide#groundDistance}（向下 {@code range + 0.1} 格的碰撞射线，两端都能用）。
-	 */
-	private static final double ALIGN_GROUND_RANGE = 1.5D;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
 	/**
@@ -229,10 +236,10 @@ public final class SnowboardControl {
 	/** <b>单板</b>：连续按住空格 <b>4</b> tick <b>之后</b>才开始累加角度（判据严格大于；短按＝纯跳跃、一点不转）。 */
 	private static final int FLIP_HOLD_DELAY_TICKS = 4;
 	/**
-	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±35° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
-	 * 直立附近也算净落）。
+	 * <b>单板</b>：落地时与<b>直立</b>（0°/360°/720°…）的角距在 ±45° 内＝干净落地；超出＝摔倒（多翻几圈只要停在
+	 * 直立附近也算净落）。<b>±45° 与双板同值</b>（两块板各一个常量，改一块不动另一块）。
 	 */
-	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 35.0D;
+	private static final double FLIP_LANDING_TOLERANCE_DEGREES = 45.0D;
 	/** <b>单板</b>：摔倒时水平速度保留的比例（0.35 ＝ 掉 65%）。 */
 	private static final double CRASH_SPEED_MULTIPLIER = 0.35D;
 	/** <b>单板</b>：摔倒后失控多少 tick（20 tick ＝ 1 s）：转向 / 压刃 / carve / 追视角全部跳过。 */
@@ -376,6 +383,7 @@ public final class SnowboardControl {
 		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).remove(entityId);
 		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).remove(entityId);
 		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).remove(entityId);
+		table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide).remove(entityId);
 		if (!clientSide) {
 			// 「上次收到客户端板轴」的时间戳跟着服务端那张表一起清：单机里两端共用 id，
 			// 客户端清表不能顺手把服务端的时间戳也抹掉（那只影响服务端要不要再加一步自己那步）
@@ -403,6 +411,7 @@ public final class SnowboardControl {
 		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).clear();
 		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).clear();
 		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).clear();
+		table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide).clear();
 	}
 
 	/**
@@ -699,7 +708,7 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>速度方向自动回正到板轴</b>（整 tick 最后一个写速度的点）：每 tick 把水平速度方向朝
-	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，每步最多 {@link #ALIGN_MAX_DEGREES_PER_TICK} 12.5°。
+	 * <b>板轴（身体左 / 右轴，{@link #sideLocked}）</b>掰一步，步长与上限见下面「每 tick 的步长」。
 	 *
 	 * <p><b>目标量就是板轴</b>（与身体左右轴平行的那个单位向量，哪一侧由 {@link #boardSide} 定 ——
 	 * 与头朝向同一个判定）：单板是横着滑的，板轴就是实际行进方向，所以「速度方向回到板轴」＝
@@ -711,14 +720,16 @@ public final class SnowboardControl {
 	 *   <li>穿着单板（调用点只在单板分支，另用 {@link #isSnowboard} 兜一层）；</li>
 	 *   <li>不在失控里（{@link SkiAir#isStunned}）—— 摔了就不掰，让惯性自己滑停；</li>
 	 *   <li>水平速度 &gt; 1e-4（没有方向可掰）；</li>
-	 *   <li><b>近地</b>：{@code onGround()} <b>或</b>脚底往下 {@link #ALIGN_GROUND_RANGE} 1.5 格内有碰撞方块
-	 *       —— 滑下坡 / 掠过起伏时 {@code onGround} 会抖，1.5 格内一律照拉；真腾空就保持惯性；</li>
+	 *   <li><b>贴地：只认 {@code onGround()}</b> —— 空中（跳跃 / 坠落）速度方向由惯性保持，
+	 *       身体 / 模型照转（{@link #applyCarve} 只转 {@code BODY_YAW}），滑行路线一点都不弯。
+	 *       旧版那条「脚底往下 1.5 格内有方块也算近地」的宽容已删：与双板 {@code AlpineSkiControl}
+	 *       同一条口径 —— 空中只让视角 / 身体转、速度方向一点不动；</li>
 	 *   <li><b>没在顶墙</b>：{@code horizontalCollision} 为假（理由见下）。</li>
 	 * </ul>
 	 *
 	 * <p><b>怎么掰</b>：用 {@link Mth#wrapDegrees} 取「板轴方向角 − 当前速度方向角」的最短角差
 	 * （两边都按 {@code atan2(z, x)} 口径），差 ≤ {@link #ALIGN_DEAD_ZONE_DEGREES} 0.05° 就当作对上、
-	 * 不写也不发包；否则把角差夹到 ±12.5° 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
+	 * 不写也不发包；否则把角差夹到 ±{@code 步长} 后用 {@link #rotateVelocity} <b>旋转</b>水平速度
 	 * （大小与 y 都不动、{@code hurtMarked = true}）—— 不是一步写成目标角，所以偏差可见、可追、不瞬移。
 	 *
 	 * <p><b>撞墙那一 tick 不掰</b>（{@code horizontalCollision} 为真就原样返回）：{@code Entity#move} 对碰撞
@@ -726,7 +737,7 @@ public final class SnowboardControl {
 	 * 位移一点没变，却把「板轴 vs 实际位移」的夹角白白拉开一次（法线垂直于板轴时最坏 90°：沿轴分量被清掉、
 	 * 只剩垂直分量）。更糟的是它还会打断 {@code SkiGlide} 的 {@code HIT_TICKS} 连续撞墙计数（板轴被掰歪后
 	 * 下一 tick 的速度方向不再撞同一条法线），{@code MOMENTUM_HIT_TICKS_BEFORE_DECAY} 3 tick 的门槛永远攒不满，
-	 * 顶墙连该有的减速都收不到。所以顶墙期间让板轴与速度都保持原样，离开墙那一 tick 再按 12.5°/tick 收。
+	 * 顶墙连该有的减速都收不到。所以顶墙期间让板轴与速度都保持原样，离开墙那一 tick 再按正常步长收。
 	 * 注意这<b>只跳回正</b>：carve 的「身体与速度同量旋转」（{@link #applyCarve}）照跑，那不会制造夹角。
 	 *
 	 * <p><b>服务端与客户端各跑一遍</b>（{@link SkiGlide} 的单板分支 + {@code client/SkisClient} 的
@@ -739,8 +750,22 @@ public final class SnowboardControl {
 	 * <p>为什么每 tick 都要这一道：同一 tick 里还有别的写者（回落加速沿当前方向加长、动量托底、
 	 * 碰撞裁剪）会把方向拽偏，这一道是最后一个写速度的地方，收的就是这些残留。
 	 *
-	 * <p>步长 <b>必须严格大于每 tick 最大身体转角</b>（{@link #TURN_MAX_DEGREES_PER_TICK} 12.0）：身体转得比
-	 * 速度掰得快时，速度方向会永久落在身体后面追不上。12.5 &gt; 12.0，见那个常量的注释。
+	 * <p><b>每 tick 的步长 ＝ {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK 9.0, |本 tick 身体转角|)}，
+	 * 再夹到 {@link #ALIGN_MAX_STEP_DEGREES} 45°</b> —— <b>与双板同一个基准速度</b>：双板落地后是把速度方向
+	 * 朝身体前方按 {@code AlpineSkiControl.ALIGN_DEGREES_PER_TICK} 9.0°/tick 掰（{@code alignVelocity}），
+	 * 单板这里用同一个 9.0 当基准，只是目标量换成<b>板轴</b>（左 / 右，由 {@link #boardSide} 定），
+	 * 不是身体前后。
+	 *
+	 * <p><b>为什么不能写死 9.0（为什么是 max 而不是常量）</b>：单板的身体每 tick 最多转
+	 * {@link #TURN_MAX_DEGREES_PER_TICK} 12.0°（carve 按固定转弯半径算，满速就顶到 12.0），而 carve 贴地时
+	 * <b>同一份速度</b>已经被按身体转角转过一次（{@link #applyCarve}）；回正再把它朝板轴追一步。若步长恒为
+	 * 9.0 &lt; 12.0，每 tick 都留下 12.0 − 9.0 的残量、越累越多，速度方向会<b>永久</b>落在身体后面
+	 * （旧版是靠「回正上限 12.5 必须严格大于 12.0」这种两个常量的大小关系来堵）。取
+	 * {@code max(9.0, |本 tick 身体转角|)} 之后，速度每 tick 至少追上身体转过的量，残量不累积 ——
+	 * 不变量由构造保证。直行 / 没在 carve 时本 tick 转角是 0，步长就退回 9.0，与双板落地对齐完全一样。
+	 *
+	 * <p><b>为什么上限是 45°</b>：残差最多 180°，单步必须 &lt; 90° 才能保证走短弧；45° 同时远大于实际可能的
+	 * 步长（身体转角上限 12.0），所以正常滑行永远碰不到它，纯粹是兜底。
 	 */
 	public static void alignCarveHeading(Entity entity, Input keys) {
 		int entityId = entity.getId();
@@ -753,8 +778,8 @@ public final class SnowboardControl {
 		if (horizontal.length() <= 1.0E-4D) {
 			return;   // 没速度可掰
 		}
-		if (!entity.onGround() && SkiGlide.groundDistance(entity, ALIGN_GROUND_RANGE) > ALIGN_GROUND_RANGE) {
-			return;   // 真腾空了：速度方向由惯性保持，不在空中把路线掰弯
+		if (!entity.onGround()) {
+			return;   // 腾空：速度方向由惯性保持（身体 / 模型照转），滑行路线一点都不弯
 		}
 		if (entity.horizontalCollision) {
 			// 顶墙这一 tick 不掰：本 tick 掰出去的角度会被同 tick 的 move() 逐轴裁剪吃掉，
@@ -769,16 +794,25 @@ public final class SnowboardControl {
 		if (Math.abs(errDeg) <= ALIGN_DEAD_ZONE_DEGREES) {
 			return;   // 死区：差不到 0.05° 就别写、别发包（既防抖，也防每 tick 多发一份同步）
 		}
-		float stepDeg = Mth.clamp(errDeg, -ALIGN_MAX_DEGREES_PER_TICK, ALIGN_MAX_DEGREES_PER_TICK);
+		// 步长：与双板同一个基准 9.0°/tick，再让「速度不能落后于身体」兜底（max，不是写死 9.0，见本方法 javadoc），
+		// 最后夹到单次不越过半圈的硬上限（45°）。本 tick 身体转角由 applyCarve 写进 TURN_STEP_* 表。
+		float bodyTurn = Math.abs(table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide).getOrDefault(entityId, 0.0F));
+		float maxStep = Math.min(ALIGN_MAX_STEP_DEGREES,
+				(float) Math.max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK, bodyTurn));
+		float stepDeg = Mth.clamp(errDeg, -maxStep, maxStep);
 		rotateVelocity(entity, stepDeg);   // 按限幅后的角度**旋转**速度方向（大小与 y 都不动）
 	}
 
 	/**
-	 * <b>carve 一步（只转向、不加力）</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，并让
-	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）。
+	 * <b>carve 一步（只转向、不加力）</b>：把锁定的身体朝向朝那一侧转一个 tick 的量，<b>贴地时</b>再让
+	 * <b>速度方向跟着转同样的角度</b>（不是拨到侧向、也不补任何推力）；腾空只转身体 / 模型。
 	 * 服务端与客户端各跑一次，两边朝向与速度方向保持一致。
 	 *
-	 * <p>腾空也照跑（从高处落下时要能带着速度拐弯）。
+	 * <p><b>腾空时身体 / 模型照转、速度方向一点不动</b>：从高处落下时照样能转板（视角 / 身体都跟手），
+	 * 但这一 tick 的 {@code delta} <b>只写进 {@code BODY_YAW}，不旋转速度</b> —— 空中改速度方向会把人
+	 * 「拽」着走（落点跟着偏），这条口径与双板完全一致（{@code AlpineSkiControl} 空中只转身体 / 视角）。
+	 * 落地后由 {@link #alignCarveHeading} 朝<b>板轴</b>按 {@code max(9.0, |本 tick 转角|)} 追赶，
+	 * 「落地方向跟上」的手感与双板同一个基准速度。
 	 *
 	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 4 格给定
 	 * （{@link #turnDegreesPerTick}，满速算出 14.43°/tick、被上限夹到 12.0，下限 2.0）。
@@ -802,13 +836,17 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>撞墙那一 tick 也照转速度</b>（不判 {@code horizontalCollision}）：身体与速度是<b>同一个旋转</b>，
 	 * 相对夹角不变，所以不会制造离轴；回正那一步在顶墙 tick 是跳过的（见 {@link #alignCarveHeading}），
-	 * 等离开墙再收。
+	 * 等离开墙再收。（只对贴地成立 —— 腾空那一段上面说了，速度一动不动。）
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
 	public static float applyCarve(Entity entity, Input input, double speed) {
 		int entityId = entity.getId();
 		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
+		IdMap<Float> turnStep = table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide);
+		// 本 tick 的身体转角记账：默认 0（没在 carve / 提前返回都在这里归零），
+		// alignCarveHeading 用它算落地回正的步长下限（见 TURN_STEP_* 表）。
+		turnStep.put(entityId, 0.0F);
 		if (!isCarving(entityId, input, speed)) {
 			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向。
 			return 0.0F;
@@ -843,13 +881,21 @@ public final class SnowboardControl {
 			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES);
 		}
 		float delta = (float) turn;
+		// 本 tick 身体真转了多少（含「服务端收到客户端板轴那一 tick 不再自己加」的情况 ——
+		// 记的是**请求**转角，作为回正步长的下限偏保守，宁可追上一点也不落后）。
+		turnStep.put(entityId, delta);
 		// 服务端：客户端这一 tick 刚把板轴交上来 —— 那份就是最终值，别再自己加一步（见本方法 javadoc）。
 		// 客户端（clientSide）永远自己累加：它是权威，而单机里两端共用 entity id，不能拿服务端的时间戳把自己挡住。
 		if (clientSide || !clientAxisThisTick(entityId, entity.level().getGameTime())) {
 			table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
 					.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		}
-		rotateVelocity(entity, delta);   // 撞墙这一 tick 也照转：身体与速度同量旋转，夹角不变
+		if (entity.onGround()) {
+			// 贴地：身体与速度同量旋转（撞墙这一 tick 也照转，夹角不变）
+			rotateVelocity(entity, delta);
+		}
+		// 腾空：这里什么都不做 —— 身体 / 模型已经转过了（BODY_YAW），速度方向由惯性保持，
+		// 落地后由 alignCarveHeading 朝板轴追赶（与双板「空中只转身体、速度不动」同一条口径）。
 		return delta;
 	}
 
