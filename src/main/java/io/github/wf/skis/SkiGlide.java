@@ -71,7 +71,9 @@ public final class SkiGlide {
 	 *
 	 * <p><b>两板口径不同</b>：<b>单板</b>只在连续撞墙 ≥ {@link #MOMENTUM_HIT_TICKS_BEFORE_DECAY}
 	 * tick 时才生效 —— 坡面上一次 {@code horizontalCollision} 很常见（贴面滑、蹭台阶边），
-	 * 单 tick 就砍半会让整段弯回不来，真正「顶着墙」才该止损；<b>双板</b>仍是撞一下即砍
+	 * 单 tick 就砍半会让整段弯回不来，真正「顶着墙」才该止损；<b>而且正在 carve 的 tick 整段豁免</b>
+	 * （门槛与非 carve 的贴墙硬滑都保留）：转弯本身每 tick 把速度扫过方块面，连续贴面是常态而不是硬顶墙，
+	 * 见 {@code applyMomentum} 里 A-3 那段。双板仍是撞一下即砍
 	 * （不看 {@link #HIT_TICKS}，{@code horizontalCollision} 为真就乘本值）。
 	 */
 	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
@@ -408,10 +410,13 @@ public final class SkiGlide {
 		double momentum = MOMENTUM.getOrDefault(id, 0.0D);
 		Input keys = player.getLastClientInput();
 		boolean board = SnowboardControl.isSnowboard(player);   // true ＝ 单板
+		// 「这一 tick 在不在 carve」只算一次：分支里用它挑衰减常数，下面的撞墙减速也用它（见 A-3）。
+		// 判据与 applyCarve / guardCarveSpeed 完全同源（SnowboardControl.isCarving），不在这里另写一份。
+		boolean carving = board && SnowboardControl.isCarving(id, keys, speed);
 		// 动量先托住当前速度：两条分支原本各写一次这一句，提到分派之前（早退路径不读它，等价）
 		momentum = Math.max(momentum, speed);
 		Double decay = board
-				? applyMomentumSnowboard(player, id, motion, speed, keys)
+				? applyMomentumSnowboard(player, id, motion, speed, keys, carving)
 				: applyMomentumSkis(player, id, motion, speed, momentum, keys);
 		if (decay == null) {
 			return;                                             // 刹车那一 tick 已在分支里结算并返回
@@ -423,9 +428,16 @@ public final class SkiGlide {
 		// 撞墙减速（两条分支各一份口径，别共用门槛）：
 		//   单板 —— 只有**连续**顶住墙（≥ MOMENTUM_HIT_TICKS_BEFORE_DECAY tick）才砍，
 		//           坡面上偶尔一次 horizontalCollision 不该被当成撞墙砍半，否则整段弯的速度回不来；
+		//           **正在 carve 时一律不砍（A-3）**：见下面那段注释；
 		//   双板 —— 撞一下即砍（与 0bbc10c 相同：horizontalCollision 为真就乘 MOMENTUM_DECAY_ON_HIT）。
 		boolean hitDecay = player.horizontalCollision
-				&& (!board || hitTicks >= MOMENTUM_HIT_TICKS_BEFORE_DECAY);
+				&& (!board || (!carving && hitTicks >= MOMENTUM_HIT_TICKS_BEFORE_DECAY));
+		// A-3：单板 carve 期间整段豁免这次砍半（门槛 3 tick 与非 carve 的贴墙硬滑都保留）。
+		// ①「撞墙」在弯里是 carve 自己造出来的：每 tick 16° 把速度扫过方块面，弧的上坡半段速度指向坡面，
+		//    连续 3 tick horizontalCollision 是转弯的常态，不是「顶着墙硬滑」；
+		// ②砍了也回不来：momentum *= 0.5 之后，下一 tick 的 `momentum = max(momentum, speed)` 拿的是
+		//    **摩擦后**的速度（雪面 0.546×入场），所以动量永远爬不回入场速度 —— 整段弯里每次撞墙都停在
+		//    0.30，一自由就跳回 0.55（0.30 ↔ 0.55 的阶跌就是这么来的），要到出弯才彻底恢复。
 		momentum *= hitDecay ? MOMENTUM_DECAY_ON_HIT : decay;
 		momentum = Math.min(momentum, GlideSteering.maxGlideSpeed(player));   // 速度上限（按板）
 
@@ -449,15 +461,19 @@ public final class SkiGlide {
 		player.hurtMarked = true;
 	}
 
-	/** 单板分支：压刃 / 换刃 / 刹车，返回本 tick 的动量衰减；已经结算并返回时为 {@code null}。 */
+	/**
+	 * 单板分支：压刃 / 换刃 / 刹车，返回本 tick 的动量衰减；已经结算并返回时为 {@code null}。
+	 *
+	 * @param carving 这一 tick 在不在 carve（调用方 {@link #applyMomentum} 已经算过，撞墙减速也要用同一个值 ——
+	 *                见那里的 A-3；这里不再重复调 {@link SnowboardControl#isCarving}，两处判定必须逐位一致）
+	 */
 	private static Double applyMomentumSnowboard(ServerPlayer player, Integer id, Vec3 motion, double speed,
-			Input keys) {
+			Input keys, boolean carving) {
 		// ——— 单板 ———
 		double side = SnowboardControl.sideSign(keys);
 		// 正在转向（压着刃）时，反向侧压是「换刃转向」而不是刹车 ——
 		// 走刹车分支（不托底、动量被对齐成当前速度）的话，起弯那一下速度会被原版摩擦＋反向输入吃掉一大截
 		// （实测 0.5 → 0.165，占 67%），而且动量被清掉后整段弯都回不到原来的速度。
-		boolean carving = SnowboardControl.isCarving(id, keys, speed);
 		if (side != 0.0D && !carving) {
 			// 分“同向 / 反向”两种按法：
 			//   反向（向左滑时按 D）＝刹车 —— 原版横移把人往右挪、速度自然抵消，

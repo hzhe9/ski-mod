@@ -2,6 +2,7 @@ package io.github.wf.skis.mixin.client;
 
 import io.github.wf.skis.SnowboardControl;
 import net.minecraft.client.Camera;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -32,6 +33,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 写进 {@link Unique} 字段，四个注入点只读字段。原来四个注入点各算一遍 —— 每帧固定 4 个
  * {@code double[]} + 4 个 {@code Vec3}（{@code frontLocked} 内部还会 new 一个）纯为拿同一组数。
  * 数值逐位不变：四个点读的是同一份 {@code tilt} / {@code eye} / {@code front}。
+ *
+ * <p><b>本帧的两个输入都按 {@code partialTick} 插值（B-1 / B-1b：消「转向一顿一顿」）</b>：
+ * <ul>
+ *   <li><b>倾斜角</b>：{@code SnowboardControl.tiltValue(id, partialTick, true)} —— prev/cur 两个值由
+ *       {@code SnowboardControl.tickTilt} 每 tick 维护，这里做 {@code Mth.lerp(pt, prev, cur)}。
+ *       倾斜每 tick 只吃掉 25% 的残差，但满幅 15° 的一步就是相机前移 0.103 格（10.3 cm）——
+ *       起步那十来 tick 不插值就是看得见的台阶；</li>
+ *   <li><b>身体朝向</b>：{@code Mth.rotLerp(partialTick, player.yBodyRotO, player.yBodyRot)}（与
+ *       {@code CameraFlipMixin} 同一个写法）。偏移方向沿的是<b>锁定的身体朝向</b>（不是视角），而身体在
+ *       carve 时每 tick 转 16° —— 偏移半径 0.4193 格，所以相机注视点每 tick 会沿圆周跳
+ *       {@code 2 × 0.4193 × sin(Δyaw/2)}：16° → 11.7 cm、10.5° → 7.7 cm @20 Hz。这是「只要转向就抖、
+ *       且与转向角速度成正比」的那一条，插值后变成每帧一小步。</li>
+ * </ul>
+ * 注意这里<b>只读</b>：不改 {@code BODY_YAW} / 倾斜状态 / 速度，也不碰 {@code EntityTiltMixin} 的模型姿态
+ * （模型那边仍是每 tick 的 {@code tiltValue(id, true)}，见那个类的注释）。{@code yBodyRotO → yBodyRot}
+ * 是原版给单板保留的插值（{@code SkisClient} 刻意不覆盖 {@code yBodyRotO}），单板这两条链因此同一相位。
  */
 @Mixin(Camera.class)
 public abstract class CameraTiltMixin {
@@ -56,17 +73,18 @@ public abstract class CameraTiltMixin {
 	 */
 	@Inject(method = "alignWithEntity", at = @At("HEAD"))
 	private void skis$primeEyeOffset(float partialTick, CallbackInfo ci) {
-		this.skis$eyeOffset();
+		this.skis$eyeOffset(partialTick);
 	}
 
 	/** 算出本帧偏移写进 {@link Unique} 字段；不适用时只把 {@link #skis$offsetValid} 置假（零分配）。 */
 	@Unique
-	private void skis$eyeOffset() {
+	private void skis$eyeOffset(float partialTick) {
 		this.skis$offsetValid = false;
 		if (!(this.entity instanceof Player player) || !SnowboardControl.isSnowboard(player)) {
 			return;
 		}
-		float tilt = SnowboardControl.tiltValue(player.getId(), true);
+		// 帧间插值（B-1b）：倾斜本身是 20 Hz 推进的，直接读会每 tick 跳一步 —— 满幅 15° 的一步 = 10.3 cm
+		float tilt = SnowboardControl.tiltValue(player.getId(), partialTick, true);
 		if (tilt == 0.0F) {
 			return;
 		}
@@ -74,7 +92,10 @@ public abstract class CameraTiltMixin {
 		double rad = Math.toRadians(tilt * SnowboardControl.tiltDegrees());
 		double forward = eye * Math.sin(rad);        // 前倾时眼睛向前移这么多格
 		double dy = eye * (Math.cos(rad) - 1.0D);    // 高度略降
-		Vec3 front = SnowboardControl.frontLocked(player.getId(), player.getYRot(), true);   // 沿锁定的身体朝向，不是视角
+		// 帧间插值（B-1）：偏移方向沿锁定的身体朝向，与 CameraFlipMixin 同一个 rotLerp 写法。
+		// 身体 carve 时每 tick 转 16°，不插值的话注视点会沿 0.4193 格的圆每 tick 跳 11.7 cm。
+		float bodyYaw = Mth.rotLerp(partialTick, player.yBodyRotO, player.yBodyRot);
+		Vec3 front = SnowboardControl.front(bodyYaw);
 		this.skis$offsetX = front.x * forward;
 		this.skis$offsetY = dy;
 		this.skis$offsetZ = front.z * forward;

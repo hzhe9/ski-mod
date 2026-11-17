@@ -21,10 +21,10 @@ import net.minecraft.world.phys.Vec3;
  *       {@code EntityTiltMixin}），相机位置也跟着（{@code CameraTiltMixin}）；倾斜是<b>渐进</b>的
  *       （{@link #tickTilt}）而不是瞬间跳到位。只改姿态，<b>不给推进</b>。</li>
  *   <li><b>carve</b>：A / D 侧压 → 身体朝向持续转（{@link #applyCarve}）＋ 速度方向跟着转同样的角度；
- *       固定半径 {@link #TURN_RADIUS_BLOCKS} 2 格 → 满速算出 28.86°/tick、夹到
- *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>24.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 4.0）；
+ *       固定半径 {@link #TURN_RADIUS_BLOCKS} 3 格 → 满速算出 19.23°/tick、夹到
+ *       {@link #TURN_MAX_DEGREES_PER_TICK} <b>16.0°/tick</b>（下限 {@link #TURN_MIN_DEGREES_PER_TICK} 3.0）；
  *       没按 A / D 但已经在滑时，光前 / 后倾也会转（后倾＝后刃，方向相反），摆动上限
- *       {@link #VEER_MAX_DEGREES} 9.6°/tick。W / S 只转向、<b>不加力</b>。</li>
+ *       {@link #VEER_MAX_DEGREES} 6.4°/tick。W / S 只转向、<b>不加力</b>。</li>
  *   <li><b>速度方向自动回正</b>：只要处于<b>可改速度方向</b>的状态（贴地，或脚底 1.0 格内有方块且
  *       {@code vy ≤ 0} —— 见 {@link #isSpeedAlignable}），水平速度方向每 tick 朝<b>板轴</b>
  *       （身体左右轴，也就是单板真正的行进方向）按 {@code max(9.0°/tick, |本 tick 身体转角|)} 掰，
@@ -32,6 +32,15 @@ import net.minecraft.world.phys.Vec3;
  *       起跳上升段 / 真腾空 / 长距离坠落速度方向一点不动（身体 / 模型照转），落地后才开始追 ——
  *       与双板同一条口径、同一个基准速度。</li>
  * </ul>
+ *
+ * <p><b>板轴是「有符号轴」，所以空中转超过 90° 在视觉上表现为「转到极限」（C）</b>：
+ * {@code boardSide} 只能在「身体左轴 / 右轴」里二选一（±1，见 {@link #boardSide}），
+ * {@link #alignCarveHeading} 的目标量因此只有 2 个朝向、{@code wrapDegrees} 之后误差恒在 (−90°, 90°]，
+ * <b>180° 与 0° 在这个表示法里不可区分</b>。空中转板时 {@code BODY_YAW} 照常累加（没有 clamp）、
+ * 第三人称 F5 下模型会一直转，但超过 90° 之后「往哪一侧落」这件事已经由符号决定了 —— 也就是说
+ * <b>≥90° 的空中旋转在视觉上表现为转到极限，因为板轴是有符号轴</b>，这与限位无关（视角限位另有
+ * {@link #VIEW_LIMIT_DEGREES} 135、头模型幅度 {@link #SNOWBOARD_HEAD_FORWARD_DEGREES}）。
+ * 不要为了让「>90° 有意义」去掉符号 —— 那会同时废掉头朝向（{@link #headSide}）与回正方向。
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
  */
@@ -61,6 +70,17 @@ public final class SnowboardControl {
 	private static final IdMap<Float> TILT_VALUE_CLIENT = new IdMap<>();
 	/** <b>服务端</b>那张表：同一份语义（{@link #tickTilt} 只在客户端跑，见 {@link #table}）。 */
 	private static final IdMap<Float> TILT_VALUE_SERVER = new IdMap<>();
+	/**
+	 * <b>客户端</b>那张表：实体 id → 俯仰姿态的<b>上一 tick 值</b>（帧间插值的起点）。
+	 *
+	 * <p>{@link #tickTilt} 每 tick 在推进之前把当时的 {@link #TILT_VALUE_CLIENT} 抄过来，所以
+	 * 「上一 tick 值 → 本 tick 值」就是这一段要插的那一小步。渲染层（{@code CameraTiltMixin}）用
+	 * {@code Mth.lerp(partialTick, prev, cur)} 把它摊到每一帧 —— 不插值的话相机位置只能按 tick 跳，
+	 * 满速 carve 时每 tick 跳 17.4 cm（见 {@link #tiltValue(int, float, boolean)}）。
+	 */
+	private static final IdMap<Float> TILT_PREV_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Float> TILT_PREV_SERVER = new IdMap<>();
 	/** <b>客户端</b>那张表：实体 id → 俯仰姿态的目标值（+1 前倾 / 0 直立 / -1 后倾），由按键刷新。 */
 	private static final IdMap<Integer> TILT_TARGET_CLIENT = new IdMap<>();
 	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
@@ -115,16 +135,16 @@ public final class SnowboardControl {
 	 * yaw 增大 = 向右，所以朝右滑用 {@code +75}、朝左滑用 {@code -75}。
 	 */
 	public static final float SNOWBOARD_HEAD_NEUTRAL_DEGREES = 75.0F;
-	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 90} 度 —— 人俯下去，头再往外扭一点。 */
-	public static final float SNOWBOARD_HEAD_FORWARD_DEGREES = 90.0F;
+	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 135} 度 —— 人俯下去，头再往外扭一点，扭到视角限位为止。 */
+	public static final float SNOWBOARD_HEAD_FORWARD_DEGREES = 135.0F;
 	/** 按住 <b>S（后倾）</b>时的头偏角幅度：{@code 60} 度 —— 人后仰，头收回一点。 */
 	public static final float SNOWBOARD_HEAD_BACKWARD_DEGREES = 60.0F;
 	/** 当前头偏角每 tick 吃掉「与目标差距」的多少（比例项：快到位时自动变慢，不会在目标附近抖）。 */
 	private static final float HEAD_OFFSET_LERP = 0.45F;
 	/**
-	 * 每 tick 最多挪多少度（限幅项）。比例项单独用会在 150° 的左右翻转时起步冲到 60°/tick，
-	 * 所以翻转靠这一项匀速扫过去：{@code 9} → 150° 约 25 tick（≈1.25 s），经过 0°（正前方），
-	 * 看得出「头从右往左扭过去」；幅度变化（15° / 30°）够小，只吃比例项，约 9–12 tick。
+	 * 每 tick 最多挪多少度（限幅项）。比例项单独用会在 210° 的左右翻转时起步冲到 60°/tick，
+	 * 所以翻转靠这一项匀速扫过去：{@code 9} → 210° 约 23 tick（≈1.17 s），经过 0°（正前方），
+	 * 看得出「头从右往左扭过去」；幅度变化（60° / 60°）够小，只吃比例项，约 9–12 tick。
 	 */
 	private static final float HEAD_OFFSET_MAX_STEP_DEGREES = 9.0F;
 	/** 与目标的差距小于它就当作到位（收敛成干净的目标值，省掉无意义的末位抖动）。 */
@@ -137,41 +157,45 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>carve（切雪转向）的固定转弯半径</b>（格）：角速度不再是常数，而是由<b>本 tick 真正用于位移的速度</b>
-	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 2.0)} 度，一直按着就是在雪地上画同一个圆。
+	 * 决定 —— 每 tick 身体转 {@code toDegrees(vTravel / 3.0)} 度，一直按着就是在雪地上画同一个圆。
 	 *
-	 * <p>满速 0.55 格/tick 时算出来 <b>28.86°/tick</b>，被 {@link #TURN_MAX_DEGREES_PER_TICK} 24.0 夹住
-	 * （≈480°/s，半圈 7.5 tick ≈ 0.375 s）；中速 0.30 格/tick 时 <b>15.74°/tick</b>，极慢 0.05 格/tick 时触底 4.0。
+	 * <p>满速 0.55 格/tick 时算出来 <b>19.23°/tick</b>，被 {@link #TURN_MAX_DEGREES_PER_TICK} 16.0 夹住
+	 * （≈320°/s，半圈 11.25 tick ≈ 0.56 s）；中速 0.30 格/tick 时 <b>10.49°/tick</b>，极慢 0.05 格/tick 时触底 3.0。
 	 * 慢滑自然转得慢、快滑自然转得快，不会出现「慢滑也按满速角速度剃头」那种手感。
 	 *
-	 * <p><b>半径 2 而不是 8 —— 同一个「每 tick 转角」被翻过两次倍</b>（见 {@link #table}）：
+	 * <p><b>半径 3 而不是 2 —— 从 2 倍档回调到约 1.5 倍档</b>（倍率的来历见 {@link #table}）：
 	 * ①「状态表按端拆分」把同一份增量从加两次变成加一次 → 8.0 减半到 4.0；
-	 * ②{@code af42725} 又把板轴改成<b>客户端权威并同步</b>，两端从此共用同一根轴、每 tick 只前进一次。
-	 * 同步前两端各积分各的，且服务端那份旋转会经 motion 包回到客户端 —— 玩家每 tick 实际感受到的是
-	 * <b>两次之和</b>；同步后只剩一次，转速因此掉了一半（低速还被下限卡住，尤其明显）。
-	 * 所以半径再减半到 <b>2.0</b>，把「同步之前的手感」按 1:1 复原。
+	 * ②{@code af42725} 又把板轴改成<b>客户端权威并同步</b>，两端从此共用同一根轴、每 tick 只前进一次，
+	 * 于是再减半到 <b>2.0</b>，把「同步之前的手感」按 1:1 复原。
+	 * 但 2.0 这档实测<b>转得太快</b>（满速 24°/tick ≈ 480°/s，半圈 0.375 s），所以这次在 2.0 与 4.0 之间
+	 * 取 <b>3.0</b>：角速度 ＝ 上一版 ×2/3、＝「同步前那批值」的 <b>4/3 ≈ 1.33 倍</b>
+	 * （下限那端是精确 1.5 倍：3.0 / 2.0；上限 16.0 / 12.0 ＝ 1.33）。
+	 * 想再要精确的 1.5 倍档就把半径取 4.0 / 1.5 ≈ <b>2.67</b> 格，同时下限/上限取 3.0 / 18.0。
 	 */
-	private static final double TURN_RADIUS_BLOCKS = 2.0D;
+	private static final double TURN_RADIUS_BLOCKS = 3.0D;
 	/**
-	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 4° 以下，而
+	 * 每 tick 身体转角的<b>下限</b>（度）：低速时 {@code vTravel / 半径} 会掉到 3° 以下，而
 	 * {@code client/SnowSpray} 判「在转向」的门槛是 {@code TURN_DEGREES_PER_TICK} 1.0°/tick ——
-	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 <b>4.0</b>。
+	 * 低于它弯外侧的喷雪与板端簇加成就失效了。所以角速度封底 <b>3.0</b>（相对 1.0°/tick 的门槛仍留 2.0° 余量）。
 	 *
-	 * <p><b>这一项就是「初始速度低时转向非常慢」的病灶</b>：同步前两端各转 2.0°/tick，玩家每 tick 拿到
-	 * <b>4.0°</b>（90° 只需 23 tick）；{@code af42725} 之后只剩一次积分，同样的 2.0 就变成 90° 要 45 tick
-	 * （2.25 s）。封底直接写成 4.0 ＝ 同步前的每 tick 实际值，低速段一步到位复原。
+	 * <p><b>这一项曾经是「初始速度低时转向非常慢」的病灶</b>：同步前两端各转 2.0°/tick，玩家每 tick 拿到
+	 * <b>4.0°</b>；{@code af42725} 之后只剩一次积分，同时也把下限写成 4.0 复原。这次随半径一起回调到
+	 * <b>3.0</b>（＝「同步前那批值」2.0 的 <b>1.5 倍</b>，与「1.5 倍档」的口号逐字对齐）——
+	 * 低速段 90° 由 22.5 tick 变成 30 tick（1.5 s），仍然远快于「按 1.0°/tick 的封底」那种爬行。
 	 */
-	private static final double TURN_MIN_DEGREES_PER_TICK = 4.0D;
+	private static final double TURN_MIN_DEGREES_PER_TICK = 3.0D;
 	/**
-	 * 每 tick 身体转角的<b>上限</b>（度）：满速算出 28.86°/tick，这里夹到 <b>24.0</b>（＝同步前两端各 12.0 之和，
-	 * 见 {@link #TURN_RADIUS_BLOCKS} 的说明；半径 2 格下 24° 对应 0.84 格/tick，高于单板上限
-	 * {@link #MAX_SPEED} 0.55，所以只在满速附近封顶）。
+	 * 每 tick 身体转角的<b>上限</b>（度）：满速算出 19.23°/tick，这里夹到 <b>16.0</b>（≈320°/s，半圈
+	 * 11.25 tick ≈ 0.56 s；半径 3 格下 16° 对应 0.84 格/tick，高于单板上限 {@link #MAX_SPEED} 0.55，
+	 * 所以只在满速附近封顶）。
 	 *
+	 * <p>它是「2 倍档 24.0」与「同步前 12.0」之间的回调值（<b>16.0 ＝ 12.0 × 4/3</b>，与半径同比例）。
 	 * <p><b>它不是回正步长的来源</b>：{@link #alignCarveHeading} 的步长是
 	 * {@code max(AlpineSkiControl.ALIGN_DEGREES_PER_TICK 9.0, |本 tick 身体转角|)}（见那个方法），
-	 * 所以「速度追不上身体」那条老问题由构造保证 —— 身体转角上限就是本常量，步长自动跟到 24.0，
+	 * 所以「速度追不上身体」那条老问题由构造保证 —— 身体转角上限就是本常量，步长自动跟到 16.0，
 	 * 仍远小于 {@link #ALIGN_MAX_STEP_DEGREES} 45.0。
 	 */
-	private static final double TURN_MAX_DEGREES_PER_TICK = 24.0D;
+	private static final double TURN_MAX_DEGREES_PER_TICK = 16.0D;
 	/**
 	 * <b>落地回正的单步硬上限</b>（度）：{@link #alignCarveHeading} 每 tick 最多把速度方向朝<b>板轴</b>掰多少度。
 	 *
@@ -339,19 +363,28 @@ public final class SnowboardControl {
 	/**
 	 * 只用 W / S 把方向朝前 / 后摆时的平滑系数：每 tick 吃掉剩余角度的这个比例。
 	 *
-	 * <p><b>0.82 ≈ 1 − (1 − 0.58)² = 0.8236，翻过两次倍</b>（见 {@link #table}）：
-	 * ①「状态表按端拆分」把两端各吃的 0.35 合成一次 → 0.58 ≈ 1 − (1 − 0.35)²；
-	 * ②{@code af42725} 板轴改为客户端权威并同步后每 tick 只收敛一次（同步前两端各收敛一次），
-	 * 所以再复合一次：1 − (1 − 0.58)² = 0.8236 → 取 <b>0.82</b>，单机每 tick 的收敛量与同步前一致。
-	 * 两次复合逐 tick 等价于「连做两步同样的收敛」，这正是同步前两端各跑一遍的效果。
+	 * <p><b>0.5467 ＝ 0.82 × 2/3，与 carve 那次回调同比（见 {@link #VEER_MAX_DEGREES}）</b>：
+	 * 它同样是「每端各跑一次」时代的复合值 —— ①两端各吃 0.35 → 复合 1 − (1 − 0.35)² = 0.5775 ≈ 0.58；
+	 * ②{@code af42725} 板轴改成客户端权威并同步后每 tick 只收敛一次，再复合一次
+	 * 1 − (1 − 0.58)² = 0.8236 → 0.82。这次 carve 的每 tick 转角回调到 2/3（{@link #TURN_RADIUS_BLOCKS}），
+	 * 摆动这一路也同比 ×2/3 → <b>0.5467</b>。
+	 *
+	 * <p><b>为什么比例项也要跟着缩</b>：每 tick 的摆角 ＝ {@code clamp(剩余角 × 本值, ±VEER_MAX)}，
+	 * 两个量都直接乘在每 tick 转角上。<b>只缩饱和步长</b>会让曲线在「大残角」段取新上限、在「小残角」
+	 * 段还是老速度 → 尾巴追得比头快，收敛形状变了（末段猛、前段钝）；两个同比缩 ⇒
+	 * 新的每 tick 摆角逐点等于旧值的 2/3（{@code k·clamp(x,lo,hi) ≡ clamp(kx,klo,khi)}），形状完全不变。
 	 */
-	private static final double VEER_SMOOTHING = 0.82D;
+	private static final double VEER_SMOOTHING = 0.5467D;
 	/**
 	 * 这个摆动每 tick 最多转多少度（平滑趋近的速度上限）。
-	 * <b>9.6</b>°/tick ＝ 192°/s（转满 180° 需 18.75 tick ≈ 0.94 s）；同步前两端各 4.8（合计 9.6），
-	 * 这一项是<b>饱和步长</b>、两次复合正好等于一次 9.6，所以 ×2 是精确等价的。
+	 * <b>6.4</b>°/tick ＝ 128°/s（转满 180° 需 28.1 tick ≈ 1.4 s）；同步前两端各 4.8（合计 9.6），
+	 * 这一项是<b>饱和步长</b>、两次复合正好等于一次 9.6，所以当年 ×2 是精确等价的。
+	 *
+	 * <p>这次与 carve 同比回调：<b>9.6 × 2/3 ＝ 6.4</b>，保持 {@code VEER_MAX / TURN_MAX = 6.4 / 16.0 = 0.4}
+	 * 这个构造比例与 2 倍档时代（9.6 / 24.0）完全一致 —— 「只压刃不按 A/D 的摆动」始终是
+	 * 「侧压 carve」的 40%，两条路的相对手感不变。
 	 */
-	private static final double VEER_MAX_DEGREES = 9.6D;
+	private static final double VEER_MAX_DEGREES = 6.4D;
 	/** 光靠前 / 后倾（没按 A / D）也能切雪的最小速度：滑得比这快就够压刃了。 */
 	private static final double CARVE_MIN_SPEED = 0.05D;
 	/** 俯仰姿态每 tick 向目标靠拢的比例（0.25 ≈ 十来个 tick 到位）—— 倾斜不是瞬间跳过去的。 */
@@ -380,6 +413,9 @@ public final class SnowboardControl {
 	 * 上限 12.0 → 24.0、{@code VEER_MAX} 4.8 → 9.6、{@code VEER_SMOOTHING} 0.58 → 0.82），
 	 * <b>只动单板</b> —— 双板的 {@code TURN_RATE_DEGREES} 4.0 / {@code VIEW_TURN_RATE_DEGREES} 4.8
 	 * 与 {@code ALIGN_DEGREES_PER_TICK} 9.0 保持拆表那批的值不变。
+	 * <b>第三次是回调（不是翻倍）</b>：2 倍档的 24°/tick 实测转得过快，{@code TURN_*} / {@code VEER_*}
+	 * 一起缩到 2 倍档的 2/3（半径 2.0 → 3.0、下限 4.0 → 3.0、上限 24.0 → 16.0、{@code VEER_MAX} 9.6 → 6.4、
+	 * {@code VEER_SMOOTHING} 0.82 → 0.5467），落点见 {@link #TURN_RADIUS_BLOCKS}。
 	 * <b>幂等写值型</b>（{@link #BOARD_SIDE_CLIENT}）、<b>只在一端跑</b>（{@code TILT_*}、{@code HEAD_OFFSET}、
 	 * {@code CARVE_*}）的表<b>不翻倍</b> —— 翻倍会让倾斜 / 头偏一次快一倍。
 	 *
@@ -415,6 +451,7 @@ public final class SnowboardControl {
 	public static void forget(int entityId, boolean clientSide) {
 		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).remove(entityId);
 		table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).remove(entityId);
+		table(TILT_PREV_CLIENT, TILT_PREV_SERVER, clientSide).remove(entityId);
 		table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide).remove(entityId);
 		table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide).remove(entityId);
 		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).remove(entityId);
@@ -443,6 +480,7 @@ public final class SnowboardControl {
 	public static void forgetAll(boolean clientSide) {
 		table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide).clear();
 		table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).clear();
+		table(TILT_PREV_CLIENT, TILT_PREV_SERVER, clientSide).clear();
 		table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide).clear();
 		table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide).clear();
 		table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).clear();
@@ -494,12 +532,19 @@ public final class SnowboardControl {
 	 *
 	 * <p>{@link #TILT_LERP} <b>不翻倍</b>：这个方法只被 {@code SkisClient} 调（客户端独有），
 	 * 服务端从不推进倾斜，所以拆表前后都是每 tick 一次。
+	 *
+	 * <p><b>同时把「推进之前的值」抄进 {@link #TILT_PREV_CLIENT}</b>：渲染层靠这一对
+	 * （prev → cur）把倾斜摊到每一帧（{@link #tiltValue(int, float, boolean)}）。写在这里而不是
+	 * 渲染层，是为了让 prev 的语义永远是「上一 tick 的值」，与 {@code yRotO → yRot} 同一口径 ——
+	 * 渲染层每帧都会跑、tick 却是 20 Hz，渲染层自己存 prev 就变成「上一帧」，插值会抖。
 	 */
 	public static void tickTilt(int entityId, boolean clientSide) {
 		IdMap<Integer> targets = table(TILT_TARGET_CLIENT, TILT_TARGET_SERVER, clientSide);
 		IdMap<Float> values = table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide);
+		IdMap<Float> prevs = table(TILT_PREV_CLIENT, TILT_PREV_SERVER, clientSide);
 		int target = targets.getOrDefault(entityId, 0);
 		float current = values.getOrDefault(entityId, 0.0F);
+		prevs.put(entityId, current);   // 本段帧间插值的起点（= 上一 tick 的值）
 		float next = current + (target - current) * TILT_LERP;
 		if (Math.abs(target - next) < TILT_EPSILON) {
 			next = target;
@@ -511,9 +556,36 @@ public final class SnowboardControl {
 		}
 	}
 
-	/** 当前俯仰姿态（平滑后的浮点值：1 = 完全前倾，-1 = 完全后倾），模型与相机用它。 */
+	/** 当前俯仰姿态（平滑后的浮点值：1 = 完全前倾，-1 = 完全后倾），模型用它（按 tick 取）。 */
 	public static float tiltValue(int entityId, boolean clientSide) {
 		return table(TILT_VALUE_CLIENT, TILT_VALUE_SERVER, clientSide).getOrDefault(entityId, 0.0F);
+	}
+
+	/**
+	 * 俯仰姿态的<b>上一 tick 值</b>（{@link #tickTilt} 每 tick 在推进之前写下）。没有记录时退回当前值
+	 * （＝这一段不插值，刚穿板那一 tick 不会从 0 扫过来）。
+	 */
+	public static float tiltValuePrev(int entityId, boolean clientSide) {
+		float current = tiltValue(entityId, clientSide);
+		return table(TILT_PREV_CLIENT, TILT_PREV_SERVER, clientSide).getOrDefault(entityId, current);
+	}
+
+	/**
+	 * <b>帧间插值后的</b>俯仰姿态：{@code Mth.lerp(partialTick, prev, cur)}。
+	 *
+	 * <p>相机位置（{@code CameraTiltMixin}）必须用这一档：眼睛的偏移是
+	 * {@code 眼高 × sin(倾斜角 × 15°)}（满倾 0.4193 格），倾斜角每 tick 最多变
+	 * {@link #TILT_LERP} 25% 的残差 —— 不插值的话起步那十来个 tick 相机每 tick 跳最多 0.103 格
+	 * （10.3 cm @20 Hz），再叠上身体在转带来的 17.4 cm/tick。
+	 *
+	 * @param partialTick 本帧的 tick 内插值 0..1（相机那边就是 {@code alignWithEntity} 收到的那个）
+	 */
+	public static float tiltValue(int entityId, float partialTick, boolean clientSide) {
+		float current = tiltValue(entityId, clientSide);
+		if (partialTick >= 1.0F) {
+			return current;
+		}
+		return Mth.lerp(partialTick, tiltValuePrev(entityId, clientSide), current);
 	}
 
 	/**
@@ -577,9 +649,9 @@ public final class SnowboardControl {
 	 * {@link #headSide} × {@link #headMagnitude}，当前值按「比例 {@link #HEAD_OFFSET_LERP} ＋ 单步上限
 	 * {@link #HEAD_OFFSET_MAX_STEP_DEGREES}」趋近目标。
 	 *
-	 * <p>比例项让快到位时自动变慢（不会在目标附近一顿一顿），限幅项把 150° 的左右翻转压成匀速扫过，
+	 * <p>比例项让快到位时自动变慢（不会在目标附近一顿一顿），限幅项把 <b>210°</b> 的左右翻转压成匀速扫过，
 	 * 中途经过 <b>0°（正前方）</b> —— 所以看到的是「头从右边慢慢扭到左边」，不是瞬间翻面。
-	 * 幅度变化（75↔90、75↔60）幅度小，只吃比例项，也是渐进的。
+	 * 幅度变化（75↔135、75↔60）幅度小，只吃比例项，也是渐进的。
 	 *
 	 * <p>首次调用（表里没这个实体）直接取目标值：刚穿板 / 刚开越肩时不做一段无意义的入场扫动。
 	 */
@@ -697,8 +769,8 @@ public final class SnowboardControl {
 	 *   <li><b>进入</b>（上一 tick 没在 carve、这一 tick {@link #isCarving} 为真）：记下
 	 *       {@code entrySpeed = 当前水平速度}，本 tick 只是记账，不动速度；</li>
 	 *   <li><b>持续期间</b>每 tick 算下限 {@code target = entrySpeed × CARVE_MOMENTUM_DECAY^持续 tick 数}；
-	 *       只有<b>没撞到方块</b>（{@code horizontalCollision} 为假）且当前水平速度 &lt; target 时，
-	 *       才把水平速度<b>缩放</b>到 target（方向沿用当前方向、y 不动）并 {@code hurtMarked = true}；</li>
+	 *       当前水平速度 &lt; target 时就把水平速度<b>缩放</b>到 target（方向沿用当前方向、y 不动）并
+	 *       {@code hurtMarked = true}；<b>撞墙那一 tick 也补</b>（见下面「撞墙那一 tick 为什么也补」）；</li>
 	 *   <li><b>退出</b>（{@link #isCarving} 变假，比如松开 W / S）：两个表一起清掉，下一段弯重新记入口速度。</li>
 	 * </ul>
 	 *
@@ -707,6 +779,18 @@ public final class SnowboardControl {
 	 * <p>用的是与动量同一个常数（现值 {@code 1.0}）：下限<b>恒等于入场速度、不衰减</b>，所以平地转向
 	 * 完全不吃摩擦 —— 用户口径「转向只改变方向、不影响速度大小」。它的意义是把<b>被截断后的恢复</b>
 	 * 锚定在入场速度上，而不是锚在被截断的那个值上（撞墙被砍半之后，下一个自由 tick 就回到入场速度）。
+	 *
+	 * <p><b>撞墙那一 tick 为什么也补（A-2）</b>：以前这里 {@code horizontalCollision} 为真就直接
+	 * {@code return}，于是弯里「每 N tick 蹭一次方块」的那几 tick 上<b>两道补速同时跳闸</b> ——
+	 * 这道下限不补，{@code alignCarveHeading} 也跳过（它顶墙时本来就不该掰方向），那一 tick 的速度就停在
+	 * 摩擦后的 {@code 0.55 × 0.546 ≈ 0.30}（−45%），下一 tick 才被补回入场速度：弯中因此出现
+	 * 0.30 ↔ 0.55 的<b>阶跌</b>（波形见 {@code docs/tuning.md}）。
+	 *
+	 * <p>现在撞墙 tick 也补，<b>但不会顶着墙推进</b>：补速是<b>沿当前方向等比缩放</b>，而
+	 * {@code Entity#move} 在这一 tick 已经把朝墙的那一维裁成了 0（逐轴裁剪），所以缩放出来的分量全在
+	 * 「碰撞后仍允许的方向」上，朝墙分量恒为 0 —— 等价于「撞墙把速度<b>改了向</b>，而不是<b>丢了速</b>」。
+	 * 上限仍是 {@link #MAX_SPEED}（target 取 {@code min(..., MAX_SPEED)}），不会冲上去。
+	 * 回正（{@link #alignCarveHeading}）仍然跳过撞墙 tick —— 那一步是<b>改方向</b>，被同 tick 的裁剪吃掉才叫白转。
 	 */
 	public static void guardCarveSpeed(ServerPlayer player) {
 		int entityId = player.getId();
@@ -731,9 +815,8 @@ public final class SnowboardControl {
 		}
 		int elapsed = carveTicks.getOrDefault(entityId, 0);
 		carveTicks.put(entityId, elapsed + 1);
-		if (player.horizontalCollision) {
-			return;   // 撞到方块这一 tick 不补（否则等于顶着墙往前推）
-		}
+		// 撞墙 tick 不再早退（见 javadoc「撞墙那一 tick 为什么也补」）：move() 已经把朝墙的分量裁成 0，
+		// 沿剩下的方向缩放不会把人往墙里推，反而正是「撞墙改向、不丢速」那一半。
 		double target = Math.min(entry * Math.pow(CARVE_MOMENTUM_DECAY, elapsed), MAX_SPEED);
 		if (speed >= target || speed <= 1.0E-6D) {
 			return;   // 已经够快（下坡加速涨上去的也算）；速度几乎为 0 时没有方向可缩放
@@ -812,7 +895,8 @@ public final class SnowboardControl {
 	 * 只剩垂直分量）。更糟的是它还会打断 {@code SkiGlide} 的 {@code HIT_TICKS} 连续撞墙计数（板轴被掰歪后
 	 * 下一 tick 的速度方向不再撞同一条法线），{@code MOMENTUM_HIT_TICKS_BEFORE_DECAY} 3 tick 的门槛永远攒不满，
 	 * 顶墙连该有的减速都收不到。所以顶墙期间让板轴与速度都保持原样，离开墙那一 tick 再按正常步长收。
-	 * 注意这<b>只跳回正</b>：carve 的「身体与速度同量旋转」（{@link #applyCarve}）照跑，那不会制造夹角。
+	 * 现在<b>两道都跳</b>：{@link #applyCarve} 的「身体与速度同量旋转」在顶墙 tick 也一并跳过（A-1），
+	 * 只剩身体 / 模型转 —— 这样「撞墙那一 tick」三项（转速度、补速、回正）不再一半生效一半不生效。
 	 *
 	 * <p><b>服务端与客户端各跑一遍</b>（{@link SkiGlide} 的单板分支 + {@code client/SkisClient} 的
 	 * {@code END_CLIENT_TICK}，客户端只对<b>本机玩家</b>跑）：26.2 里玩家位置是<b>客户端权威</b>
@@ -831,9 +915,9 @@ public final class SnowboardControl {
 	 * 不是身体前后。
 	 *
 	 * <p><b>为什么不能写死 9.0（为什么是 max 而不是常量）</b>：单板的身体每 tick 最多转
-	 * {@link #TURN_MAX_DEGREES_PER_TICK} 24.0°（carve 按固定转弯半径算，满速就顶到 24.0），而 carve 贴地时
+	 * {@link #TURN_MAX_DEGREES_PER_TICK} 16.0°（carve 按固定转弯半径算，满速就顶到 16.0），而 carve 贴地时
 	 * <b>同一份速度</b>已经被按身体转角转过一次（{@link #applyCarve}）；回正再把它朝板轴追一步。若步长恒为
-	 * 9.0 &lt; 24.0，每 tick 都留下 24.0 − 9.0 的残量、越累越多，速度方向会<b>永久</b>落在身体后面
+	 * 9.0 &lt; 16.0，每 tick 都留下 16.0 − 9.0 的残量、越累越多，速度方向会<b>永久</b>落在身体后面
 	 * （旧版是靠「回正上限 12.5 必须严格大于 12.0」这种两个常量的大小关系来堵）。取
 	 * {@code max(9.0, |本 tick 身体转角|)} 之后，速度每 tick 至少追上身体转过的量，残量不累积 ——
 	 * 不变量由构造保证。直行 / 没在 carve 时本 tick 转角是 0，步长就退回 9.0，与双板落地对齐完全一样。
@@ -893,8 +977,8 @@ public final class SnowboardControl {
 	 * 只认 {@code onGround()} 的话，滑下坡时它每几 tick 抖成 false，carve 的身体转角就会隔几 tick
 	 * 没同步到速度上 —— 速度方向被回正拉着走一小步、又被身体甩开，坡上转起来一顿一顿。
 	 *
-	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 2 格给定
-	 * （{@link #turnDegreesPerTick}，满速算出 28.86°/tick、被上限夹到 24.0，下限 4.0）。
+	 * <p>每 tick 转多少由<b>固定转弯半径</b> {@link #TURN_RADIUS_BLOCKS} 3 格给定
+	 * （{@link #turnDegreesPerTick}，满速算出 19.23°/tick、被上限夹到 16.0，下限 3.0）。
 	 *
 	 * <p><b>累加型，常量被翻过两次倍</b>：①拆表前单机里两端各往同一张 {@code BODY_YAW} 加一次
 	 * 同一份增量（等效 2 倍角速度），拆表后每端只写自己那张表，所以当时 {@code TURN_*} / {@code VEER_*}
@@ -916,9 +1000,13 @@ public final class SnowboardControl {
 	 * 速度方向最终对不对，由 {@link #alignCarveHeading} 在 tick 末尾每 tick 朝<b>板轴</b>限幅拉回来，
 	 * 与「从哪个方向进的弯」无关 —— 所以撞墙、蹭墙、从任意角度起弯都不用特殊处理。
 	 *
-	 * <p><b>撞墙那一 tick 也照转速度</b>（不判 {@code horizontalCollision}）：身体与速度是<b>同一个旋转</b>，
-	 * 相对夹角不变，所以不会制造离轴；回正那一步在顶墙 tick 是跳过的（见 {@link #alignCarveHeading}），
-	 * 等离开墙再收。（只对可改速度方向的状态成立 —— 真腾空那一段上面说了，速度一动不动。）
+	 * <p><b>撞墙那一 tick 不转速度方向（A-1）</b>，判据与回正是同一道（{@code horizontalCollision}）：
+	 * 身体照转（{@code BODY_YAW} 是模型 / 板轴，不受位移裁剪影响），但速度方向这一步跳过。
+	 * 理由与 {@link #alignCarveHeading} 顶墙跳过完全一样 —— 这一 tick 转出去的分量会在<b>同一个</b>
+	 * {@code move()} 里被逐轴裁掉（α = 速度与墙面法线的夹角，存活模长 ≈ {@code |v|·sin α}：擦边 α≈80°
+	 * 只掉 1.5%，正面 α≈20° 掉 94%），位移一点没变、速度却少了一块；而这一 tick 的补速以前也被
+	 * {@link #guardCarveSpeed} 一起跳闸 → 弯里出现一次 −45% 的阶跌。现在两道一起对齐：
+	 * <b>撞墙 tick 只有身体转</b>，速度方向等离开墙那一 tick 由回正按步长追上（≤ {@link #ALIGN_MAX_STEP_DEGREES}）。
 	 *
 	 * @return 本 tick 转过的角度（0 表示没在 carve）
 	 */
@@ -972,8 +1060,9 @@ public final class SnowboardControl {
 			table(BODY_YAW_CLIENT, BODY_YAW_SERVER, clientSide)
 					.computeIfPresent(entityId, (id, yaw) -> yaw + delta);
 		}
-		if (isSpeedAlignable(entity)) {
-			// 可改速度方向（贴地，或坡面 onGround 抖动那一 tick）：身体与速度同量旋转（撞墙这一 tick 也照转，夹角不变）
+		if (isSpeedAlignable(entity) && !entity.horizontalCollision) {
+			// 可改速度方向（贴地，或坡面 onGround 抖动那一 tick）且这一 tick 没顶墙：身体与速度同量旋转。
+			// 撞墙 tick 跳过（A-1，理由见本方法 javadoc）：转出去的分量会被同 tick 的 move() 裁掉，纯白转 + 白掉速。
 			rotateVelocity(entity, delta);
 		}
 		// 真腾空：这里什么都不做 —— 身体 / 模型已经转过了（BODY_YAW），速度方向由惯性保持，
@@ -995,11 +1084,11 @@ public final class SnowboardControl {
 	 * 的 {@code getBlock().getFriction()}（雪 0.6、冰 0.98、石头 0.6、灵魂沙 0.6）。算出来的 factor
 	 * 不在 (0, 1] 就认为拿不到方块摩擦，退回用原始 speed（宁可角速度偏小，也不要除出个爆表值）。
 	 *
-	 * <p><b>摩擦换算保持不变，倍率由 {@link #TURN_RADIUS_BLOCKS} 承担</b>：半径取 2 格（两次翻倍的结果，
-	 * 见该常量的 javadoc），因为三者都只乘在同一个除法 / 同一个 clamp 上，等效于把每 tick 的转角整体 ×4
-	 * 相对最初那版（clamp 的两端也同步缩放，所以 {@code k × clamp(x, lo, hi) ≡ clamp(kx, klo, khi)} 逐点相等）。
-	 * <p>实际值（雪面，摩擦 0.6 → factor 0.546）：满速 0.55 → 算 28.86 → 夹到 <b>24.0</b>；
-	 * 0.30 → <b>15.74</b>；0.14 → <b>7.35</b>；0.10 → <b>5.25</b>；0.05 → 夹到下限 <b>4.0</b>。
+	 * <p><b>摩擦换算保持不变，倍率由 {@link #TURN_RADIUS_BLOCKS} 承担</b>：半径取 3 格（2 倍档 2.0 回调到
+	 * 约 1.5 倍档的结果，见该常量的 javadoc），因为三者都只乘在同一个除法 / 同一个 clamp 上，等效于把每 tick
+	 * 的转角整体同比缩放（clamp 的两端也同步缩放，所以 {@code k × clamp(x, lo, hi) ≡ clamp(kx, klo, khi)} 逐点相等）。
+	 * <p>实际值（雪面，摩擦 0.6 → factor 0.546）：满速 0.55 → 算 19.23 → 夹到 <b>16.0</b>；
+	 * 0.30 → <b>10.49</b>；0.14 → <b>4.90</b>；0.10 → <b>3.50</b>；0.05 → 夹到下限 <b>3.0</b>。
 	 */
 	private static double turnDegreesPerTick(Entity entity, double speed) {
 		double factor = 0.91D;

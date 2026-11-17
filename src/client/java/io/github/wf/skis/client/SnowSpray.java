@@ -217,8 +217,8 @@ public final class SnowSpray {
 	 * 滑行方向这一 tick 转了多少度算「在转向」。
 	 *
 	 * <p><b>阈值必须低于两板最小的每 tick 转角</b>：单板 A / D carve 的角速度封底
-	 * {@code SnowboardControl.TURN_MIN_DEGREES_PER_TICK} ＝ 4.0°/tick（两板里最小的稳定转向量），阈值取 1.0° 留 3.0° 余量；
-	 * 双板 A / D 是 {@code AlpineSkiControl.TURN_RATE_DEGREES} 4.0°/tick，两板按 W / S 的最大偏转 9.6°/tick
+	 * {@code SnowboardControl.TURN_MIN_DEGREES_PER_TICK} ＝ 3.0°/tick（两板里最小的稳定转向量），阈值取 1.0° 留 2.0° 余量；
+	 * 双板 A / D 是 {@code AlpineSkiControl.TURN_RATE_DEGREES} 4.0°/tick，两板按 W / S 的最大偏转 6.4°/tick
 	 * （{@code VEER_MAX_DEGREES}）/ 4.8°/tick（{@code VIEW_TURN_RATE_DEGREES}），四档都在这条线以上。走位那种低幅方向修正
 	 * 一般不到 1°/tick，0.5° / 0.8° 的抖动不会被误判成转向。
 	 *
