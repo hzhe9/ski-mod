@@ -38,9 +38,15 @@ import net.minecraft.world.phys.Vec3;
  * {@link #alignCarveHeading} 的目标量因此只有 2 个朝向、{@code wrapDegrees} 之后误差恒在 (−90°, 90°]，
  * <b>180° 与 0° 在这个表示法里不可区分</b>。空中转板时 {@code BODY_YAW} 照常累加（没有 clamp）、
  * 第三人称 F5 下模型会一直转，但超过 90° 之后「往哪一侧落」这件事已经由符号决定了 —— 也就是说
- * <b>≥90° 的空中旋转在视觉上表现为转到极限，因为板轴是有符号轴</b>，这与限位无关（视角限位另有
- * {@link #VIEW_LIMIT_DEGREES} 135、头模型幅度 {@link #SNOWBOARD_HEAD_FORWARD_DEGREES}）。
+ * <b>≥90° 的空中旋转在视觉上表现为转到极限，因为板轴是有符号轴</b>，这与限位无关（视角本来就<b>不</b>限位，
+ * 头模型的 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135° 夹的只是模型）。
  * 不要为了让「>90° 有意义」去掉符号 —— 那会同时废掉头朝向（{@link #headSide}）与回正方向。
+ *
+ * <p><b>视角与头模型是两件事（本轮 III）</b>：单板<b>没有视角限位</b>（{@code client/SkiViewSmoothing} 对单板
+ * 不夹 —— 鼠标能转满一圈，背后也能看），但<b>头模型（渲染出来的那颗头）相对身体朝向硬夹在
+ * ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°</b>（{@link #headModelOffset}）：视角继续转、头的模型不跟
+ * （停在 135 不动，<b>不翻到另一侧</b>）—— 因为夹的是<b>连续的</b>视角偏角，不是 {@code wrapDegrees} 之后
+ * 那个 (−180°, 180°] 的值，所以转过 135° 之后既不会掉头也不会回抽。双板的 ±90° 视角限位不受影响。
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
  */
@@ -114,6 +120,14 @@ public final class SnowboardControl {
 	/** <b>客户端</b>那张表：同一份语义，见 {@link #table}。 */
 	private static final IdMap<Integer> CARVE_TICKS_CLIENT = new IdMap<>();
 	/**
+	 * <b>只在服务端写</b>（照 {@link #CLIENT_AXIS_TICK} 的做法）：实体 id → <b>上一 tick 结束时的水平速度模长</b>
+	 * （格/tick）。{@link #guardCarveSpeed} 每次跑完都记一份。
+	 *
+	 * <p>用途只有一处：<b>撞墙那一 tick 的补速上限</b>。{@code Entity#move} 的逐轴裁剪发生在实体 tick 里，
+	 * 等这里看到速度时被裁掉的那部分已经没了 —— 想知道「撞之前有多快」，只能靠上一 tick 记下的这个值。
+	 */
+	private static final IdMap<Double> CARVE_PRE_HIT_SPEED = new IdMap<>();
+	/**
 	 * <b>服务端</b>那张表：实体 id → <b>本 tick 身体转过的角度</b>（度，带符号；{@link #applyCarve} 每 tick 写一次，
 	 * 没在 carve 写 0）。
 	 *
@@ -124,18 +138,45 @@ public final class SnowboardControl {
 	private static final IdMap<Float> TURN_STEP_SERVER = new IdMap<>();
 	/** <b>客户端</b>那张表：同一份语义（{@link #applyCarve} 在客户端也跑，见 {@link #table}）。 */
 	private static final IdMap<Float> TURN_STEP_CLIENT = new IdMap<>();
+	/**
+	 * <b>客户端</b>那张表：实体 id → <b>只用 W / S 时锁存下来的每 tick 摆角</b>（度，带符号）。
+	 *
+	 * <p>见 {@link #veerStep}：<b>只按 W / S（没按 A / D）时不再每 tick 拿「速度方向到身体前/后」的实时
+	 * 误差去算</b>，而是<b>在按键组合变化的那一 tick 算一次、之后照这个值每 tick 转</b>。原因见那个方法的
+	 * javadoc：实时误差在<b>空中</b>会随身体转动归零（速度冻住、身体在转），转到 90° 就自己停住。
+	 *
+	 * <p><b>幂等写值型</b>（按键一变就覆盖一次），不是每 tick 累加，所以不在翻倍清单里。
+	 */
+	private static final IdMap<Float> VEER_STEP_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Float> VEER_STEP_SERVER = new IdMap<>();
+	/** <b>客户端</b>那张表：实体 id → 锁存 {@link #VEER_STEP_CLIENT} 时的<b>按键签名</b>（见 {@link #keySignature}）。 */
+	private static final IdMap<Integer> VEER_KEYS_CLIENT = new IdMap<>();
+	/** <b>服务端</b>那张表：同一份语义，见 {@link #table}。 */
+	private static final IdMap<Integer> VEER_KEYS_SERVER = new IdMap<>();
 
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
-	/** 头（视角）相对身体朝向能转的最大角度：左右各 {@code 135} 度，合计 270 —— 扭不到背后去。 */
-	public static final float VIEW_LIMIT_DEGREES = 135.0F;
 	/**
-	 * <b>越肩视角模式</b>下，单板头相对<b>身体朝向</b>的偏角幅度：<b>默认（没按 W / S，或 W 与 S 同按）</b>
+	 * <b>渲染头（头模型）相对身体朝向的硬上限</b>（度，左右各一份）：头模型最多扭到 <b>135°</b>，
+	 * 视角再过也停在 135（<b>不掉头、不回抽、不再跟</b>）。
+	 *
+	 * <p><b>单板的视角本身没有限位</b>（{@code client/SkiViewSmoothing} 对单板不夹，{@link #headModelOffset}
+	 * 收的是<b>连续</b>偏角）—— 用户口径：「只把头<b>模型</b>固定在左右 135 度，视角还能继续转，头不跟着转」。
+	 * 与双板 {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90°（那一条限的是<b>视角</b>，不是头模型）各自独立。
+	 *
+	 * <p><b>为什么必须夹在「连续的偏角」上、而不是 render state 里那个 {@code wrapDegrees(head−body)}</b>：
+	 * 后者恒在 (−180°, 180°]，视角转到 170° 时头停在 135，再转到 190° 就变成 −170 → 夹出来是 −135 ——
+	 * 头会<b>瞬间掉到另一侧</b>。夹在连续量上就没有这个问题（190 → 仍是 135）。
+	 */
+	public static final float HEAD_MODEL_LIMIT_DEGREES = 135.0F;
+	/**
+	 * 越肩视角模式下，单板头相对<b>身体朝向</b>的偏角幅度：<b>默认（没按 W / S，或 W 与 S 同按）</b>
 	 * 为 {@code 75} 度。符号不在这里 —— 朝哪一侧滑就朝哪一侧（见 {@link #tickHead}）：
 	 * yaw 增大 = 向右，所以朝右滑用 {@code +75}、朝左滑用 {@code -75}。
 	 */
 	public static final float SNOWBOARD_HEAD_NEUTRAL_DEGREES = 75.0F;
-	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 135} 度 —— 人俯下去，头再往外扭一点，扭到视角限位为止。 */
+	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 135} 度 —— 人俯下去，头再往外扭一点，扭到头模型限位为止。 */
 	public static final float SNOWBOARD_HEAD_FORWARD_DEGREES = 135.0F;
 	/** 按住 <b>S（后倾）</b>时的头偏角幅度：{@code 60} 度 —— 人后仰，头收回一点。 */
 	public static final float SNOWBOARD_HEAD_BACKWARD_DEGREES = 60.0F;
@@ -154,6 +195,18 @@ public final class SnowboardControl {
 	 * 改看 A / D 输入，再没有就锁存上一次的判定（一停下来头不能自己回正）。
 	 */
 	private static final double HEAD_SIDE_MIN_SPEED = 0.05D;
+	/**
+	 * <b>换边</b>所需的侧向分量（格/tick）：<b>已经判定某一侧</b>之后，反向分量要涨到这么高才允许翻符号，
+	 * 否则一直停在锁存的那一侧（滞后）。
+	 *
+	 * <p><b>为什么需要它（本轮 II 的第二个病灶）</b>：{@code boardSide} 靠「速度 × 身体左轴」定符号，
+	 * 而<b>空中速度是冻住的</b>；身体转到 <b>90°</b>（板轴与速度垂直）时那个侧向分量正好<b>过零</b>——
+	 * 于是每一 tick 都在零附近翻符号：{@code boardSide} 翻 → {@code headSide} 翻 → {@link #tickHead} 的
+	 * 目标瞬间反 180°（视觉上就是「卡住 + 头乱摆」），{@link #alignCarveHeading} 的目标轴也跟着翻。
+	 * 0.20 ≈ 满速 0.55 的 36%：翻转要求「确实已经滑到另一侧去了」，在 0 附近抖不动。
+	 * 侧向分量 <b>只用来初始化</b>（首次判定仍用 {@link #HEAD_SIDE_MIN_SPEED} 0.05）。
+	 */
+	private static final double HEAD_SIDE_SWITCH_MIN_SPEED = 0.20D;
 
 	/**
 	 * <b>carve（切雪转向）的固定转弯半径</b>（格）：角速度不再是常数，而是由<b>本 tick 真正用于位移的速度</b>
@@ -235,6 +288,18 @@ public final class SnowboardControl {
 	private static final double NEAR_GROUND_RANGE = 1.0D;
 	// 注意：W / S <b>只转向、不加力</b> —— W / S 改的是速度的方向，不往速度向量上加量。
 	// 所以这里没有 carve 推力常量 —— 滑行的速度快慢只由下落加速与地面推进决定，前后倾只改方向。
+	/**
+	 * <b>撞墙那一 tick 的补速倍率上限</b>（倍）：{@link #guardCarveSpeed} 在 {@code horizontalCollision}
+	 * 为真的那一 tick，最多把<b>裁剪后剩下的</b>水平速度放大这么多。
+	 *
+	 * <p>含义 ＝「不把被墙裁掉的那块加回来」：{@code move()} 逐轴裁剪后只剩 {@code |v|·sin α × 摩擦}
+	 * （α ＝ 速度与墙面法线的夹角），要补回满速需要的倍率是 {@code 1 / (0.546 · sin α)} ——
+	 * <b>30° 需 3.67、60° 需 2.12、85° 需 1.15，而 5° 需 21</b>。取 4.0 恰好覆盖到 α ≥ 27.3°：
+	 * 弯里蹭墙（30°–60°，上一轮修过的「不阶跌」）照样补满，近正面撞（α ≈ 5°）则按裁剪真实掉速
+	 * （0.048 → 0.19，改前是 11.5 倍弹回 0.55）。<b>别往下调到 3.6 以下</b>：30° 那一档立刻变回
+	 * 上一轮那个 0.30 ↔ 0.55 的阶跌。
+	 */
+	private static final double CARVE_HIT_BOOST_MAX = 4.0D;
 	/**
 	 * 单板速度上限（格/tick）。
 	 *
@@ -373,6 +438,10 @@ public final class SnowboardControl {
 	 * 两个量都直接乘在每 tick 转角上。<b>只缩饱和步长</b>会让曲线在「大残角」段取新上限、在「小残角」
 	 * 段还是老速度 → 尾巴追得比头快，收敛形状变了（末段猛、前段钝）；两个同比缩 ⇒
 	 * 新的每 tick 摆角逐点等于旧值的 2/3（{@code k·clamp(x,lo,hi) ≡ clamp(kx,klo,khi)}），形状完全不变。
+	 *
+	 * <p><b>本轮起它只在「按键组合变化」的那一 tick 参与一次</b>（{@link #veerStep} 把它算出的结果<b>锁存</b>）：
+	 * 每 tick 都不再重算，所以它现在决定的是「按下 W / S 那一刻的起步摆角」，起手形状与以前逐位相同
+	 * （满速时剩余角恒为 90°，{@code 90 × 0.5467 = 49.2} → 夹到 {@link #VEER_MAX_DEGREES} 6.4）。
 	 */
 	private static final double VEER_SMOOTHING = 0.5467D;
 	/**
@@ -458,10 +527,14 @@ public final class SnowboardControl {
 		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).remove(entityId);
 		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).remove(entityId);
 		table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide).remove(entityId);
+		table(VEER_STEP_CLIENT, VEER_STEP_SERVER, clientSide).remove(entityId);
+		table(VEER_KEYS_CLIENT, VEER_KEYS_SERVER, clientSide).remove(entityId);
 		if (!clientSide) {
 			// 「上次收到客户端板轴」的时间戳跟着服务端那张表一起清：单机里两端共用 id，
 			// 客户端清表不能顺手把服务端的时间戳也抹掉（那只影响服务端要不要再加一步自己那步）
 			CLIENT_AXIS_TICK.remove(entityId);
+			// 「撞墙前的速度」只在服务端维护（见 CARVE_PRE_HIT_SPEED）
+			CARVE_PRE_HIT_SPEED.remove(entityId);
 		}
 		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
 		if (clientSide) {
@@ -487,6 +560,11 @@ public final class SnowboardControl {
 		table(CARVE_SPEED_CLIENT, CARVE_SPEED_SERVER, clientSide).clear();
 		table(CARVE_TICKS_CLIENT, CARVE_TICKS_SERVER, clientSide).clear();
 		table(TURN_STEP_CLIENT, TURN_STEP_SERVER, clientSide).clear();
+		table(VEER_STEP_CLIENT, VEER_STEP_SERVER, clientSide).clear();
+		table(VEER_KEYS_CLIENT, VEER_KEYS_SERVER, clientSide).clear();
+		if (!clientSide) {
+			CARVE_PRE_HIT_SPEED.clear();
+		}
 	}
 
 	/**
@@ -612,6 +690,12 @@ public final class SnowboardControl {
 	 * 分量 ≥ {@link #HEAD_SIDE_MIN_SPEED} 就用它（往身体左侧滑 → +1）；
 	 * ② 分量太小就看 <b>A / D</b>（{@link #sideSign}，A = 左 → +1）；
 	 * ③ 两者都拿不到就<b>锁存</b>上一次的判定（停下来也不能自己换边）。
+	 *
+	 * <p><b>已判定之后换边要更强的分量（滞后，本轮 II）</b>：反向分量得涨到
+	 * {@link #HEAD_SIDE_SWITCH_MIN_SPEED} 0.20 才允许翻符号。原来只要 0.05 就翻，而空中速度是冻住的 ——
+	 * 身体转到 90°（板轴与速度垂直）时那个侧向分量<b>正好过零</b>，于是 {@code boardSide} 每 tick 在
+	 * 零附近翻符号，{@link #headSide} 跟着翻，{@link #tickHead} 的目标每 tick 反 180°（「卡在 90° 还抖」）。
+	 * 现在侧向分量只用于<b>初始化</b>，过零不再改判。
 	 */
 	public static int boardSide(Entity entity, Input input) {
 		int entityId = entity.getId();
@@ -622,13 +706,19 @@ public final class SnowboardControl {
 		double lateral = horizontal.dot(sideLocked(entityId, entity.getYRot(), 1.0D, clientSide));
 		double press = sideSign(input);
 		IdMap<Integer> sides = table(BOARD_SIDE_CLIENT, BOARD_SIDE_SERVER, clientSide);
+		Integer held = sides.get(entityId);
 		int side;
 		if (Math.abs(lateral) >= HEAD_SIDE_MIN_SPEED) {
-			side = lateral > 0.0D ? 1 : -1;   // 往身体左侧滑 → +1（左轴）
+			int observed = lateral > 0.0D ? 1 : -1;   // 往身体左侧滑 → +1（左轴）
+			// 滞后的那一刀：已经判定过、方向又反了时，反向分量必须超过更高的门槛才换边。
+			// 跨过 90°（板轴与速度垂直）时分量恰好过零 —— 那里不换边，头朝向因此不跳。
+			boolean switching = held == null || observed == held
+					|| Math.abs(lateral) >= HEAD_SIDE_SWITCH_MIN_SPEED;
+			side = switching ? observed : held;
 		} else if (press != 0.0D) {
 			side = press > 0.0D ? 1 : -1;
 		} else {
-			return sides.getOrDefault(entityId, -1);   // 锁存（默认身体右轴，与旧的「头默认朝右」同侧）
+			return held != null ? held : -1;   // 锁存（默认身体右轴，与旧的「头默认朝右」同侧）
 		}
 		sides.put(entityId, side);
 		return side;
@@ -677,6 +767,30 @@ public final class SnowboardControl {
 	 */
 	public static float headOffset(int entityId, boolean clientSide) {
 		return table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide).getOrDefault(entityId, 0.0F);
+	}
+
+	/**
+	 * <b>头模型（渲染出来的头）相对身体朝向的 yaw</b>（度）：把<b>连续的</b>视角偏角硬夹在
+	 * ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°。
+	 *
+	 * <p>调用点：{@code client/SkisClient} 每 tick 对本机玩家写 {@code yHeadRot = 身体朝向 + 本方法(...)}，
+	 * 且<b>只在非越肩视角下</b>（越肩下头朝横移方向，另有一套）。渲染侧拿到的就是
+	 * {@code wrapDegrees(yHeadRot − yBodyRot)}（{@code LivingEntityRenderer#extractRenderState} 的
+	 * {@code state.yRot}），落进 {@code HumanoidModel#setupAnim} 的 {@code head.yRot}。
+	 *
+	 * <p><b>为什么夹这里、而不是在渲染层夹 {@code state.yRot}</b>：那边已经是 {@code wrapDegrees} 之后的
+	 * (−180°, 180°]，视角过 180° 时会跳到 −170 那一侧，夹出来是 −135 —— 头会<b>掉头</b>。这里的入参是
+	 * {@code SkiViewSmoothing} 那个<b>不绕圈</b>的偏角（0 → 170 → 190 → … 一直累加），夹在它上面
+	 * 才能「转过 135° 之后停在 135 不动」。
+	 *
+	 * @param viewOffsetDegrees 视角相对身体朝向的连续偏角（度，可以 &gt; 180 / &lt; −180）
+	 * @return 头模型相对身体朝向的 yaw（度，恒在 ±135）
+	 */
+	public static float headModelOffset(float viewOffsetDegrees) {
+		if (!Float.isFinite(viewOffsetDegrees)) {
+			return viewOffsetDegrees;   // 还没接手（NaN）：调用方自己跳过，别把 NaN 写进朝向
+		}
+		return Mth.clamp(viewOffsetDegrees, -HEAD_MODEL_LIMIT_DEGREES, HEAD_MODEL_LIMIT_DEGREES);
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link GlideSteering} 的约定一致。 */
@@ -791,6 +905,23 @@ public final class SnowboardControl {
 	 * 「碰撞后仍允许的方向」上，朝墙分量恒为 0 —— 等价于「撞墙把速度<b>改了向</b>，而不是<b>丢了速</b>」。
 	 * 上限仍是 {@link #MAX_SPEED}（target 取 {@code min(..., MAX_SPEED)}），不会冲上去。
 	 * 回正（{@link #alignCarveHeading}）仍然跳过撞墙 tick —— 那一步是<b>改方向</b>，被同 tick 的裁剪吃掉才叫白转。
+	 *
+	 * <p><b>撞墙 tick 的补速封顶（本轮 I）</b>：等比缩放的倍率 {@code keep = target / speed} 以前<b>没有上限</b>，
+	 * 而近正面撞墙时 {@code move()} 把朝墙分量裁到近零（α ≈ 5° 时只剩 {@code |v|·sin α ≈ 0.048}），
+	 * 于是 {@code keep ≈ 0.55 / 0.048 ≈ 11.5} —— 一 tick 内把人「弹」回满速沿墙滑出去。现在撞墙那一 tick
+	 * 的 target 再夹两道：
+	 * <ol>
+	 *   <li>{@code ≤ CARVE_PRE_HIT_SPEED} —— <b>撞墙前那一 tick 的实测速度模长</b>（“补速不得超过撞前速度”）；</li>
+	 *   <li>{@code ≤ speed × }{@link #CARVE_HIT_BOOST_MAX} 4.0 —— 单次最多把<b>剩下的</b>速度放大 4 倍。</li>
+	 * </ol>
+	 * 第二条是「不把朝墙分量加回来」的量化口径：只剩 {@code |v|·sin α × 摩擦} 时，要补回满速需要的倍率是
+	 * {@code 1 / (0.546 · sin α)} —— 30° 需 3.67、60° 需 2.12、85° 需 1.15，而 5° 需 21。
+	 * 取 <b>4.0</b> 恰好覆盖到 <b>α ≥ 27.3°</b>（30° 那一档留 2.7° 余量，所以上一轮修掉的「弯中 0.30 ↔ 0.55
+	 * 阶跌」不会回退 —— 弯里蹭墙的入射角就在 30°–60°），更陡的正面撞则<b>按墙的裁剪掉速</b>（5° 时只补到
+	 * {@code 4 × 0.048 = 0.19}，撞完确实慢下来）。
+	 *
+	 * <p>非撞墙 tick <b>没有任何新上限</b>：这时没有东西被裁掉，{@code target} 就是「入场速度」这条下限，
+	 * 恢复撞墙丢掉的速度靠的正是它。
 	 */
 	public static void guardCarveSpeed(ServerPlayer player) {
 		int entityId = player.getId();
@@ -804,6 +935,7 @@ public final class SnowboardControl {
 		if (!isCarving(entityId, keys, speed)) {
 			carveSpeed.remove(entityId);
 			carveTicks.remove(entityId);
+			CARVE_PRE_HIT_SPEED.remove(entityId);
 			return;
 		}
 		Double entry = carveSpeed.get(entityId);
@@ -811,6 +943,7 @@ public final class SnowboardControl {
 			// 进入 carve 这一 tick：只记入口速度（下限就等于当前速度，不必动速度）
 			carveSpeed.put(entityId, speed);
 			carveTicks.put(entityId, 0);
+			CARVE_PRE_HIT_SPEED.put(entityId, speed);
 			return;
 		}
 		int elapsed = carveTicks.getOrDefault(entityId, 0);
@@ -818,12 +951,20 @@ public final class SnowboardControl {
 		// 撞墙 tick 不再早退（见 javadoc「撞墙那一 tick 为什么也补」）：move() 已经把朝墙的分量裁成 0，
 		// 沿剩下的方向缩放不会把人往墙里推，反而正是「撞墙改向、不丢速」那一半。
 		double target = Math.min(entry * Math.pow(CARVE_MOMENTUM_DECAY, elapsed), MAX_SPEED);
-		if (speed >= target || speed <= 1.0E-6D) {
-			return;   // 已经够快（下坡加速涨上去的也算）；速度几乎为 0 时没有方向可缩放
+		if (player.horizontalCollision) {
+			// 撞墙这一 tick 才封顶：① 不超过撞前速度（上一 tick 的实测值）；② 单次最多放大 4 倍
+			//（= 不把被墙裁掉的那块加回来，见 javadoc）。两道都只作用在「被裁过」的这一 tick 上。
+			double preHit = CARVE_PRE_HIT_SPEED.getOrDefault(entityId, speed);
+			target = Math.min(target, Math.min(preHit, speed * CARVE_HIT_BOOST_MAX));
 		}
-		double keep = target / speed;
-		player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
-		player.hurtMarked = true;
+		if (speed < target && speed > 1.0E-6D) {
+			double keep = target / speed;
+			player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
+			player.hurtMarked = true;
+		}
+		// 记「本 tick 结束时的速度」＝ 下一 tick 的撞前速度。必须放在补速之后：撞墙 tick 补回来的那一段
+		// 下一 tick 还要算在「撞前」里，否则封顶会一格一格往下压（0.19 → 0.19² 那种）。
+		CARVE_PRE_HIT_SPEED.put(entityId, player.getDeltaMovement().horizontalDistance());
 	}
 
 	/**
@@ -1019,18 +1160,27 @@ public final class SnowboardControl {
 		turnStep.put(entityId, 0.0F);
 		if (!isCarving(entityId, input, speed)) {
 			// 只在“压刃”时切雪：光按 A / D 是纯横移，不转向。
+			// 逻辑上这一段没有 carve，所以 W / S 的摆角锁存也要作废（下一次按下重新按当时的几何算）。
+			forgetVeerLatch(entityId, clientSide);
 			return 0.0F;
 		}
 		double side = sideSign(input);   // A / D 的侧压：+1 左 / -1 右 / 0 没按
 		double turn;
 		if (side != 0.0D) {
 			// 有侧压：每 tick 转角由「固定转弯半径」定（{@link #turnDegreesPerTick}），
-			// 后倾（S）＝后刃（反向）。
+			// 后倾（S）＝后刃（反向）。有侧压时没有 W / S 摆角锁存的事，一并清掉 ——
+			// 松开 A / D 回到「只按 W / S」时要按那时的几何重新锁存，不能沿用上一次的。
+			forgetVeerLatch(entityId, clientSide);
 			turn = (input.backward() ? -side : side) * turnDegreesPerTick(entity, speed);
 		} else {
 			// 只用前 / 后倾：把滑行方向朝 **身体前方**（W）/ **身体后方**（S）摆。
 			// 这样“往左滑”和“往右滑”按同一个键效果才一致 —— 之前用固定左 / 右转的符号，
 			// 结果是往左滑按 W 朝前、往右滑按 W 朝后 —— 同一个键在两侧滑行时给出相反效果。
+			//
+			// <b>本轮 II：每 tick 的摆角不再实时算，而是「按键组合一变就锁存一份」</b>（见 veerStep）。
+			// 实时算的写法在**空中**会自己停住：速度方向冻住、身体在转，于是「速度方向 → 身体前/后」
+			// 的剩余角随身体转动单调变小，转到 90°（板轴与速度垂直）时剩 0 —— 而且 wrapDegrees 在
+			// ±180 那里的跳变会让它先撞上 180 → 每 tick 反向一次 → 就停在 90° 且抖。
 			if (speed < CARVE_MIN_SPEED) {
 				return 0.0F;
 			}
@@ -1039,16 +1189,7 @@ public final class SnowboardControl {
 			if (horizontal.lengthSqr() < 1.0E-6D) {
 				return 0.0F;
 			}
-			Vec3 front = frontLocked(entityId, entity.getYRot(), clientSide);
-			Vec3 target = input.forward() ? front : front.scale(-1.0D);
-			// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大 ＝ 向右转
-			double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
-			double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
-			double diff = Mth.wrapDegrees((float) (goal - current));
-			// 平滑趋近：步长与剩余角度成正比（快到位时自动变慢），而不是“固定步长、到了就死停”——
-			// 后者在目标附近会变成一顿一顿的：固定步长 + 到目标死停，残差小时每 tick 都在越过与停下之间跳。
-			// 结果直接就是**角度**（不再按 TURN_RATE 折算成倍数：那个常量已经删了）。
-			turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES);
+			turn = veerStep(entity, entityId, clientSide, input, horizontal);
 		}
 		float delta = (float) turn;
 		// 本 tick 身体真转了多少（含「服务端收到客户端板轴那一 tick 不再自己加」的情况 ——
@@ -1099,6 +1240,78 @@ public final class SnowboardControl {
 		double vTravel = factor > 0.0D && factor <= 1.0D ? speed / factor : speed;
 		return Mth.clamp(Math.toDegrees(vTravel / TURN_RADIUS_BLOCKS),
 				TURN_MIN_DEGREES_PER_TICK, TURN_MAX_DEGREES_PER_TICK);
+	}
+
+	/**
+	 * <b>只用 W / S（没按 A / D）时每 tick 摆多少度</b>（带符号）：<b>只在按键组合变化的那一 tick 算一次，
+	 * 之后每 tick 照同一个值转</b>（锁存在 {@link #VEER_STEP_CLIENT} / {@link #VEER_STEP_SERVER}，
+	 * 配 {@link #keySignature} 判断「按键变了没有」）。
+	 *
+	 * <p><b>为什么要锁存（本轮 II 的真因）</b>：旧写法每 tick 都用<b>实时</b>剩余角
+	 * {@code wrapDegrees(身体前/后方向角 − 速度方向角)} 算步长。贴地时速度与身体同量旋转，剩余角恒定 → 能一直转；
+	 * 但<b>空中速度是冻住的</b>（{@link #isSpeedAlignable} 为假），身体每 tick 转一步、剩余角就少一步：
+	 * 从板轴（与身体前/后差 90°）起转，<b>转过 90° 时剩余角归零</b>，摆角也归零 —— 板就停在 90°。
+	 * 而且在停下之前会先撞上 {@code wrapDegrees} 的 ±180 边界（剩余角从 +90 一路涨到 180 再跳到 −180），
+	 * 于是每 tick 反向一次 → 身体在两个值之间来回跳（用户看到的「卡住 + 画面卡顿」）。
+	 *
+	 * <p><b>锁存之后</b>：方向与幅度都固定在「按下那一刻的几何」上（满速时剩余角 90° →
+	 * {@code clamp(90 × VEER_SMOOTHING 0.5467, ±6.4) = 6.4°/tick}），身体因此<b>平滑、单调地连续转过 90°、
+	 * 180°</b>，不会每 tick 反向；角速度上限仍是 {@link #VEER_MAX_DEGREES} 6.4（远低于
+	 * {@link #TURN_MAX_DEGREES_PER_TICK} 16.0，A / D 那条路一点没变）。
+	 * 贴地时实时剩余角本来就恒定 90°，所以<b>贴地手感与锁存前逐 tick 相同</b>。
+	 *
+	 * @param horizontal 当前水平速度（非零，调用方已判）
+	 */
+	private static double veerStep(Entity entity, int entityId, boolean clientSide, Input input, Vec3 horizontal) {
+		IdMap<Float> steps = table(VEER_STEP_CLIENT, VEER_STEP_SERVER, clientSide);
+		IdMap<Integer> signatures = table(VEER_KEYS_CLIENT, VEER_KEYS_SERVER, clientSide);
+		int signature = keySignature(input);
+		Integer latchedKeys = signatures.get(entityId);
+		Float latchedStep = steps.get(entityId);
+		if (latchedKeys != null && latchedStep != null && latchedKeys == signature) {
+			return latchedStep;   // 按键没变：照锁存的那一步转（这就是「跨越 90° 不卡」的全部）
+		}
+		Vec3 front = frontLocked(entityId, entity.getYRot(), clientSide);
+		Vec3 target = input.forward() ? front : front.scale(-1.0D);
+		// 在 F(θ) = (-sinθ, cosθ) 的参数化下，方向角 = atan2(-x, z)；yaw 增大 ＝ 向右转
+		double current = Math.toDegrees(Math.atan2(-horizontal.x, horizontal.z));
+		double goal = Math.toDegrees(Math.atan2(-target.x, target.z));
+		double diff = Mth.wrapDegrees((float) (goal - current));
+		// 起手摆角：与旧写法逐位相同（剩角 × 平滑系数，夹到 ±VEER_MAX）。之后不再重算。
+		double turn = Mth.clamp(diff * VEER_SMOOTHING, -VEER_MAX_DEGREES, VEER_MAX_DEGREES);
+		signatures.put(entityId, signature);
+		steps.put(entityId, (float) turn);
+		return turn;
+	}
+
+	/** 作废这个实体的 W / S 摆角锁存（没在 carve / 按了 A / D 时调，见 {@link #veerStep}）。 */
+	private static void forgetVeerLatch(int entityId, boolean clientSide) {
+		table(VEER_STEP_CLIENT, VEER_STEP_SERVER, clientSide).remove(entityId);
+		table(VEER_KEYS_CLIENT, VEER_KEYS_SERVER, clientSide).remove(entityId);
+	}
+
+	/**
+	 * 按键组合的签名（W / S / A / D 各一位）：{@link #veerStep} 用它判断「锁存作废了没有」。
+	 * 只要按下的键组合变了（换键、松开再按、加 / 减侧压）就重新按当时的几何锁存一次。
+	 */
+	private static int keySignature(Input input) {
+		if (input == null) {
+			return 0;
+		}
+		int signature = 0;
+		if (input.forward()) {
+			signature |= 1;
+		}
+		if (input.backward()) {
+			signature |= 2;
+		}
+		if (input.left()) {
+			signature |= 4;
+		}
+		if (input.right()) {
+			signature |= 8;
+		}
+		return signature;
 	}
 
 	/**

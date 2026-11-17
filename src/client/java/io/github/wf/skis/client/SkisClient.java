@@ -196,6 +196,18 @@ public class SkisClient implements ClientModInitializer {
 			}
 			if (ShoulderSurfingCompat.isActive()) {
 				player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId(), true) : 0.0F));
+			} else if (board) {
+				// ——— 原版第三人称：<b>头模型</b>硬夹在 ±135°，视角（yRot / 相机）继续自由转 ———
+				// yHeadRot 是「头模型」的唯一来源（LivingEntityRenderer#extractRenderState 把它经
+				// wrapDegrees(yHeadRot − yBodyRot) 塞进 render state 的 yRot → HumanoidModel 的 head.yRot）。
+				// 不写这一句时原版 tickHeadTurn 每 tick 把 yHeadRot 抄成 yRot：视角转多少头就转多少（无限位）。
+				// 这里写「身体朝向 + 夹过的连续偏角」：过 135° 之后头停在 135 不动，视角照转（夹的入参是连续量，
+				// 所以不会像 wrapDegrees 那样在 180° 掉头）。NaN ＝ SkiViewSmoothing 还没接手（刚穿板那一 tick），
+				// 此时别写，留给原版。
+				float viewOffset = SkiViewSmoothing.viewOffsetDegrees();
+				if (Float.isFinite(viewOffset)) {
+					player.setYHeadRot(yaw + SnowboardControl.headModelOffset(viewOffset));
+				}
 			}
 		}
 	}

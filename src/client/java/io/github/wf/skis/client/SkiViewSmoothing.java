@@ -7,8 +7,14 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 
 /**
- * <b>视角限位的唯一权威（单板 + 双板同一套）</b>：头相对锁定的身体朝向最多左右各
- * {@link SnowboardControl#VIEW_LIMIT_DEGREES} / {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 度。
+ * <b>视角限位（只对双板生效；单板不限位）</b>：双板的头（视角）相对锁定的身体朝向最多左右各
+ * {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90 度。
+ *
+ * <p><b>单板不再限位（本轮 III）</b>：用户口径是「只把头<b>模型</b>夹在左右 135°，视角还能继续转」——
+ * 所以这里对单板<b>不夹</b>（{@link #limit} 返回无穷大），{@code headOffset} 变成一个<b>连续累加</b>的偏角
+ * （可以超过 ±180、绕整圈），{@link #viewOffsetDegrees()} 把它交出去，由
+ * {@code SnowboardControl.headModelOffset} 夹在 ±{@code HEAD_MODEL_LIMIT_DEGREES} 再写进 {@code yHeadRot}。
+ * 夹在<b>连续量</b>上是关键：渲染侧拿到的 {@code wrapDegrees(head − body)} 会绕圈，在 180° 处掉头。
  *
  * <p><b>状态只有一个</b>：{@code headOffset}（视角相对身体朝向的偏角，度）。两个入口改的都是<b>同一个标量</b>、
  * 夹的也是同一个限位，所以结构上不可能互相拉回：
@@ -161,9 +167,20 @@ public final class SkiViewSmoothing {
 		turnStart = Float.NaN;
 	}
 
-	/** 这块板的视角限位（单板 / 双板各一份常量：双板 90 / 单板 135）。 */
+	/** 这块板的视角限位：<b>双板 90°；单板不限位</b>（见类注释的「单板不再限位」）。 */
 	private static float limit(boolean snowboard) {
-		return snowboard ? SnowboardControl.VIEW_LIMIT_DEGREES : AlpineSkiControl.VIEW_LIMIT_DEGREES;
+		return snowboard ? Float.POSITIVE_INFINITY : AlpineSkiControl.VIEW_LIMIT_DEGREES;
+	}
+
+	/**
+	 * <b>视角相对身体朝向的连续偏角</b>（度；还没接手时 {@code NaN}）。
+	 *
+	 * <p>单板没有视角限位，所以这个值<b>可以超过 ±180</b>（转几圈就是几百度，一路累加），
+	 * 头模型那道硬夹正是靠它保持连续 —— 见 {@code SnowboardControl.headModelOffset}。
+	 * 双板那边它恒在 ±90 内（限位夹着），调用方不读。
+	 */
+	public static float viewOffsetDegrees() {
+		return tracked ? headOffset : Float.NaN;
 	}
 
 	/**
