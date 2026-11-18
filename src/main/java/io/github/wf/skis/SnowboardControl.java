@@ -39,14 +39,15 @@ import net.minecraft.world.phys.Vec3;
  * <b>180° 与 0° 在这个表示法里不可区分</b>。空中转板时 {@code BODY_YAW} 照常累加（没有 clamp）、
  * 第三人称 F5 下模型会一直转，但超过 90° 之后「往哪一侧落」这件事已经由符号决定了 —— 也就是说
  * <b>≥90° 的空中旋转在视觉上表现为转到极限，因为板轴是有符号轴</b>，这与限位无关（视角本来就<b>不</b>限位，
- * 头模型的 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135° 夹的只是模型）。
+ * 头模型的 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 90° 夹的只是模型）。
  * 不要为了让「>90° 有意义」去掉符号 —— 那会同时废掉头朝向（{@link #headSide}）与回正方向。
  *
  * <p><b>视角与头模型是两件事（本轮 III）</b>：单板<b>没有视角限位</b>（{@code client/SkiViewSmoothing} 对单板
  * 不夹 —— 鼠标能转满一圈，背后也能看），但<b>头模型（渲染出来的那颗头）相对身体朝向硬夹在
- * ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°</b>（{@link #headModelOffset}）：视角继续转、头的模型不跟
- * （停在 135 不动，<b>不翻到另一侧</b>）—— 因为夹的是<b>连续的</b>视角偏角，不是 {@code wrapDegrees} 之后
- * 那个 (−180°, 180°] 的值，所以转过 135° 之后既不会掉头也不会回抽。双板的 ±90° 视角限位不受影响。
+ * ±{@link #HEAD_MODEL_LIMIT_DEGREES} 90°</b>（{@link #headModelOffset}）：视角继续转、头的模型不跟
+ * （|相对角| 一到 90 就停在 90，<b>不再跟</b>）—— 夹的是 {@code Mth.wrapDegrees} 折叠后的相对角，
+ * 所以视角转过背后（相对角越过 180°）时头模型会从 +90 翻到 −90，那一下是「头最多只能扭 90°」的
+ * 必然结果，也只发生在<b>背后那一点</b>。双板的 ±90° 视角限位不受影响。
  *
  * <p>滑行物理（下落加速、低摩擦动量、雪面推进）与双板同款，在 {@link SkiGlide} 里统一施加。
  */
@@ -158,26 +159,31 @@ public final class SnowboardControl {
 	/** 前倾 / 后倾时<b>整个人连同板</b>绕脚底倾斜的角度（度）。 */
 	private static final float TILT_DEGREES = 15.0F;
 	/**
-	 * <b>渲染头（头模型）相对身体朝向的硬上限</b>（度，左右各一份）：头模型最多扭到 <b>135°</b>，
-	 * 视角再过也停在 135（<b>不掉头、不回抽、不再跟</b>）。
+	 * <b>渲染头（头模型）相对身体朝向的硬上限</b>（度，左右各一份）：头模型最多扭到 <b>90°</b> ——
+	 * 刚好到肩线（正侧方），视角再过也停在 90（<b>不再跟</b>）。
 	 *
 	 * <p><b>单板的视角本身没有限位</b>（{@code client/SkiViewSmoothing} 对单板不夹）—— 用户口径：
-	 * 「只把头<b>模型</b>固定在左右 135 度，视角还能继续转，头不跟着转」。
+	 * 「只把头<b>模型</b>固定在左右 90 度，视角还能继续转，头不跟着转」。
 	 * 与双板 {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90°（那一条限的是<b>视角</b>，不是头模型）各自独立。
 	 *
 	 * <p><b>夹之前必须先折</b>（见 {@link #headModelOffset}）：入参是任意大的角度（转几圈就是几百度），
 	 * 先 {@code Mth.wrapDegrees} 折到 (−180°, 180°] 再 {@code Mth.clamp}。夹在<b>未折叠</b>的连续累加量上
-	 * 是本轮回归的根因 —— 累加量过 135 之后被钉死在 135，而它本身不会再回到真实夹角，
+	 * 是上一轮回归的根因 —— 累加量过上限之后被钉死在上限，而它本身不会再回到真实夹角，
 	 * 于是转完一圈要反向转回去整整一圈才「解冻」（用户看到的是「头朝背后、怎么转都不动」）。
 	 */
-	public static final float HEAD_MODEL_LIMIT_DEGREES = 135.0F;
+	public static final float HEAD_MODEL_LIMIT_DEGREES = 90.0F;
 	/**
 	 * 越肩视角模式下，单板头相对<b>身体朝向</b>的偏角幅度：<b>默认（没按 W / S，或 W 与 S 同按）</b>
 	 * 为 {@code 75} 度。符号不在这里 —— 朝哪一侧滑就朝哪一侧（见 {@link #tickHead}）：
 	 * yaw 增大 = 向右，所以朝右滑用 {@code +75}、朝左滑用 {@code -75}。
 	 */
 	public static final float SNOWBOARD_HEAD_NEUTRAL_DEGREES = 75.0F;
-	/** 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 135} 度 —— 人俯下去，头再往外扭一点，扭到头模型限位为止。 */
+	/**
+	 * 按住 <b>W（前倾）</b>时的头偏角幅度：{@code 135} 度 —— 人俯下去，头再往外扭一点。
+	 *
+	 * <p>这是<b>越肩视角</b>那条路（{@link #tickHead} → {@link #headOffset}）的幅度，<b>不经过</b>
+	 * {@link #HEAD_MODEL_LIMIT_DEGREES} 的夹，所以可以大于 90；原版第三人称下的头模型仍夹在 ±90。
+	 */
 	public static final float SNOWBOARD_HEAD_FORWARD_DEGREES = 135.0F;
 	/** 按住 <b>S（后倾）</b>时的头偏角幅度：{@code 60} 度 —— 人后仰，头收回一点。 */
 	public static final float SNOWBOARD_HEAD_BACKWARD_DEGREES = 60.0F;
@@ -772,7 +778,7 @@ public final class SnowboardControl {
 
 	/**
 	 * <b>头模型（渲染出来的头）相对身体朝向的 yaw</b>（度）：把视角相对身体朝向的偏角
-	 * <b>先折到 (−180°, 180°]、再夹到 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°</b>。
+	 * <b>先折到 (−180°, 180°]、再夹到 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 90°</b>。
 	 *
 	 * <p>调用点：{@code client/SkisClient} 每 tick 对本机玩家写 {@code yHeadRot = 身体朝向 + 本方法(...)}，
 	 * 入参是<b>当场算出来的</b> {@code wrapDegrees(当前视 yaw − 身体朝向)}，且<b>只在非越肩视角 / 非乘客 /
@@ -783,16 +789,22 @@ public final class SnowboardControl {
 	 * <p><b>无状态是硬要求</b>：这个角度<b>不能</b>拿跨 tick 的累加量来夹。上一版把
 	 * {@code SkiViewSmoothing} 那个「不绕圈」的连续偏角直接夹在 ±135 上，结果是：转过一圈后累加量
 	 * 已经是 495、585…，夹出来恒为 135，而累加量自己不会回到真实夹角 —— 头模型看上去「朝背后 + 跟身体
-	 * 冻在一起」，玩家必须反向转回整整 {@code 累加量 − 135} 度（几圈）才解冻。改成每 tick 从
+	 * 冻在一起」，玩家必须反向转回整整 {@code 累加量 − 上限} 度（几圈）才解冻。改成每 tick 从
 	 * 「当前视 yaw − 身体朝向」重算、先折后夹，就没有任何跨 tick 状态可以漂。
 	 *
-	 * <p><b>先折后夹的代价（可接受）</b>：视角正对背后那一瞬（相对角 ±180°）头模型从 +135 翻到 −135 ——
-	 * 那是「头最多只能扭 135°」这条规则的必然结果，也只发生在<b>背后</b>这一点；其余角度下模型都
-	 * 严格等于折叠后的相对角，转到哪跟到哪。正好 180° 归到 +180（夹成 +135），免得 {@code wrapDegrees}
-	 * 的 {@code [-180, 180)} 把它判成 −180 → −135。
+	 * <p><b>先折后夹的代价（可接受）</b>：视角正对背后那一瞬（相对角 ±180°）头模型从 +90 翻到 −90 ——
+	 * 那是「头最多只能扭 90°、且扭的方向取折叠后那个」这条规则的必然结果，也只发生在<b>背后</b>这一点；
+	 * 其余角度下模型都严格等于「折叠后的相对角」再夹 90（|rel| ≤ 90 时就是 rel 本身，见下表）。
+	 * 正好 180° 归到 +180（夹成 +90），免得 {@code wrapDegrees} 的 {@code [-180, 180)} 把它判成
+	 * −180 → −90：在<b>正背后</b>那一点上，头朝哪边都一样，取 +90 只是为了让 179.9 → 180 连续。
+	 *
+	 * <pre>
+	 * rel    0   30   60   90  120  135  150  180  210  240  270
+	 * 头模型  0   30   60  +90  +90  +90  +90  +90  −90  −90  −90
+	 * </pre>
 	 *
 	 * @param viewOffsetDegrees 视角相对身体朝向的偏角（度；任意大小都行，转几圈就是几百度，内部先折）
-	 * @return 头模型相对身体朝向的 yaw（度，恒在 ±135）
+	 * @return 头模型相对身体朝向的 yaw（度，恒在 ±90）
 	 */
 	public static float headModelOffset(float viewOffsetDegrees) {
 		if (!Float.isFinite(viewOffsetDegrees)) {
@@ -800,7 +812,7 @@ public final class SnowboardControl {
 		}
 		float relative = Mth.wrapDegrees(viewOffsetDegrees);   // (-180, 180]
 		if (relative == -180.0F) {
-			relative = 180.0F;          // 正好半圈：算正面朝后（夹成 +135），不判成 -180
+			relative = 180.0F;          // 正好半圈：算正面朝后（夹成 +90），不判成 -180
 		}
 		return Mth.clamp(relative, -HEAD_MODEL_LIMIT_DEGREES, HEAD_MODEL_LIMIT_DEGREES);
 	}

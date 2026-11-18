@@ -58,7 +58,7 @@ public final class AlpineSkiControl {
 	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
 	 * 刚好看到正侧方，背后整片都是禁区。
 	 *
-	 * <p><b>单板没有这一项</b>：单板的视角完全不限位，135° 那个数是<b>头模型</b>的夹
+	 * <p><b>单板没有这一项</b>：单板的视角完全不限位，90° 那个数是<b>头模型</b>的夹
 	 * （{@link SnowboardControl#HEAD_MODEL_LIMIT_DEGREES}），视角继续转、模型不跟。
 	 * <b>限的是视角，不是转向</b> —— A / D 的 {@link #TURN_RATE_DEGREES} 一点没变。
 	 */

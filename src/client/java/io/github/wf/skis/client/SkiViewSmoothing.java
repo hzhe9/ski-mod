@@ -10,12 +10,12 @@ import net.minecraft.util.Mth;
  * <b>视角限位（只对双板生效；单板不限位）</b>：双板的头（视角）相对锁定的身体朝向最多左右各
  * {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90 度。
  *
- * <p><b>单板不再限位（本轮 III）</b>：用户口径是「只把头<b>模型</b>夹在左右 135°，视角还能继续转」——
+ * <p><b>单板不再限位（本轮 III）</b>：用户口径是「只把头<b>模型</b>夹在左右 90°，视角还能继续转」——
  * 所以这里对单板<b>不夹</b>（{@link #limit} 返回无穷大）。单板这颗头模型<b>不读这里的状态</b>：
  * {@code client/SkisClient} 每 tick 用「当前视 yaw − 身体朝向」现算、先 {@code Mth.wrapDegrees} 折叠、
  * 再夹 ±{@code HEAD_MODEL_LIMIT_DEGREES}（见 {@code SnowboardControl#headModelOffset}）。
  * 上一版把这个 {@code headOffset}（当时是<b>不折叠</b>的连续累加量）直接夹了写进 {@code yHeadRot}，
- * 转几圈后累加量到 495 / 585…，夹出来恒为 135、自己又回不到真实夹角 —— 头模型就被<b>永久冻在背后</b>。
+ * 转几圈后累加量到 495 / 585…，夹出来恒为上限、自己又回不到真实夹角 —— 头模型就被<b>永久冻在背后</b>。
  * 无状态的现算是那条回归的修法；这里的 {@code headOffset} 现在<b>只服务于视角本身</b>，而且每帧折回
  * (−180°, 180°]，连「漂到几百度」这个前提都不再成立。
  *

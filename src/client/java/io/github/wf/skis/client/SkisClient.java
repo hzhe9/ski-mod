@@ -197,15 +197,15 @@ public class SkisClient implements ClientModInitializer {
 			if (ShoulderSurfingCompat.isActive()) {
 				player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId(), true) : 0.0F));
 			} else if (board && !player.isPassenger() && !player.isSleeping()) {
-				// ——— 原版第三人称：<b>头模型</b>硬夹在 ±135°，视角（yRot / 相机）继续自由转 ———
+				// ——— 原版第三人称：<b>头模型</b>硬夹在 ±90°，视角（yRot / 相机）继续自由转 ———
 				// yHeadRot 是「头模型」的唯一来源（LivingEntityRenderer#extractRenderState 把它经
 				// wrapDegrees(yHeadRot − yBodyRot) 塞进 render state 的 yRot → HumanoidModel 的 head.yRot）。
 				// 不写这一句时原版 tickHeadTurn 每 tick 把 yHeadRot 抄成 yRot：视角转多少头就转多少（无限位）。
 				//
-				// <b>每 tick 现算，不读任何跨 tick 的偏角</b>：入参 = 当前视 yaw − 锁定身体朝向（+ 折叠 + 夹 135
+				// <b>每 tick 现算，不读任何跨 tick 的偏角</b>：入参 = 当前视 yaw − 锁定身体朝向（+ 折叠 + 夹 90
 				// 都在 headModelOffset 里）。上一版读 SkiViewSmoothing 的「连续累加偏角」，转几圈后那个量已经是
-				// 495 / 585…，夹出来恒为 135、且自己不会回到真实夹角 —— 头模型就永久冻在背后（用户实测的回归）。
-				// 视 yaw 与身体朝向都是这一 tick 的瞬时值，所以从 ±135 以外转回来时头当 tick 就继续跟视角。
+				// 495 / 585…，夹出来恒为上限、且自己不会回到真实夹角 —— 头模型就永久冻在背后（用户实测的回归）。
+				// 视 yaw 与身体朝向都是这一 tick 的瞬时值，所以从 ±90 以外转回来时头当 tick 就继续跟视角。
 				// 骑乘 / 睡觉时整段不写，把这几个语义留给原版（睡眠的 yHeadRot 由原版管）。
 				player.setYHeadRot(yaw
 						+ SnowboardControl.headModelOffset(player.getYRot() - yaw));

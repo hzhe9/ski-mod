@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p><b>单板不限视角、只夹头模型（本轮 III）</b>：{@code SkiViewSmoothing.limit(snowboard)} 对单板返回无穷大，
  * 所以这里两条注入对单板<b>什么也不做</b>（鼠标能转满一圈）；单板那颗<b>头模型</b>由
  * {@code client/SkisClient} 每 tick 写 {@code yHeadRot = 身体朝向 + SnowboardControl.headModelOffset(视 yaw − 身体朝向)}，
- * 内部<b>先 {@code Mth.wrapDegrees} 折叠、再夹 ±135°</b>（无状态：每 tick 现算，没有任何跨 tick 累加量）。
+ * 内部<b>先 {@code Mth.wrapDegrees} 折叠、再夹 ±90°</b>（无状态：每 tick 现算，没有任何跨 tick 累加量）。
  *
  * <p>拦的是鼠标转视角的入口 {@code Entity#turn(double, double)}：
  * <ul>
