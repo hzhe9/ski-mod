@@ -28,8 +28,8 @@ import net.minecraft.world.phys.Vec3;
  *   <tr><td>状态字段（7 个）</td>
  *       <td>{@code angle} / {@code prevAngle}（渲染插值对）、{@code holdTicks}（连续按住）、
  *       {@code flipStarted}（本段已开翻）、{@code jumpedThisAir}（本段起过跳）、
- *       {@code airTicks}（连续腾空，饱和 3）、{@code farGroundTicks}（离地 &gt; 1 格，饱和 3，
- *       只给空中站姿的混合读 —— 与 {@code airTicks} 是两个量）</td></tr>
+ *       {@code airTicks}（连续腾空，饱和 3）、{@code farGroundTicks}（离地 &gt; 2 格，饱和 3，
+ *       只给空中站姿的混合读 —— 与 {@code airTicks} 是两个量；起跳 / 空翻那一趟直接拉满）</td></tr>
  *   <tr><td>簿记（3 个）</td>
  *       <td>{@code airborne}（落地边沿）、{@code prevHoldingJump}（按下沿）、
  *       {@code wasOnGround}（默认 {@code true}，免得刚建表那一 tick 被当成落地）</td></tr>
@@ -94,14 +94,28 @@ public final class SkiAir {
 	private static final int LANDING_LOCK_MIN_AIR_TICKS = 3;
 
 	/**
+	 * <b>空中站姿专用的「还算地面」宽容</b>（格）：离地 ≤ 本值仍按地面姿势，<b>超过才开始算空中</b>。
+	 *
+	 * <p><b>与 {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 <u>不是同一个旋钮</u>，不要合并</b>：
+	 * 那个 1.0 服务的是贴地判定（carve 的速度方向能不能改 / 头偏角 / 动画），改它会连带改手感；
+	 * 本值只管<b>姿势</b>（{@link #airPoseBlend} 的那条 0 → 1 渐变）。两个数会分头调，合成一个必然互相拉扯。
+	 *
+	 * <p><b>为什么是 2.0</b>：用户口径「离地面要达到两格以上才会变成小角度姿势」—— 一格半的坡面落差 /
+	 * 贴着雪面飞过去的那一小段都还该是滑行姿势；真离地两格以上才读成「在飞」。
+	 * 起跳 / 空翻<u>不受本值约束</u>，那条路整个飞行过程恒为空中姿势（见 {@link #tickClient} 的 ⑥）。
+	 */
+	private static final double AIR_POSE_NEAR_GROUND_RANGE = 2.0D;
+
+	/**
 	 * <b>空中站姿的混合时长</b>（tick）：{@link #airPoseBlend} 用
 	 * {@code AirState#farGroundTicks / 本值} 从 0 走到 1，也就是「离地超过
-	 * {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格之后再过 3 tick 才完全变成空中姿势」。
+	 * {@link #AIR_POSE_NEAR_GROUND_RANGE} 2.0 格之后再过 3 tick 才完全变成空中姿势」。
 	 *
-	 * <p><b>计数的来源是「离地超过 1 格」，不是「连续腾空」</b>：地面判定和模组里其它几处一样带近地宽容
-	 * —— {@code onGround} 为真、<b>或</b>脚底到下方碰撞面 ≤ {@link SnowboardControl#NEAR_GROUND_RANGE}
-	 * 都算地面（{@code AirState#farGroundTicks} 只在两者都不成立时累加）。所以起跳头几 tick（离地还在
-	 * 1 格以内）仍是地面姿势，越过 1 格之后才开始混合 —— 免得「一跳即切空中姿势」那一抽。
+	 * <p><b>计数的来源是「离地超过 2 格」，不是「连续腾空」</b>：{@code AirState#farGroundTicks}
+	 * 只在 {@code onGround} 为假、且脚底到下方碰撞面 &gt; {@link #AIR_POSE_NEAR_GROUND_RANGE} 时累加。
+	 * <b>起跳 / 空翻是另一条路</b>：{@code jumpedThisAir || flipStarted} 时计数直接拉满本值
+	 * （blend 当 tick 就是 1，<b>不做</b> 3 tick 渐变、也<b>不看距离</b>）—— 所以贴地一跳
+	 * （离地不到 1 格）也是收腿的小角度姿势。
 	 *
 	 * <p>取 3 与 {@link #LANDING_LOCK_MIN_AIR_TICKS} 同值纯属巧合（一个管落地判罚、一个管观感），
 	 * <b>两个常量各自独立</b>：{@code farGroundTicks} 饱和在本值上，{@code airTicks} 饱和在
@@ -109,7 +123,7 @@ public final class SkiAir {
 	 * 「连续腾空」，落地禁跳在读它，混用会带出副作用）。
 	 *
 	 * <p>落地当 tick（{@code onGround} 为真）计数立刻归零、blend 回 0（<b>不</b>拖 3 tick ——
-	 * 那会读成「落地蹲不下去」）；离地但还在 1 格内也立刻归零。
+	 * 那会读成「落地蹲不下去」）；非跳跃腾空但还在 2 格内也立刻归零。
 	 */
 	private static final int AIR_POSE_BLEND_TICKS = 3;
 
@@ -286,7 +300,7 @@ public final class SkiAir {
 		private double angle;
 		/** 上一 tick 结束时的翻滚角（渲染插值下限）。 */
 		private double prevAngle;
-		/** 上一 tick 结束时是不是在空中（落地判定的边沿检测）。<b>严格按 {@code onGround()}</b> —— 与「空中姿势」那个 {@link #farGroundTicks}（离地 &gt; 1 格）不是一个口径，别互换。 */
+		/** 上一 tick 结束时是不是在空中（落地判定的边沿检测）。<b>严格按 {@code onGround()}</b> —— 与「空中姿势」那个 {@link #farGroundTicks}（离地 &gt; 2 格，或起跳 / 空翻全程）不是一个口径，别互换。 */
 		private boolean airborne;
 		/**
 		 * 从按下那一刻起的<b>连续按住</b>跳跃 tick 数：<b>只在松手时归零</b>（落地 / 起跳成功 / 失控都不清），
@@ -336,18 +350,20 @@ public final class SkiAir {
 		 */
 		private int airTicks;
 		/**
-		 * <b>离地超过 {@link SnowboardControl#NEAR_GROUND_RANGE}（1.0 格）已经连续多少 tick</b>
-		 * —— 贴地、或脚底到下方碰撞面 ≤ 1 格时归零，再往上累加并饱和到 {@link #AIR_POSE_BLEND_TICKS}（3）。
+		 * <b>空中站姿的计数</b>：非跳跃腾空时＝「离地超过 {@link #AIR_POSE_NEAR_GROUND_RANGE}（2.0 格）
+		 * 已经连续多少 tick」—— 贴地、或脚底到下方碰撞面 ≤ 2 格时归零，再往上累加并饱和到
+		 * {@link #AIR_POSE_BLEND_TICKS}（3）；<b>起跳 / 空翻那一趟（{@code jumpedThisAir || flipStarted}）
+		 * 直接拉满 3</b>（整个飞行过程恒为空中姿势，不看距离、不做渐变）。
 		 *
 		 * <p>唯一用途是给 {@link #airPoseBlend} 做<b>渐变</b>：{@code min(1, farGroundTicks / 3)}。
 		 * 与 {@link #airTicks} <b>不是同一个量</b>、也不借用它：
 		 * <ul>
 		 *   <li>{@code airTicks} ＝「连续 {@code onGround == false} 多少 tick」，饱和在
 		 *       {@link #LANDING_LOCK_MIN_AIR_TICKS}，落地禁跳在读它 —— 它的语义就是<b>严格腾空</b>；</li>
-		 *   <li>{@code farGroundTicks} ＝「离地超过 1 格多少 tick」，是<b>观感</b>的口径：坡面抖动、
-		 *       刚起跳那一两 tick（还在 1 格内）都算地面，姿势不动。</li>
+		 *   <li>{@code farGroundTicks} ＝「离地超过 2 格多少 tick」（跳 / 翻那一趟恒满），是<b>观感</b>的
+		 *       口径：坡面抖动、离地不到 2 格的贴面飞行都算地面，姿势不动。</li>
 		 * </ul>
-		 * 混用会串出副作用（例如把落地禁跳的门槛变成「离地 1 格 3 tick」，坡上一直不落地就永远不禁跳）。
+		 * 混用会串出副作用（例如把落地禁跳的门槛变成「离地 2 格 3 tick」，坡上一直不落地就永远不禁跳）。
 		 */
 		private int farGroundTicks;
 		/** 上一 tick 是否按住跳跃键（按下沿检测：缓冲只在「按下」那一刻充值）。 */
@@ -577,9 +593,19 @@ public final class SkiAir {
 	 * ＋ 没失控 ＋ 水平速度 ≥ 门槛，满足才加 {@code flipDegreesPerTick}（16°）并置 {@code flipStarted}。
 	 * <b>只有从地面起跳那一下</b>的前 4 个按住 tick 角度恒 0 ＝模型静止段；短按＝纯跳跃；
 	 * 空中松手定格后<b>再按立刻续上</b>（{@code holdTicks} 已归零，但 {@code flipStarted} 还在）。
-	 * ⑥ <b>空中姿势的计数</b>（{@code AirState#farGroundTicks}，只给渲染侧 {@link #airPoseBlend} 读）：
-	 * 离地 ≤ {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格仍按地面算、计数归零，越过 1 格之后
-	 * 才累加并饱和到 {@link #AIR_POSE_BLEND_TICKS}（3）；贴地那一支也把它归零。
+	 * ⑥ <b>空中姿势的计数</b>（{@code AirState#farGroundTicks}，只给渲染侧 {@link #airPoseBlend} 读），
+	 * <b>两条路</b>：
+	 * <ul>
+	 *   <li><b>跳 / 翻这一趟</b>（{@link AirState#jumpedThisAir} 或 {@link AirState#flipStarted}）——
+	 *       计数<b>直接拉满</b> {@link #AIR_POSE_BLEND_TICKS}（3）＝ blend 当 tick 就是 1，
+	 *       <b>不看距离、不做 3 tick 滞变</b>：从起跳那一刻到落地那一刻，全程都是收腿的小角度姿势。
+	 *       贴地一跳（离地不到 1 格）也一样 —— 用户口径「跳起来到落下这个过程中一直都是小角度姿态」。
+	 *       两个标志与落地沿判罚用的是同一组（{@code jumpedThisAir || flipStarted}），口径一致。</li>
+	 *   <li><b>非跳跃的腾空</b>（从坡上滑落 / 走下台阶 / 掉下去）—— 离地 ≤
+	 *       {@link #AIR_POSE_NEAR_GROUND_RANGE} 2.0 格仍按地面算、计数归零；越过 2 格之后才累加并饱和到
+	 *       {@link #AIR_POSE_BLEND_TICKS}（3），即再过 3 tick 才完全变成空中姿势。</li>
+	 * </ul>
+	 * 贴地那一支（④）也把它归零 ＝ 落地当 tick 回地面姿势。
 	 * <b>这里不看 {@code vy}</b>（起跳那一 tick 还在 0.x 格但 {@code vy > 0}，加了 {@code vy ≤ 0}
 	 * 就会当场抽成空中姿势），也<b>不借用</b> {@code airTicks}（那个是「连续腾空」，落地禁跳在读它）。
 	 *
@@ -611,13 +637,21 @@ public final class SkiAir {
 		}
 
 		state.airborne = true;                                      // ⑤ 空中：门槛每 tick 实时判
-		// ⑥ 空中姿势的「还算地面」：离地 ≤ NEAR_GROUND_RANGE 1.0 格仍按地面算、计数归零，
-		//    越过 1 格之后才累加（饱和到 AIR_POSE_BLEND_TICKS）。**只看距离、不看 vy** ——
-		//    起跳那一 tick 还在 0.x 格但 vy > 0，加上 vy ≤ 0 会当场切成空中姿势，正是要避免的抽动。
-		double gap = SkiGlide.groundDistance(player, SnowboardControl.NEAR_GROUND_RANGE);
-		state.farGroundTicks = gap <= SnowboardControl.NEAR_GROUND_RANGE
-				? 0
-				: Math.min(state.farGroundTicks + 1, AIR_POSE_BLEND_TICKS);
+		// ⑥ 空中姿势：**两条路**
+		//    ① 跳 / 翻这一趟（jumpedThisAir 或 flipStarted）→ 计数直接拉满 = blend 1，全程小角度姿势，
+		//       不看距离、不做 3 tick 滞变（贴地一跳也一样）。与落地沿判罚（detectLandingEdge）同一组标志。
+		//    ② 其它腾空 → 离地 ≤ AIR_POSE_NEAR_GROUND_RANGE 2.0 格仍按地面算、计数归零，
+		//       越过 2 格之后才累加（饱和到 AIR_POSE_BLEND_TICKS）。**只看距离、不看 vy** ——
+		//       起跳那一 tick 还在 0.x 格但 vy > 0，加上 vy ≤ 0 会当场切成空中姿势，正是要避免的抽动。
+		//    这两个数都不借 SnowboardControl.NEAR_GROUND_RANGE（那 1.0 格是贴地判定，改它连带改手感）。
+		if (state.jumpedThisAir || state.flipStarted) {
+			state.farGroundTicks = AIR_POSE_BLEND_TICKS;            // 跳 / 翻全程：恒为空中姿势
+		} else {
+			double gap = SkiGlide.groundDistance(player, AIR_POSE_NEAR_GROUND_RANGE);
+			state.farGroundTicks = gap <= AIR_POSE_NEAR_GROUND_RANGE
+					? 0
+					: Math.min(state.farGroundTicks + 1, AIR_POSE_BLEND_TICKS);
+		}
 		if (holdingJump
 				&& (state.flipStarted || state.holdTicks > tuning.flipHoldDelayTicks())
 				&& state.stunTicks <= 0
@@ -793,13 +827,17 @@ public final class SkiAir {
 	}
 
 	/**
-	 * 这个实体此刻是不是<b>真的在空中</b>（＝离地已经超过
-	 * {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格，客户端那张表里由 {@link #tickClient}
-	 * 每 tick 按「{@code onGround} 或脚底到下方碰撞面 ≤ 1 格」推进 {@code AirState#farGroundTicks}）。
-	 * 渲染期用（{@code HumanoidModelMixin} 决定用地面站姿还是空中站姿）。
+	 * 这个实体此刻是不是<b>真的在空中</b>（＝客户端那张表里 {@code AirState#farGroundTicks > 0}，
+	 * 由 {@link #tickClient} 每 tick 推进）。渲染期用（{@code HumanoidModelMixin} 决定用地面站姿还是空中站姿）。
 	 *
-	 * <p><b>口径</b>：贴地、<b>或离地 ≤ 1 格</b> → {@code false}（那两种都按地面算：
-	 * 坡面 / 起伏上 {@code onGround} 抖动、刚起跳那一两 tick 都不该换姿势）。
+	 * <p><b>口径</b>（两个入口，任一成立即为 true）：
+	 * <ul>
+	 *   <li><b>跳 / 翻这一趟</b>（{@code jumpedThisAir || flipStarted}）→ 从起跳那一刻到落地那一刻恒 true，
+	 *       不看高度（贴地一跳也算）；</li>
+	 *   <li><b>其它腾空</b> → 离地超过 {@link #AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>才为 true；
+	 *       贴地、离地 ≤ 2 格都是 false（坡面 / 起伏上 {@code onGround} 抖动、贴面飞过去那一小段
+	 *       都不该换姿势）。</li>
+	 * </ul>
 	 *
 	 * <p><b>只读、null 安全、不分配、不反射</b>：一次 {@code IdMap} 查询，没有状态（没穿板 / 没 tick 过 /
 	 * 远端玩家）就 {@code false}。渲染期每帧调用没有压力；也正因为只读，它<b>不</b>推进任何计时器、
@@ -815,13 +853,19 @@ public final class SkiAir {
 
 	/**
 	 * <b>空中站姿的混合系数</b>（0 = 完全地面姿势、1 = 完全空中姿势）：
-	 * {@code min(1, farGroundTicks / AIR_POSE_BLEND_TICKS)}，其中 {@code farGroundTicks} ＝
-	 * 「离地超过 {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格」的连续 tick 数（饱和 3）。
+	 * {@code min(1, farGroundTicks / AIR_POSE_BLEND_TICKS)}。两个入口决定 {@code farGroundTicks}：
+	 *
+	 * <ul>
+	 *   <li><b>跳 / 翻这一趟</b>（{@code jumpedThisAir || flipStarted}）→ 计数恒为满值 3，
+	 *       <b>本方法恒返回 1</b>：从起跳那一刻到落地那一刻全程小角度姿势，不受高度影响；</li>
+	 *   <li><b>其它腾空</b> → 「离地超过 {@link #AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>」的连续 tick 数
+	 *       （饱和 3）：<b>贴地或离地 ≤ 2 格恒 0</b>，越过 2 格之后再用 3 tick 平滑过渡。</li>
+	 * </ul>
 	 *
 	 * <p>给渲染侧（{@code HumanoidModelMixin}）用它把 {@code SkiStance.SQUAT_LEG_TILT} →
 	 * {@code SQUAT_LEG_TILT_AIR}、{@code SQUAT_BODY_LEAN} → {@code SQUAT_BODY_LEAN_AIR} 做
-	 * {@code Mth.lerp}：<b>贴地或离地 ≤ 1 格时恒 0</b>（姿势一点都不变），越过 1 格之后再用 3 tick
-	 * 平滑过渡 —— 既不当场抽，也不会「一跳即切空中姿势」。
+	 * {@code Mth.lerp}。那 2.0 格<b>只服务姿势</b>，与 {@link SnowboardControl#NEAR_GROUND_RANGE}
+	 * 1.0（贴地判定）是两个旋钮，不要合并。
 	 *
 	 * <p><b>回到地面当 tick 立刻回 0</b>（贴地那一支直接把计数清零）—— 落地后再拖 3 tick 才蹲回去
 	 * 会读成「落地蹲不下去」。与 {@link #isAirborne} 一样：只读、null 安全、不做射线、没有状态就 0，

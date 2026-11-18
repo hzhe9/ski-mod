@@ -278,21 +278,21 @@ public final class SnowboardControl {
 	/**
 	 * <b>「贴着地面」的距离容差</b>（格）：脚底往下这么多格内有碰撞方块，就算「离地很近」。
 	 *
-	 * <p><b>两块板共用这一个常量</b>（它在 {@code SnowboardControl} 里只是历史上的位置），两个消费方：
+	 * <p><b>两块板共用这一个常量</b>（它在 {@code SnowboardControl} 里只是历史上的位置）。它现在<b>只服务贴地判定</b>：
 	 * <ul>
 	 *   <li><b>单板能不能改速度方向</b>（{@link #isSpeedAlignable}）：{@code onGround()} 为假时，
 	 *       距离 ≤ 本值<b>且</b> {@code vy ≤ 0} 仍算贴着坡面在滑，{@link #alignCarveHeading} /
-	 *       {@link #applyCarve} 照旧转速度；</li>
-	 *   <li><b>两块板共用的空中站姿</b>（{@code SkiAir.tickClient} → {@code airPoseBlend}）：
-	 *       {@code onGround} 为真<b>或</b>距离 ≤ 本值都算地面，姿势不变；
-	 *       越过本值之后才开始往空中姿势混。这一支<b>只看距离、不看 {@code vy}</b> ——
-	 *       起跳那一 tick 人还在 0.x 格但 {@code vy > 0}，加 {@code vy ≤ 0} 会当场抽成空中姿势，
-	 *       正是用户要避免的那一下；姿态是纯观感，不需要「只在往下走时才算贴地」这条运动学约束。</li>
+	 *       {@link #applyCarve} 照旧转速度。</li>
 	 * </ul>
+	 *
+	 * <p><b>空中站姿不再读本值</b>：姿势那边在 {@code SkiAir} 里另有一个
+	 * {@code AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>（离地 ≤ 2 格仍按地面姿势，超过才往空中姿势混；
+	 * 跳 / 空翻那一趟更是全程恒为空中姿势、不看距离）。两个数<b>会分头调</b> —— 改本值会连带改手感
+	 * （速度回正的宽容），改那个只会改观感，<b>不要合并成一个</b>。
 	 *
 	 * <p><b>为什么要它</b>：滑下坡时 {@code onGround()} 会每几 tick 抖成 false（实体 tick 里先位移再落地，
 	 * 斜面上下坠那一 tick 就没踩着方块）。只认 {@code onGround} 的话回正跟着断续 —— 坡上方向一顿一顿，
-	 * 像每隔几 tick 松一次手；姿态那边则是坡上每抖一次就抽一下。这层宽容兜的就是抖动那几 tick，
+	 * 像每隔几 tick 松一次手。这层宽容兜的就是抖动那几 tick，
 	 * <b>不是</b>用来在空中转速度的（那边还有 {@code vy ≤ 0} 把上升段挡住）。
 	 *
 	 * <p><b>为什么是 1.0 而不是 1.5</b>：满速起跳（力度 0.470）的离地高度逐 tick 是

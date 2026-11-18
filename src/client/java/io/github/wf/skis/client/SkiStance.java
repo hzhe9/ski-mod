@@ -70,10 +70,14 @@ public final class SkiStance {
 	 * 人在空中不压刃，腿收回去、角度很小。
 	 *
 	 * <p>地面用 {@link #SQUAT_LEG_TILT}，渲染侧（{@code HumanoidModelMixin}）按
-	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}：<b>贴地或脚底离地 ≤
-	 * {@link io.github.wf.skis.SnowboardControl#NEAR_GROUND_RANGE} 1.0 格时 blend 恒 0</b>（姿势一点不变，
-	 * 刚起跳那一两 tick 不会抽），越过 1 格之后再用 3 tick 平滑过渡到空中姿势；
-	 * 落地那一 tick 直接回到地面值（不拖 3 tick，否则读成「落地蹲不下去」）。
+	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}，<b>两条路</b>：
+	 * ① <b>跳 / 空翻这一趟</b>（{@code jumpedThisAir || flipStarted}）→ blend 恒 1，<b>从起跳到落地
+	 * 全程都是空中姿势</b>，不看高度（贴着地跳一下也一样）；
+	 * ② <b>其它腾空</b> → 贴地或离地 ≤ {@code SkiAir.AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>时 blend
+	 * 恒 0（姿势一点不变），越过 2 格之后再用 3 tick 平滑过渡到空中姿势。
+	 * 两条路都是落地那一 tick 直接回到地面值（不拖 3 tick，否则读成「落地蹲不下去」）。
+	 * <b>那 2.0 格只服务姿势</b>，与 {@link io.github.wf.skis.SnowboardControl#NEAR_GROUND_RANGE} 1.0
+	 * （贴地判定）是两个旋钮。
 	 */
 	public static final float SQUAT_LEG_TILT_AIR = -0.06F;
 
