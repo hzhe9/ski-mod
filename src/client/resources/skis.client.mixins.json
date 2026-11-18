@@ -15,7 +15,8 @@
 		"CameraFlipMixin",
 		"CameraViewSmoothingMixin",
 		"SkiHeadLimitMixin",
-		"LocalPlayerJumpMixin"
+		"LocalPlayerJumpMixin",
+		"LocalPlayerBoardInputMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -25,10 +25,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *   <li>双腿：取消走路摆腿、不做外撇，只把左右腿各向外平移 {@link SkiStance#LEG_SPREAD}
  *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>屈膝微蹲</b> ——
  *       <b>大腿</b>绕靴口翻 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
- *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>空中</b>（跳跃 / 空翻 / 坠落）腿与躯干收到
- *       {@link SkiStance#SQUAT_LEG_TILT_AIR} / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 那对小角度，
- *       按 {@link SkiAir#airPoseBlend}(id) 混合过去 —— <b>跳 / 翻那一趟从起跳到落地恒为空中姿势</b>；
- *       <b>其余腾空</b>离地 ≤ 2 格仍按地面姿势，越过 2 格之后再用 3 tick 过渡（落地那一 tick 立刻回地面值）。</li>
+ *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>跳跃</b>那一趟（{@code jumpedThisAir}）腿与躯干收到
+ *       {@link SkiStance#SQUAT_LEG_TILT_AIR} -0.19 / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 0.12 ——
+ *       比地面值只缩一点点；按 {@link SkiAir#airPoseBlend}(id) 混合，blend <b>只有 0 / 1</b>
+ *       （判据只有「这一趟是不是跳的」，不再看离地高度、也没有渐变）。<b>非跳跃的腾空</b>（坡上滑落 /
+ *       走下台阶 / 掉下去）保持<b>地面姿势</b>；落地那一 tick 立刻回地面值。</li>
  *   <li>双臂：<b>静止</b>固定在划动的中间位置，不随移动摆动；</li>
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
@@ -108,10 +109,9 @@ public abstract class HumanoidModelMixin {
 		boolean stance = SkisMod.isSkiFeet(state.feetEquipment)
 				&& !state.isVisuallySwimming && !state.isFallFlying && !state.isPassenger;
 		// 空中站姿的混合系数（0 = 地面、1 = 空中）：只查客户端那张表，一次 map 查询、null 安全。
-		// 两条来路：跳 / 空翻那一趟恒 1（全程小角度姿势，不看高度）；其它腾空要「离地超过 2 格」才
-		// 开始累加（贴地 / 离地 ≤ 2 格是 0＝地面姿势）。不做任何射线（距离在 SkiAir.tickClient 里量好）。
-		// 非 Avatar（僵尸 / 护甲模型等）与远端玩家都没有状态 → 0（＝按地面姿势渲染，已知限制见
-		// SkiAir.airPoseBlend 的 javadoc：CLIENT_STATES 只维护本机玩家）。
+		// 只有两个值：这一趟腾空里起过跳（jumpedThisAir）＝ 1（缩一点点），其余一切 ＝ 0（地面姿势）。
+		// 不再看离地高度、也没有渐变（那条路已删，见 SkiAir.airPoseBlend 的 javadoc）。
+		// 非 Avatar（僵尸 / 护甲模型等）与远端玩家都没有状态 → 0（＝按地面姿势渲染，已知限制同上）。
 		int entityId = state instanceof AvatarRenderState avatar ? avatar.id : -1;
 		float airBlend = entityId >= 0 ? SkiAir.airPoseBlend(entityId) : 0.0F;
 		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
@@ -171,8 +171,8 @@ public abstract class HumanoidModelMixin {
 		}
 
 		// 上身与头：微蹲的另外两条角度（蹲行时保持原版的弯腰与头角，整段不覆盖）。
-		// 空中（跳 / 空翻那一趟恒 1；其它腾空离地 > 2 格后 3 tick 渐变过来）把腿与躯干都收到更小的角度
-		// （落地那一 tick 立刻回地面值）；蹲行优先，躯干 / 头仍保持原版。
+		// 跳跃那一趟（airBlend = 1）把腿与躯干收到更小的角度（-0.19 / 0.12，只缩一点点）；
+		// 其余腾空 airBlend = 0 ＝地面值（落地那一 tick 立刻回地面值）；蹲行优先，躯干 / 头仍保持原版。
 		// 单板按 W / S 的“整个人 + 板一起倾”不在模型里做 —— 板是独立提交的模型，只改部件它不跟，
 		// 统一在 EntityTiltMixin 里转整个 poseStack。
 		if (!state.isCrouching) {
@@ -250,9 +250,8 @@ public abstract class HumanoidModelMixin {
 	 * 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。
 	 *
 	 * <p>角度在「地面值 {@link SkiStance#SQUAT_LEG_TILT} → 空中值 {@link SkiStance#SQUAT_LEG_TILT_AIR}」
-	 * 之间按 {@code airBlend} 插值：<b>跳 / 翻那一趟全程为 1</b>（起跳到落地都是收腿的小角度）；
-	 * <b>其它腾空</b>贴地或离地 ≤ 2 格时 airBlend 恒 0（坡面抖动、贴面飞行都不换姿势），
-	 * 离地越过 2 格之后再用 3 tick 平滑收腿（见 {@code SkiAir.airPoseBlend}）。
+	 * 之间按 {@code airBlend}（0 / 1）二选一：<b>跳跃那一趟为 1</b>（起跳到落地都只是稍微收腿）；
+	 * 其余腾空（含坡上滑落 / 掉落）为 0 ＝ 地面姿势（见 {@code SkiAir.airPoseBlend}）。
 	 */
 	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
 		thigh.visible = stance;

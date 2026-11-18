@@ -3,6 +3,7 @@ package io.github.wf.skis.mixin.client;
 import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.SnowboardControl;
+import io.github.wf.skis.client.ShoulderSurfingCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
@@ -20,7 +21,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *   <li><b>双板</b>：A / D <b>只用来转向</b>，左右分量直接清掉（否则按住 A 会“一边转一边横移”，
  *       看着像绕圈而不是原地转向）；前后照常。</li>
  *   <li><b>单板 A / D</b>：沿<b>身体朝向</b>的左右平移 —— 把「左右输入」绕视角旋转 (身体朝向 − 视角) 后交回原版，
- *       原版再按视角解释它，结果就是沿身体左右走；身体朝向不会因此改变（原版侧移不改 yRot）。</li>
+ *       原版再按视角解释它，结果就是沿身体左右走；身体朝向不会因此改变（原版侧移不改 yRot）。
+ *       <b>越肩视角开着时这里整段跳过</b>（原样交回）：对方模组会把本方法返回的向量再旋一次并写回
+ *       {@code ClientInput#moveVector}，本方法的返回值到不了原版手里 —— 那条路改在
+ *       {@code LocalPlayerBoardInputMixin}（{@code LocalPlayer#modifyInput} 的 RETURN）做，
+ *       理由见那里与下面 {@code ShoulderSurfingCompat#isActive()} 处的注释。</li>
  *   <li><b>W / S</b>：一律没反应（前后分量直接丢掉）。</li>
  * </ul>
  *
@@ -28,6 +33,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>这里的 δ 用 {@code 身体朝向 − 视角}：双板的视角可以转（限在身体 ±90° 内，见
  * {@code client/SkiViewSmoothing}），所以 δ 不恒为 0 —— 视角怎么转，W / S 都还是沿身体前后。
+ * <b>越肩视角下「视角」不再等于 {@code player.getYRot()}</b>（对方模组自己每 tick 写 yRot，
+ * 真正跟鼠标的是相机）：单板那条改到 {@code LocalPlayerBoardInputMixin}，δ 在那里按
+ * <b>这一 tick 的 {@code getYRot()}</b> 现算 —— 那也是 {@code travel()} 会用的同一个基准。
  *
  * <p><b>空格照旧（单板也能跳）</b>：单板没有前后滑行、全靠原版移动横着走，拦掉跳跃它就再也离不了地；
  * 所以「按空格跳出去」是穿板时唯一的主动离地方式（其余情况由 {@code SkiGlide} 贴着坡面走）。
@@ -55,6 +63,18 @@ public abstract class ClientInputMixin {
 			float delta = (AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), true) - player.getYRot())
 					* Mth.DEG_TO_RAD;
 			cir.setReturnValue(new Vec2(-move.y * Mth.sin(delta), move.y * Mth.cos(delta)));
+			return;
+		}
+		// ——— 越肩视角：交给 LocalPlayerBoardInputMixin 在 modifyInput 里做 ———
+		// 为什么不能在这里算：ShoulderSurfing 的 InputHandler#updateMovementInput 会把**本方法返回的
+		// 这个向量**再旋一次（R(玩家 yRot − 相机 yRot)）然后用 setMoveVector 写回 ClientInput.moveVector
+		// —— 它在 LocalPlayer#aiStep 里紧跟 ClientInput#tick 之后跑，于是①本方法每 tick 被调两次
+		// （它读一次、原版 applyInput 再读一次），②原版最终消费的是它那份「按相机 yaw 换算」的值。
+		// 所以这里返回什么都没用（会被再旋一次），而且它把 A/D 换算成「面朝按键方向跑」后 x ≈ 0，
+		// 会被下面那句 `move.x == 0 → Vec2.ZERO` 直接抹成 0 —— 越肩开着时单板 A/D 完全没反应。
+		// 现在越肩开着就把输入原样交回，单板的横移改在 modifyInput 的 RETURN（原版最后一次读它之后、
+		// xxa/zza 落地之前）按身体朝向重算，见 LocalPlayerBoardInputMixin 的 javadoc。
+		if (ShoulderSurfingCompat.isActive()) {
 			return;
 		}
 		if (move.x == 0.0F) {

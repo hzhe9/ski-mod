@@ -285,10 +285,10 @@ public final class SnowboardControl {
 	 *       {@link #applyCarve} 照旧转速度。</li>
 	 * </ul>
 	 *
-	 * <p><b>空中站姿不再读本值</b>：姿势那边在 {@code SkiAir} 里另有一个
-	 * {@code AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>（离地 ≤ 2 格仍按地面姿势，超过才往空中姿势混；
-	 * 跳 / 空翻那一趟更是全程恒为空中姿势、不看距离）。两个数<b>会分头调</b> —— 改本值会连带改手感
-	 * （速度回正的宽容），改那个只会改观感，<b>不要合并成一个</b>。
+	 * <p><b>空中站姿与它无关</b>：姿势那边<b>只看「这一趟是不是跳的」</b>（{@code SkiAir.airPoseBlend} 读
+	 * {@code AirState#jumpedThisAir}，0 / 1 两值，非跳跃的腾空保持地面姿势）—— 曾经有过一个
+	 * {@code AIR_POSE_NEAR_GROUND_RANGE} 2.0 格的距离旋钮，已随「只留跳跃一条路」整条删除。
+	 * 本值（1.0 格）<b>只服务手感</b>（速度回正的宽容），改它不会改姿势。
 	 *
 	 * <p><b>为什么要它</b>：滑下坡时 {@code onGround()} 会每几 tick 抖成 false（实体 tick 里先位移再落地，
 	 * 斜面上下坠那一 tick 就没踩着方块）。只认 {@code onGround} 的话回正跟着断续 —— 坡上方向一顿一顿，

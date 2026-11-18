@@ -66,20 +66,18 @@ public final class SkiStance {
 	public static final float SQUAT_LEG_TILT = -0.26F;
 
 	/**
-	 * <b>空中</b>（跳跃 / 空翻 / 坠落）的大腿角度（弧度，负值＝膝往前顶）：<b>-0.06 ≈ 地面的 1/4</b> ——
-	 * 人在空中不压刃，腿收回去、角度很小。
+	 * <b>空中</b>（跳跃那一趟）的大腿角度（弧度，负值＝膝往前顶）：<b>-0.19 ≈ 地面 -0.26 的 73%</b> ——
+	 * 只是「缩一点点」，不是站立（曾经收到 -0.06 ≈ 地面的 1/4，用户嫌太小：看起来像站在板上）。
 	 *
 	 * <p>地面用 {@link #SQUAT_LEG_TILT}，渲染侧（{@code HumanoidModelMixin}）按
-	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}，<b>两条路</b>：
-	 * ① <b>跳 / 空翻这一趟</b>（{@code jumpedThisAir || flipStarted}）→ blend 恒 1，<b>从起跳到落地
-	 * 全程都是空中姿势</b>，不看高度（贴着地跳一下也一样）；
-	 * ② <b>其它腾空</b> → 贴地或离地 ≤ {@code SkiAir.AIR_POSE_NEAR_GROUND_RANGE} <b>2.0 格</b>时 blend
-	 * 恒 0（姿势一点不变），越过 2 格之后再用 3 tick 平滑过渡到空中姿势。
-	 * 两条路都是落地那一 tick 直接回到地面值（不拖 3 tick，否则读成「落地蹲不下去」）。
-	 * <b>那 2.0 格只服务姿势</b>，与 {@link io.github.wf.skis.SnowboardControl#NEAR_GROUND_RANGE} 1.0
-	 * （贴地判定）是两个旋钮。
+	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}。blend <b>只有 0 / 1</b>：
+	 * 判据只有一条 —— <b>这一趟腾空里起过跳</b>（{@code SkiAir.AirState#jumpedThisAir}）→ 1，
+	 * 其余一切（含非跳跃的滑落 / 掉落、空翻但没起跳）→ 0（<b>地面姿势</b>）。
+	 * 没有「离地 &gt; 2 格」那条路、也没有 3 tick 渐变（{@code AIR_POSE_NEAR_GROUND_RANGE} /
+	 * {@code AIR_POSE_BLEND_TICKS} / {@code farGroundTicks} 已删除）。
+	 * 落地那一 tick {@code jumpedThisAir} 已被落地沿清掉，所以**落地当 tick 就回地面值**。
 	 */
-	public static final float SQUAT_LEG_TILT_AIR = -0.06F;
+	public static final float SQUAT_LEG_TILT_AIR = -0.19F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>上身（躯干）前倾角</b>（弧度，正值＝向前压）。
@@ -91,10 +89,11 @@ public final class SkiStance {
 	public static final float SQUAT_BODY_LEAN = 0.16F;
 
 	/**
-	 * <b>空中</b>的躯干前倾角（弧度，正值＝向前压）：<b>0.04 ≈ 地面的 1/4</b> —— 空中人直起来，
-	 * 与收腿配对。混合方式与 {@link #SQUAT_LEG_TILT_AIR} 完全相同（同一份 `airPoseBlend`）。
+	 * <b>空中</b>（跳跃那一趟）的躯干前倾角（弧度，正值＝向前压）：<b>0.12 ≈ 地面 0.16 的 75%</b> ——
+	 * 与收腿配对，只比地面直一点点（不是站立：曾经是 0.04，用户嫌缩得太小）。
+	 * 混合方式与 {@link #SQUAT_LEG_TILT_AIR} 完全相同（同一份 `airPoseBlend`，只有 0 / 1）。
 	 */
-	public static final float SQUAT_BODY_LEAN_AIR = 0.04F;
+	public static final float SQUAT_BODY_LEAN_AIR = 0.12F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>头随上身略前低</b>（弧度，正值＝低头；0.10 rad ≈ 5.7°）。
