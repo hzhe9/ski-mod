@@ -1,5 +1,6 @@
 package io.github.wf.skis.mixin.client;
 
+import io.github.wf.skis.AlpineSkiControl;
 import io.github.wf.skis.SkiAir;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.client.SkiStance;
@@ -102,6 +103,27 @@ public abstract class HumanoidModelMixin {
 	@Unique
 	private boolean skis$warnedMissingThigh;
 
+	/**
+	 * 上一帧是不是<b>我们自己</b>把上身（躯干 / 头 / 两支手臂的位姿）搬去做了转向侧倾。
+	 *
+	 * <p>为什么要记住：{@code HumanoidModel} 的实例被<b>同一类渲染对象共用</b>（所有玩家共用一个
+	 * {@code PlayerModel}），而 {@code body.x/y}、{@code head.x/y}、{@code arm.x/y} 这些位姿字段<b>原版从不重置</b>
+	 * （{@code body.zRot} / {@code head.zRot} 也一样，原版只写 {@code xRot / yRot}）。不记住的话，
+	 * 给一个穿板的人倾完、下一个渲染对象（没穿板的人）就会继承那份侧倾。
+	 *
+	 * <p>只在「我们写过」时才恢复 —— 前面那几条 {@code body.xRot / head.xRot} 是<b>无条件覆盖</b>，
+	 * 而位姿字段可能是别的动画模组写的（Vivid Move 那类已经被我们的兼容 mixin 关掉了，但仍不该乱清）。
+	 */
+	@Unique
+	private boolean skis$upperBodyRolled;
+
+	/** 手臂枢轴的横向位置（{@code HumanoidModel.createMesh} 里 {@code right_arm} 在 x=-5、{@code left_arm} 在 x=+5）。 */
+	private static final float ARM_PIVOT_X = 5.0F;
+	/** 手臂枢轴的高度（模型 y=2）：肩线。 */
+	private static final float SHOULDER_Y = 2.0F;
+	/** 腰线高度（模型 y=12）：躯干的下沿＝髋，腿上端的起点。 */
+	private static final float WAIST_Y = 12.0F;
+
 	@Inject(method = "setupAnim", at = @At("TAIL"))
 	private void skis$applyGlideStance(HumanoidRenderState state, CallbackInfo ci) {
 		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
@@ -114,15 +136,22 @@ public abstract class HumanoidModelMixin {
 		// 非 Avatar（僵尸 / 护甲模型等）与远端玩家都没有状态 → 0（＝按地面姿势渲染，已知限制同上）。
 		int entityId = state instanceof AvatarRenderState avatar ? avatar.id : -1;
 		float airBlend = entityId >= 0 ? SkiAir.airPoseBlend(entityId) : 0.0F;
+		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
+		// 双板「转向侧倾 + 外侧腿外伸」的平滑系数（+1 左转 / -1 右转 / 0 站姿）。
+		// 只有双板读它（单板那条路一点不动）；非 Avatar / 远端玩家 / 表里没记录 → 0 ＝ 地面站姿。
+		float lean = stance && !board && entityId >= 0 ? AlpineSkiControl.turnLean(entityId) : 0.0F;
+		// 蹲行优先：蹲着的时候整段「转向姿势」都不写（躯干 / 头保持原版弯腰，腿也不外伸）。
+		float turn = state.isCrouching ? 0.0F : lean;
+		// 上身侧倾：在腿之前把躯干那一组（body / head / 手臂）摆好。
+		skis$applyUpperBodyRoll(self, turn * rollRadians());
 		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
 		// 同一个模型实例被所有渲染对象共用（玩家、不穿板的人），漏写一条分支就会把上一个
 		// 渲染对象留下的状态带给下一个 —— 那正是「不穿板的人腿少了一截」的来源。
-		skis$poseLegSplit(self, stance, airBlend);
+		skis$poseLegSplit(self, stance, airBlend, turn);
 		if (!stance) {
 			return;
 		}
 
-		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
 		if (board) {
 			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开（横向偏移与 SnowboardModel 的鞋位同值，
 			// 否则脚会与鞋错开）；屈膝在上面的 skis$poseLegSplit 里绕靴口做。
@@ -189,14 +218,14 @@ public abstract class HumanoidModelMixin {
 	 * {@code skipDraw} 只跳过<b>本部件自己的 cube</b>、children 照常渲染 —— 正是「藏起 12 单位的那根、
 	 * 只留 6 单位的大腿」需要的开关。
 	 */
-	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend) {
+	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend, float turn) {
 		ModelPart thigh = thighOf(self.rightLeg);
 		if (thigh != null) {
 			// 玩家模型（createMesh 加了 skis_thigh）：原版整条腿跳过自己的 cube，大腿当孩子照常画
 			self.rightLeg.skipDraw = stance;
 			self.leftLeg.skipDraw = stance;
-			poseThigh(thigh, stance, airBlend);
-			poseThigh(thighOf(self.leftLeg), stance, airBlend);
+			poseThigh(thigh, stance, airBlend, turn, true);
+			poseThigh(thighOf(self.leftLeg), stance, airBlend, turn, false);
 			if (self instanceof PlayerModel playerModel) {
 				// 外层裤腿是腿的孩子（vanilla 让它们跟着腿的位姿走），同样只跳过自己的 cube ——
 				// 别再单独给 pants 写位置 / 旋转，那会和腿差一帧
@@ -252,12 +281,107 @@ public abstract class HumanoidModelMixin {
 	 * <p>角度在「地面值 {@link SkiStance#SQUAT_LEG_TILT} → 空中值 {@link SkiStance#SQUAT_LEG_TILT_AIR}」
 	 * 之间按 {@code airBlend}（0 / 1）二选一：<b>跳跃那一趟为 1</b>（起跳到落地都只是稍微收腿）；
 	 * 其余腾空（含坡上滑落 / 掉落）为 0 ＝ 地面姿势（见 {@code SkiAir.airPoseBlend}）。
+	 *
+	 * <p><b>转向时的外侧腿（{@code turn} 的符号决定是哪条）</b>：
+	 * <ul>
+	 *   <li>{@code zRot} 把大腿<b>向外甩</b> {@link AlpineSkiControl#TURN_OUTWARD_LEG_DEGREES} × |turn|；</li>
+	 *   <li>{@code xRot}（前屈角）收到 {@link AlpineSkiControl#TURN_OUTWARD_LEG_BEND_SCALE} 倍（一半），
+	 *       读起来就是这条腿「伸直了」；</li>
+	 *   <li>枢轴仍在靴口（模型 y=18），所以靴口以下（雪鞋 / 脚底 / 板面）一点不动。</li>
+	 * </ul>
+	 *
+	 * <p><b>符号推导</b>（{@code zRot} 到底往哪边甩）：
+	 * {@code ModelPart} 的位姿是 {@code T(x,y) · Rz(zRot) · …}（{@code translateAndRotate} 先 translate、
+	 * 再 {@code Quaternionf.rotationZYX(zRot, yRot, xRot)}），也就是局部点 {@code (x, y)} 映到
+	 * {@code (x·cos − y·sin, x·sin + y·cos)}。大腿的可见段在局部 {@code y ∈ [−6, 0]}（<b>−y 是朝髋向上</b>，
+	 * 因为枢轴在靴口、往上是髋），上端 {@code (0, −6)} 映射到 {@code x' = +6·sinθ} ——
+	 * <b>正 θ 把上端推到模型 +x，而模型 +x 是实体左侧</b>（右腿建在 {@code x = −2.8}）。
+	 * 所以 <b>右腿往实体右侧（−x）伸 ⇒ θ 取负</b>、左腿取正 —— 与 {@code ARM_OUTWARD_ROLL}
+	 * 「−x 侧肢体正 zRot ＝ 末端向外」是同一个约定，只是大腿的「末端」在 −y 那一头，符号因此相反。
 	 */
-	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
+	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend, float turn, boolean rightLeg) {
 		thigh.visible = stance;
-		thigh.xRot = stance
-				? Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR)
-				: 0.0F;
+		if (!stance) {
+			// 部件是我们自己建的、只由这里写：两个角都要写到底，否则会把上一个渲染对象的姿势带下去
+			thigh.xRot = 0.0F;
+			thigh.zRot = 0.0F;
+			return;
+		}
+		float baseTilt = Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR);
+		// 外侧腿只在一侧生效：向左转（turn > 0）＝右腿出去，向右转（turn < 0）＝左腿出去
+		float outward = Mth.clamp(rightLeg ? turn : -turn, 0.0F, 1.0F);
+		thigh.xRot = baseTilt * (1.0F - outward * (1.0F - AlpineSkiControl.outwardLegBendScale()));
+		thigh.zRot = (rightLeg ? -1.0F : 1.0F) * outward * AlpineSkiControl.outwardLegRadians();
+	}
+
+	/** {@link AlpineSkiControl#TURN_ROLL_DEGREES} 换成弧度（侧倾是转角度、模型要弧度；走方法读，见那边的注释）。 */
+	private static float rollRadians() {
+		return AlpineSkiControl.turnRollRadians();
+	}
+
+	/**
+	 * <b>双板：上身绕腰侧倾</b>（{@code roll} 弧度，正 ＝ 向实体<b>左</b>侧倾）。
+	 *
+	 * <p><b>为什么不能只写一句 {@code body.zRot}</b>：{@code HumanoidModel} 的网格里
+	 * {@code head} / {@code body} / {@code right_arm} / {@code left_arm} 是<b>兄弟</b>，
+	 * 枢轴分别被烘在「颈线（模型 y=0）」与「肩（y=2）」—— 也就是说 {@code body.zRot} 转的是<b>颈</b>，
+	 * 头不会跟着倒、髋反而会往反方向甩出去（12° 时腰横移 12·sin12° ≈ 2.5 单位，
+	 * 侧腰会和腿上端错开一道缝）。所以照<b>绕腰（y=12）刚性转</b>来摆这一组：
+	 * {@code ModelPart} 的位姿是 {@code T·R}（先平移再转），要实现 {@code 绕 W 转} 就是
+	 * {@code T = W − R·W}，于是：
+	 * <ul>
+	 *   <li>{@code body.x = 12·sinθ}、{@code body.y = 12·(1 − cosθ)}、{@code body.zRot = θ}
+	 *       —— 腰不动、肩与颈线摆出去；</li>
+	 *   <li>{@code head} 同样搬到 {@code (12·sinθ, 12·(1−cosθ))} 再 {@code zRot = θ}
+	 *       —— 它与 {@code body} 枢轴同一点，搬过之后颈线严丝合缝；</li>
+	 *   <li>两支手臂的位置 = {@code W + R·(p − W)}（{@code p} = 各自的肩点，右 (−5, 2)、左 (5, 2)），
+	 *       <b>不额外加 zRot</b>：手臂自然垂着，肩点跟着躯干走、接缝不裂。</li>
+	 * </ul>
+	 *
+	 * <p><b>符号</b>：{@code Rz} 把局部 {@code (x, y)} 映到 {@code (x·cos − y·sin, x·sin + y·cos)}；
+	 * 头顶在局部 {@code (0, −8)}（−y 朝上）⇒ {@code x' = +8·sinθ}，而模型 <b>+x ＝ 实体左侧</b>，
+	 * 所以 <b>θ > 0 ＝ 上身向左倾</b>。{@code turn} 里 A ＝ +1（向左转），于是「按 A 上身左倾」直接成立。
+	 *
+	 * <p>整人 + 板一起转（{@code EntityTiltMixin} 那条路）不能用在双板上：板与雪鞋会往地里缴。
+	 * 这里一个 {@code poseStack} 都不碰。<b>代价</b>：手臂 {@code x/y} 由我们每帧写（原版只在挥手动画里写），
+	 * 所以只在 {@code roll ≠ 0} 时写、回到 0 时精确还原（见 {@link #skis$upperBodyRolled}）。
+	 */
+	private void skis$applyUpperBodyRoll(HumanoidModel<?> self, float roll) {
+		if (roll == 0.0F) {
+			if (!this.skis$upperBodyRolled) {
+				return;   // 没倾过：一个字段都不碰（别人的动画 / 原版位姿原样保留）
+			}
+			self.body.x = 0.0F;
+			self.body.y = 0.0F;
+			self.body.zRot = 0.0F;
+			self.head.x = 0.0F;
+			self.head.y = 0.0F;
+			self.head.zRot = 0.0F;
+			self.rightArm.x = -ARM_PIVOT_X;
+			self.rightArm.y = SHOULDER_Y;
+			self.leftArm.x = ARM_PIVOT_X;
+			self.leftArm.y = SHOULDER_Y;
+			this.skis$upperBodyRolled = false;
+			return;
+		}
+		float cos = Mth.cos(roll);
+		float sin = Mth.sin(roll);
+		// T = W − R·W（W = (0, WAIST_Y)）：腰保持不动，颈线 / 肩随侧倾摆出去
+		float shiftX = WAIST_Y * sin;
+		float shiftY = WAIST_Y * (1.0F - cos);
+		self.body.x = shiftX;
+		self.body.y = shiftY;
+		self.body.zRot = roll;
+		self.head.x = shiftX;   // 头与躯干枢轴同一点（颈线）：搬同样的位移，缝才对得上
+		self.head.y = shiftY;
+		self.head.zRot = roll;
+		// 手臂：把肩点 p 绕腰转过去（只搬位置，不加 zRot —— 手臂仍自然垂下）
+		float dy = SHOULDER_Y - WAIST_Y;   // 肩相对腰的纵向偏移（−10：在腰上面）
+		self.rightArm.x = -ARM_PIVOT_X * cos - dy * sin;
+		self.rightArm.y = WAIST_Y - ARM_PIVOT_X * sin + dy * cos;
+		self.leftArm.x = ARM_PIVOT_X * cos - dy * sin;
+		self.leftArm.y = WAIST_Y + ARM_PIVOT_X * sin + dy * cos;
+		this.skis$upperBodyRolled = true;
 	}
 
 	/** 空手时两臂的前后角：单板不前抬（0），双板向前微抬。 */

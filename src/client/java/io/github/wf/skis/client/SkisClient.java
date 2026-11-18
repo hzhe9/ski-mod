@@ -93,6 +93,8 @@ public class SkisClient implements ClientModInitializer {
 			tickMotion(client, self);
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			tickAttitude(self);
+			// 双板：转向时「上身侧倾 + 外侧腿外伸」的平滑系数（模型那边按实体 id 读）
+			tickAlpineLean(self);
 		});
 	}
 
@@ -284,6 +286,29 @@ public class SkisClient implements ClientModInitializer {
 				// （client/SkiViewSmoothing 的 headOffset），按帧写、按帧判断，不会有两处基准互相拉回。
 			}
 		}
+	}
+
+	/**
+	 * <b>双板：推进「转向侧倾 + 外侧腿外伸」的平滑系数</b>（只推本机玩家）。
+	 *
+	 * <p>目标＝「A / D 按着（{@code sideSign}，A = +1 = 左）＋ 贴地 ＋ 没在失控」→ ±1，其余 0；
+	 * 判据与平滑都在 {@link AlpineSkiControl#tickTurnLean(int, Input, boolean)} 里（只此一处，
+	 * 失控闸门直接复用 {@code SkiAir.isStunned}）。<b>空中目标置 0</b>：躯干回正、腿回站姿 ——
+	 * 用户口径是「那条腿依旧踩在地面上」，离地就没有这回事了。
+	 *
+	 * <p><b>为什么只推本机</b>：按键（{@code LocalPlayer#input.keyPresses}）只有本机读得到，也没有 S2C 包，
+	 * 所以远端玩家在你屏幕上永远是地面站姿（与摆臂动画 {@code SkiState} 同一条已知限制）。
+	 */
+	private static void tickAlpineLean(LocalPlayer self) {
+		if (self == null) {
+			return;
+		}
+		if (!SkisMod.isSkiMotionActive(self) || SnowboardControl.isSnowboard(self)) {
+			// 没穿板 / 创造飞行 / 旁观 / 换成了单板：系数立刻归零（单板一条都不读这个系数）
+			AlpineSkiControl.clearTurnLean(self.getId());
+			return;
+		}
+		AlpineSkiControl.tickTurnLean(self.getId(), self.input.keyPresses, self.onGround());
 	}
 
 	/**
