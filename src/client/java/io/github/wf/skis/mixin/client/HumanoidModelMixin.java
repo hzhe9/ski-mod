@@ -27,7 +27,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *       <b>大腿</b>绕靴口翻 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
  *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>空中</b>（跳跃 / 空翻 / 坠落）腿与躯干收到
  *       {@link SkiStance#SQUAT_LEG_TILT_AIR} / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 那对小角度，
- *       按 {@link SkiAir#airPoseBlend}(id) 在 3 tick 里混合过去（落地那一 tick 立刻回地面值）。</li>
+ *       按 {@link SkiAir#airPoseBlend}(id) 混合过去 —— <b>贴地或离地 ≤ 1 格仍按地面姿势</b>，
+ *       越过 1 格之后再用 3 tick 过渡（落地那一 tick 立刻回地面值）。</li>
  *   <li>双臂：<b>静止</b>固定在划动的中间位置，不随移动摆动；</li>
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
@@ -107,6 +108,8 @@ public abstract class HumanoidModelMixin {
 		boolean stance = SkisMod.isSkiFeet(state.feetEquipment)
 				&& !state.isVisuallySwimming && !state.isFallFlying && !state.isPassenger;
 		// 空中站姿的混合系数（0 = 地面、1 = 空中）：只查客户端那张表，一次 map 查询、null 安全。
+		// 读的是「离地已超过 1 格多少 tick」，所以贴地 / 离地 ≤ 1 格（坡面抖动、刚起跳那一两 tick）
+		// 都是 0＝地面姿势；不做任何射线（距离在 SkiAir.tickClient 里量好，这里纯读）。
 		// 非 Avatar（僵尸 / 护甲模型等）与远端玩家都没有状态 → 0（＝按地面姿势渲染，已知限制见
 		// SkiAir.airPoseBlend 的 javadoc：CLIENT_STATES 只维护本机玩家）。
 		int entityId = state instanceof AvatarRenderState avatar ? avatar.id : -1;
@@ -247,8 +250,8 @@ public abstract class HumanoidModelMixin {
 	 * 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。
 	 *
 	 * <p>角度在「地面值 {@link SkiStance#SQUAT_LEG_TILT} → 空中值 {@link SkiStance#SQUAT_LEG_TILT_AIR}」
-	 * 之间按 {@code airBlend} 插值：空中腿收回去、角度很小，起跳后 3 tick 平滑过渡（见
-	 * {@code SkiAir.airPoseBlend}）。
+	 * 之间按 {@code airBlend} 插值：<b>贴地或离地 ≤ 1 格时 airBlend 恒 0</b>（坡面抖动、刚起跳那一两
+	 * tick 都不换姿势），离地越过 1 格之后再用 3 tick 平滑收腿（见 {@code SkiAir.airPoseBlend}）。
 	 */
 	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
 		thigh.visible = stance;

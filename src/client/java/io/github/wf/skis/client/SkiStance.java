@@ -70,7 +70,9 @@ public final class SkiStance {
 	 * 人在空中不压刃，腿收回去、角度很小。
 	 *
 	 * <p>地面用 {@link #SQUAT_LEG_TILT}，渲染侧（{@code HumanoidModelMixin}）按
-	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}：起跳后约 3 tick 平滑过渡到空中姿势，
+	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}：<b>贴地或脚底离地 ≤
+	 * {@link io.github.wf.skis.SnowboardControl#NEAR_GROUND_RANGE} 1.0 格时 blend 恒 0</b>（姿势一点不变，
+	 * 刚起跳那一两 tick 不会抽），越过 1 格之后再用 3 tick 平滑过渡到空中姿势；
 	 * 落地那一 tick 直接回到地面值（不拖 3 tick，否则读成「落地蹲不下去」）。
 	 */
 	public static final float SQUAT_LEG_TILT_AIR = -0.06F;

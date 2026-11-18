@@ -25,10 +25,11 @@ import net.minecraft.world.phys.Vec3;
  *       <td>{@code onGround} 立即跳；离地未满 <b>6 tick</b> 的逗留窗内跳</td></tr>
  *   <tr><td>计时器（4 个）</td>
  *       <td>逗留窗 6 / 输入缓冲 5 / 起跳冷却 10 / 摔倒失控 20（tick；两板同值，常量各自一份）</td></tr>
- *   <tr><td>状态字段（6 个）</td>
+ *   <tr><td>状态字段（7 个）</td>
  *       <td>{@code angle} / {@code prevAngle}（渲染插值对）、{@code holdTicks}（连续按住）、
  *       {@code flipStarted}（本段已开翻）、{@code jumpedThisAir}（本段起过跳）、
- *       {@code airTicks}（连续腾空，饱和 3）</td></tr>
+ *       {@code airTicks}（连续腾空，饱和 3）、{@code farGroundTicks}（离地 &gt; 1 格，饱和 3，
+ *       只给空中站姿的混合读 —— 与 {@code airTicks} 是两个量）</td></tr>
  *   <tr><td>簿记（3 个）</td>
  *       <td>{@code airborne}（落地边沿）、{@code prevHoldingJump}（按下沿）、
  *       {@code wasOnGround}（默认 {@code true}，免得刚建表那一 tick 被当成落地）</td></tr>
@@ -93,12 +94,22 @@ public final class SkiAir {
 	private static final int LANDING_LOCK_MIN_AIR_TICKS = 3;
 
 	/**
-	 * <b>空中站姿的混合时长</b>（tick）：{@link #airPoseBlend} 用 {@code airTicks / 本值} 从 0 走到 1 ——
-	 * 起跳后约 3 tick 平滑过渡到空中姿势，免得「离地那一 tick 就整条腿 / 躯干瞬间换角度」的抽动。
+	 * <b>空中站姿的混合时长</b>（tick）：{@link #airPoseBlend} 用
+	 * {@code AirState#farGroundTicks / 本值} 从 0 走到 1，也就是「离地超过
+	 * {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格之后再过 3 tick 才完全变成空中姿势」。
+	 *
+	 * <p><b>计数的来源是「离地超过 1 格」，不是「连续腾空」</b>：地面判定和模组里其它几处一样带近地宽容
+	 * —— {@code onGround} 为真、<b>或</b>脚底到下方碰撞面 ≤ {@link SnowboardControl#NEAR_GROUND_RANGE}
+	 * 都算地面（{@code AirState#farGroundTicks} 只在两者都不成立时累加）。所以起跳头几 tick（离地还在
+	 * 1 格以内）仍是地面姿势，越过 1 格之后才开始混合 —— 免得「一跳即切空中姿势」那一抽。
 	 *
 	 * <p>取 3 与 {@link #LANDING_LOCK_MIN_AIR_TICKS} 同值纯属巧合（一个管落地判罚、一个管观感），
-	 * <b>两个常量各自独立</b>：{@code airTicks} 饱和在后者上，所以本值 ≤ 3 时 blend 一定到得了 1。
-	 * 落地当 tick {@code airborne} 就转 false，blend 立刻回 0（<b>不</b>拖 3 tick —— 那会读成「落地蹲不下去」）。
+	 * <b>两个常量各自独立</b>：{@code farGroundTicks} 饱和在本值上，{@code airTicks} 饱和在
+	 * {@link #LANDING_LOCK_MIN_AIR_TICKS} 上，两条计数各数各的、互不借用（{@code airTicks} 的语义是
+	 * 「连续腾空」，落地禁跳在读它，混用会带出副作用）。
+	 *
+	 * <p>落地当 tick（{@code onGround} 为真）计数立刻归零、blend 回 0（<b>不</b>拖 3 tick ——
+	 * 那会读成「落地蹲不下去」）；离地但还在 1 格内也立刻归零。
 	 */
 	private static final int AIR_POSE_BLEND_TICKS = 3;
 
@@ -275,7 +286,7 @@ public final class SkiAir {
 		private double angle;
 		/** 上一 tick 结束时的翻滚角（渲染插值下限）。 */
 		private double prevAngle;
-		/** 上一 tick 结束时是不是在空中（落地判定的边沿检测）。 */
+		/** 上一 tick 结束时是不是在空中（落地判定的边沿检测）。<b>严格按 {@code onGround()}</b> —— 与「空中姿势」那个 {@link #farGroundTicks}（离地 &gt; 1 格）不是一个口径，别互换。 */
 		private boolean airborne;
 		/**
 		 * 从按下那一刻起的<b>连续按住</b>跳跃 tick 数：<b>只在松手时归零</b>（落地 / 起跳成功 / 失控都不清），
@@ -324,6 +335,21 @@ public final class SkiAir {
 		 * {@code JUMP_COOLDOWN_TICKS}，表现成「怎么按都跳不起来」。只有连续腾空 ≥ 3 tick 的落地才算真落地。
 		 */
 		private int airTicks;
+		/**
+		 * <b>离地超过 {@link SnowboardControl#NEAR_GROUND_RANGE}（1.0 格）已经连续多少 tick</b>
+		 * —— 贴地、或脚底到下方碰撞面 ≤ 1 格时归零，再往上累加并饱和到 {@link #AIR_POSE_BLEND_TICKS}（3）。
+		 *
+		 * <p>唯一用途是给 {@link #airPoseBlend} 做<b>渐变</b>：{@code min(1, farGroundTicks / 3)}。
+		 * 与 {@link #airTicks} <b>不是同一个量</b>、也不借用它：
+		 * <ul>
+		 *   <li>{@code airTicks} ＝「连续 {@code onGround == false} 多少 tick」，饱和在
+		 *       {@link #LANDING_LOCK_MIN_AIR_TICKS}，落地禁跳在读它 —— 它的语义就是<b>严格腾空</b>；</li>
+		 *   <li>{@code farGroundTicks} ＝「离地超过 1 格多少 tick」，是<b>观感</b>的口径：坡面抖动、
+		 *       刚起跳那一两 tick（还在 1 格内）都算地面，姿势不动。</li>
+		 * </ul>
+		 * 混用会串出副作用（例如把落地禁跳的门槛变成「离地 1 格 3 tick」，坡上一直不落地就永远不禁跳）。
+		 */
+		private int farGroundTicks;
 		/** 上一 tick 是否按住跳跃键（按下沿检测：缓冲只在「按下」那一刻充值）。 */
 		private boolean prevHoldingJump;
 		/**
@@ -551,6 +577,11 @@ public final class SkiAir {
 	 * ＋ 没失控 ＋ 水平速度 ≥ 门槛，满足才加 {@code flipDegreesPerTick}（16°）并置 {@code flipStarted}。
 	 * <b>只有从地面起跳那一下</b>的前 4 个按住 tick 角度恒 0 ＝模型静止段；短按＝纯跳跃；
 	 * 空中松手定格后<b>再按立刻续上</b>（{@code holdTicks} 已归零，但 {@code flipStarted} 还在）。
+	 * ⑥ <b>空中姿势的计数</b>（{@code AirState#farGroundTicks}，只给渲染侧 {@link #airPoseBlend} 读）：
+	 * 离地 ≤ {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格仍按地面算、计数归零，越过 1 格之后
+	 * 才累加并饱和到 {@link #AIR_POSE_BLEND_TICKS}（3）；贴地那一支也把它归零。
+	 * <b>这里不看 {@code vy}</b>（起跳那一 tick 还在 0.x 格但 {@code vy > 0}，加了 {@code vy ≤ 0}
+	 * 就会当场抽成空中姿势），也<b>不借用</b> {@code airTicks}（那个是「连续腾空」，落地禁跳在读它）。
 	 *
 	 * @param holdingJump 本 tick 是否按住跳跃键（{@code LocalPlayer#input.keyPresses.jump()}）
 	 * @param listener    落地回调（把最终角度交给服务端）；可为 {@code null}
@@ -575,10 +606,18 @@ public final class SkiAir {
 				landClient(state, tuning, listener);
 			}
 			state.airborne = false;
+			state.farGroundTicks = 0;                               // 贴地：空中姿势立刻回地面（不拖 3 tick）
 			return;
 		}
 
 		state.airborne = true;                                      // ⑤ 空中：门槛每 tick 实时判
+		// ⑥ 空中姿势的「还算地面」：离地 ≤ NEAR_GROUND_RANGE 1.0 格仍按地面算、计数归零，
+		//    越过 1 格之后才累加（饱和到 AIR_POSE_BLEND_TICKS）。**只看距离、不看 vy** ——
+		//    起跳那一 tick 还在 0.x 格但 vy > 0，加上 vy ≤ 0 会当场切成空中姿势，正是要避免的抽动。
+		double gap = SkiGlide.groundDistance(player, SnowboardControl.NEAR_GROUND_RANGE);
+		state.farGroundTicks = gap <= SnowboardControl.NEAR_GROUND_RANGE
+				? 0
+				: Math.min(state.farGroundTicks + 1, AIR_POSE_BLEND_TICKS);
 		if (holdingJump
 				&& (state.flipStarted || state.holdTicks > tuning.flipHoldDelayTicks())
 				&& state.stunTicks <= 0
@@ -754,38 +793,46 @@ public final class SkiAir {
 	}
 
 	/**
-	 * 这个实体此刻是不是<b>真的腾空</b>（{@code AirState#airborne}，客户端那张表里由
-	 * {@link #tickClient} 每 tick 按 {@code onGround()} 翻牌）。渲染期用（{@code HumanoidModelMixin}
-	 * 决定用地面站姿还是空中站姿）。
+	 * 这个实体此刻是不是<b>真的在空中</b>（＝离地已经超过
+	 * {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格，客户端那张表里由 {@link #tickClient}
+	 * 每 tick 按「{@code onGround} 或脚底到下方碰撞面 ≤ 1 格」推进 {@code AirState#farGroundTicks}）。
+	 * 渲染期用（{@code HumanoidModelMixin} 决定用地面站姿还是空中站姿）。
+	 *
+	 * <p><b>口径</b>：贴地、<b>或离地 ≤ 1 格</b> → {@code false}（那两种都按地面算：
+	 * 坡面 / 起伏上 {@code onGround} 抖动、刚起跳那一两 tick 都不该换姿势）。
 	 *
 	 * <p><b>只读、null 安全、不分配、不反射</b>：一次 {@code IdMap} 查询，没有状态（没穿板 / 没 tick 过 /
-	 * 远端玩家）就 {@code false}。渲染期每帧调用没有压力；也正因为只读，它<b>不</b>推进任何计时器。
+	 * 远端玩家）就 {@code false}。渲染期每帧调用没有压力；也正因为只读，它<b>不</b>推进任何计时器、
+	 * 不做任何射线（距离是在 {@link #tickClient} 里量好的）。
 	 *
 	 * <p><b>已知限制</b>：{@link #CLIENT_STATES} 只有<b>本机玩家</b>会被 {@code SkisClient} 写
 	 * （{@link #tickClient} 只对本机跑），所以远端玩家在别人屏幕上<b>永远读 false</b>、按地面站姿渲染。
 	 */
 	public static boolean isAirborne(int entityId) {
 		AirState state = CLIENT_STATES.get(entityId);
-		return state != null && state.airborne;
+		return state != null && state.farGroundTicks > 0;
 	}
 
 	/**
-	 * <b>空中站姿的混合系数</b>（0 = 完全地面姿势、1 = 完全空中姿势）：{@code min(1, airTicks / 3)}。
+	 * <b>空中站姿的混合系数</b>（0 = 完全地面姿势、1 = 完全空中姿势）：
+	 * {@code min(1, farGroundTicks / AIR_POSE_BLEND_TICKS)}，其中 {@code farGroundTicks} ＝
+	 * 「离地超过 {@link SnowboardControl#NEAR_GROUND_RANGE} 1.0 格」的连续 tick 数（饱和 3）。
 	 *
 	 * <p>给渲染侧（{@code HumanoidModelMixin}）用它把 {@code SkiStance.SQUAT_LEG_TILT} →
 	 * {@code SQUAT_LEG_TILT_AIR}、{@code SQUAT_BODY_LEAN} → {@code SQUAT_BODY_LEAN_AIR} 做
-	 * {@code Mth.lerp}：起跳后 3 tick 平滑过渡，<b>避免离地那一 tick 的硬跳</b>。
+	 * {@code Mth.lerp}：<b>贴地或离地 ≤ 1 格时恒 0</b>（姿势一点都不变），越过 1 格之后再用 3 tick
+	 * 平滑过渡 —— 既不当场抽，也不会「一跳即切空中姿势」。
 	 *
-	 * <p><b>落地当 tick 立刻回 0</b>（{@code airborne} 已转 false，不看 {@code airTicks}）——
-	 * 落地后再拖 3 tick 才蹲回去会读成「落地蹲不下去」。与 {@link #isAirborne} 一样：只读、null 安全、
-	 * 没有状态就 0，远端玩家永远是 0（已知限制同上）。
+	 * <p><b>回到地面当 tick 立刻回 0</b>（贴地那一支直接把计数清零）—— 落地后再拖 3 tick 才蹲回去
+	 * 会读成「落地蹲不下去」。与 {@link #isAirborne} 一样：只读、null 安全、不做射线、没有状态就 0，
+	 * 远端玩家永远是 0（已知限制同上）。
 	 */
 	public static float airPoseBlend(int entityId) {
 		AirState state = CLIENT_STATES.get(entityId);
-		if (state == null || !state.airborne) {
+		if (state == null) {
 			return 0.0F;
 		}
-		return Math.min(1.0F, state.airTicks / (float) AIR_POSE_BLEND_TICKS);
+		return Math.min(1.0F, state.farGroundTicks / (float) AIR_POSE_BLEND_TICKS);
 	}
 
 	/**
