@@ -93,6 +93,16 @@ public final class SkiAir {
 	private static final int LANDING_LOCK_MIN_AIR_TICKS = 3;
 
 	/**
+	 * <b>空中站姿的混合时长</b>（tick）：{@link #airPoseBlend} 用 {@code airTicks / 本值} 从 0 走到 1 ——
+	 * 起跳后约 3 tick 平滑过渡到空中姿势，免得「离地那一 tick 就整条腿 / 躯干瞬间换角度」的抽动。
+	 *
+	 * <p>取 3 与 {@link #LANDING_LOCK_MIN_AIR_TICKS} 同值纯属巧合（一个管落地判罚、一个管观感），
+	 * <b>两个常量各自独立</b>：{@code airTicks} 饱和在后者上，所以本值 ≤ 3 时 blend 一定到得了 1。
+	 * 落地当 tick {@code airborne} 就转 false，blend 立刻回 0（<b>不</b>拖 3 tick —— 那会读成「落地蹲不下去」）。
+	 */
+	private static final int AIR_POSE_BLEND_TICKS = 3;
+
+	/**
 	 * 空翻的旋转轴高度（格，<b>从脚底往上</b>）：<b>绕腰翻，不是绕脚底</b>。
 	 *
 	 * <p>这个值同时决定两个人身上的位置同源：第三人称模型（{@code EntityTiltMixin} 转整个 poseStack）
@@ -741,6 +751,41 @@ public final class SkiAir {
 	public static boolean isFlipping(int entityId) {
 		AirState state = CLIENT_STATES.get(entityId);
 		return state != null && state.angle != 0.0D;
+	}
+
+	/**
+	 * 这个实体此刻是不是<b>真的腾空</b>（{@code AirState#airborne}，客户端那张表里由
+	 * {@link #tickClient} 每 tick 按 {@code onGround()} 翻牌）。渲染期用（{@code HumanoidModelMixin}
+	 * 决定用地面站姿还是空中站姿）。
+	 *
+	 * <p><b>只读、null 安全、不分配、不反射</b>：一次 {@code IdMap} 查询，没有状态（没穿板 / 没 tick 过 /
+	 * 远端玩家）就 {@code false}。渲染期每帧调用没有压力；也正因为只读，它<b>不</b>推进任何计时器。
+	 *
+	 * <p><b>已知限制</b>：{@link #CLIENT_STATES} 只有<b>本机玩家</b>会被 {@code SkisClient} 写
+	 * （{@link #tickClient} 只对本机跑），所以远端玩家在别人屏幕上<b>永远读 false</b>、按地面站姿渲染。
+	 */
+	public static boolean isAirborne(int entityId) {
+		AirState state = CLIENT_STATES.get(entityId);
+		return state != null && state.airborne;
+	}
+
+	/**
+	 * <b>空中站姿的混合系数</b>（0 = 完全地面姿势、1 = 完全空中姿势）：{@code min(1, airTicks / 3)}。
+	 *
+	 * <p>给渲染侧（{@code HumanoidModelMixin}）用它把 {@code SkiStance.SQUAT_LEG_TILT} →
+	 * {@code SQUAT_LEG_TILT_AIR}、{@code SQUAT_BODY_LEAN} → {@code SQUAT_BODY_LEAN_AIR} 做
+	 * {@code Mth.lerp}：起跳后 3 tick 平滑过渡，<b>避免离地那一 tick 的硬跳</b>。
+	 *
+	 * <p><b>落地当 tick 立刻回 0</b>（{@code airborne} 已转 false，不看 {@code airTicks}）——
+	 * 落地后再拖 3 tick 才蹲回去会读成「落地蹲不下去」。与 {@link #isAirborne} 一样：只读、null 安全、
+	 * 没有状态就 0，远端玩家永远是 0（已知限制同上）。
+	 */
+	public static float airPoseBlend(int entityId) {
+		AirState state = CLIENT_STATES.get(entityId);
+		if (state == null || !state.airborne) {
+			return 0.0F;
+		}
+		return Math.min(1.0F, state.airTicks / (float) AIR_POSE_BLEND_TICKS);
 	}
 
 	/**

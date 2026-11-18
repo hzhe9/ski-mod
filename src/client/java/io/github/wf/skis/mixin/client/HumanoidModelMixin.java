@@ -1,5 +1,6 @@
 package io.github.wf.skis.mixin.client;
 
+import io.github.wf.skis.SkiAir;
 import io.github.wf.skis.SkisMod;
 import io.github.wf.skis.client.SkiStance;
 import io.github.wf.skis.client.SkiState;
@@ -24,7 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *   <li>双腿：取消走路摆腿、不做外撇，只把左右腿各向外平移 {@link SkiStance#LEG_SPREAD}
  *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>屈膝微蹲</b> ——
  *       <b>大腿</b>绕靴口翻 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
- *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。</li>
+ *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>空中</b>（跳跃 / 空翻 / 坠落）腿与躯干收到
+ *       {@link SkiStance#SQUAT_LEG_TILT_AIR} / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 那对小角度，
+ *       按 {@link SkiAir#airPoseBlend}(id) 在 3 tick 里混合过去（落地那一 tick 立刻回地面值）。</li>
  *   <li>双臂：<b>静止</b>固定在划动的中间位置，不随移动摆动；</li>
  *   <li>右键撑杖时播放<b>一次</b>摆臂（前摆再收回，约 0.6 秒），由 {@link SkiState} 的倒计时驱动；</li>
  *   <li>身体：轻微前倾。</li>
@@ -103,10 +106,15 @@ public abstract class HumanoidModelMixin {
 
 		boolean stance = SkisMod.isSkiFeet(state.feetEquipment)
 				&& !state.isVisuallySwimming && !state.isFallFlying && !state.isPassenger;
+		// 空中站姿的混合系数（0 = 地面、1 = 空中）：只查客户端那张表，一次 map 查询、null 安全。
+		// 非 Avatar（僵尸 / 护甲模型等）与远端玩家都没有状态 → 0（＝按地面姿势渲染，已知限制见
+		// SkiAir.airPoseBlend 的 javadoc：CLIENT_STATES 只维护本机玩家）。
+		int entityId = state instanceof AvatarRenderState avatar ? avatar.id : -1;
+		float airBlend = entityId >= 0 ? SkiAir.airPoseBlend(entityId) : 0.0F;
 		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
 		// 同一个模型实例被所有渲染对象共用（玩家、不穿板的人），漏写一条分支就会把上一个
 		// 渲染对象留下的状态带给下一个 —— 那正是「不穿板的人腿少了一截」的来源。
-		skis$poseLegSplit(self, stance);
+		skis$poseLegSplit(self, stance, airBlend);
 		if (!stance) {
 			return;
 		}
@@ -160,10 +168,12 @@ public abstract class HumanoidModelMixin {
 		}
 
 		// 上身与头：微蹲的另外两条角度（蹲行时保持原版的弯腰与头角，整段不覆盖）。
+		// 空中（起跳 / 空翻）把腿与躯干都收到更小的角度，按 airBlend 在 3 tick 里平滑过渡
+		// （落地那一 tick 立刻回地面值）；蹲行优先，躯干 / 头仍保持原版。
 		// 单板按 W / S 的“整个人 + 板一起倾”不在模型里做 —— 板是独立提交的模型，只改部件它不跟，
 		// 统一在 EntityTiltMixin 里转整个 poseStack。
 		if (!state.isCrouching) {
-			self.body.xRot = SkiStance.SQUAT_BODY_LEAN;    // 躯干前压（与腿的后倾配对＝屈身）
+			self.body.xRot = Mth.lerp(airBlend, SkiStance.SQUAT_BODY_LEAN, SkiStance.SQUAT_BODY_LEAN_AIR);   // 躯干前压（与腿的后倾配对＝屈身）
 			self.head.xRot = SkiStance.SQUAT_HEAD_PITCH;   // 头随上身略前低（只在站姿生效分支里写）
 		}
 	}
@@ -176,14 +186,14 @@ public abstract class HumanoidModelMixin {
 	 * {@code skipDraw} 只跳过<b>本部件自己的 cube</b>、children 照常渲染 —— 正是「藏起 12 单位的那根、
 	 * 只留 6 单位的大腿」需要的开关。
 	 */
-	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance) {
+	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend) {
 		ModelPart thigh = thighOf(self.rightLeg);
 		if (thigh != null) {
 			// 玩家模型（createMesh 加了 skis_thigh）：原版整条腿跳过自己的 cube，大腿当孩子照常画
 			self.rightLeg.skipDraw = stance;
 			self.leftLeg.skipDraw = stance;
-			poseThigh(thigh, stance);
-			poseThigh(thighOf(self.leftLeg), stance);
+			poseThigh(thigh, stance, airBlend);
+			poseThigh(thighOf(self.leftLeg), stance, airBlend);
 			if (self instanceof PlayerModel playerModel) {
 				// 外层裤腿是腿的孩子（vanilla 让它们跟着腿的位姿走），同样只跳过自己的 cube ——
 				// 别再单独给 pants 写位置 / 旋转，那会和腿差一帧
@@ -233,10 +243,18 @@ public abstract class HumanoidModelMixin {
 		return leg.hasChild(SkiStance.THIGH_PART) ? leg.getChild(SkiStance.THIGH_PART) : null;
 	}
 
-	/** 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。 */
-	private static void poseThigh(ModelPart thigh, boolean stance) {
+	/**
+	 * 大腿子部件：绕靴口翻（负角＝膝往前顶，与原「腿后倾」同一方向），不生效时藏起来。
+	 *
+	 * <p>角度在「地面值 {@link SkiStance#SQUAT_LEG_TILT} → 空中值 {@link SkiStance#SQUAT_LEG_TILT_AIR}」
+	 * 之间按 {@code airBlend} 插值：空中腿收回去、角度很小，起跳后 3 tick 平滑过渡（见
+	 * {@code SkiAir.airPoseBlend}）。
+	 */
+	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
 		thigh.visible = stance;
-		thigh.xRot = stance ? SkiStance.SQUAT_LEG_TILT : 0.0F;
+		thigh.xRot = stance
+				? Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR)
+				: 0.0F;
 	}
 
 	/** 空手时两臂的前后角：单板不前抬（0），双板向前微抬。 */

@@ -60,18 +60,35 @@ public final class SkiStance {
 	 * 「髋 → 靴口」这一段保持竖直，蹲的观感全部由这一条角度给出（配合躯干前压 + 头略低）。
 	 *
 	 * <p>两块板共用这一个值（曾经的单板 {@code BOARD_LEG_TILT} / 双板 {@code SKI_LEG_TILT}
-	 * 两个同值常量已删除：同一个旋钮不该记两处）。-0.15 → -0.20 是把「微蹲」的意图补回来的量；
-	 * 换成绕靴口翻之后这个幅度不再带来穿模，手感与之前一致。
+	 * 两个同值常量已删除：同一个旋钮不该记两处）。-0.15 → -0.20 → <b>-0.26</b>（用户「屈膝再加大一点点」）；
+	 * 换成绕靴口翻之后这个幅度不再带来穿模，手感与之前一致。空中另用 {@link #SQUAT_LEG_TILT_AIR}。
 	 */
-	public static final float SQUAT_LEG_TILT = -0.20F;
+	public static final float SQUAT_LEG_TILT = -0.26F;
+
+	/**
+	 * <b>空中</b>（跳跃 / 空翻 / 坠落）的大腿角度（弧度，负值＝膝往前顶）：<b>-0.06 ≈ 地面的 1/4</b> ——
+	 * 人在空中不压刃，腿收回去、角度很小。
+	 *
+	 * <p>地面用 {@link #SQUAT_LEG_TILT}，渲染侧（{@code HumanoidModelMixin}）按
+	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}：起跳后约 3 tick 平滑过渡到空中姿势，
+	 * 落地那一 tick 直接回到地面值（不拖 3 tick，否则读成「落地蹲不下去」）。
+	 */
+	public static final float SQUAT_LEG_TILT_AIR = -0.06F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>上身（躯干）前倾角</b>（弧度，正值＝向前压）。
 	 *
 	 * <p>与 {@link #SQUAT_LEG_TILT} 配对：下半身往后、上半身往前，才有「压着刃」的屈身感；
-	 * 只做腿后倾会读成「直挺挺地往后倒」。0.05 → 0.12（原来的 {@code GLIDE_LEAN} 已删除，统一用这一个）。
+	 * 只做腿后倾会读成「直挺挺地往后倒」。0.05 → 0.12 → <b>0.16</b>（原来的 {@code GLIDE_LEAN} 已删除，
+	 * 统一用这一个）。空中另用 {@link #SQUAT_BODY_LEAN_AIR}。
 	 */
-	public static final float SQUAT_BODY_LEAN = 0.12F;
+	public static final float SQUAT_BODY_LEAN = 0.16F;
+
+	/**
+	 * <b>空中</b>的躯干前倾角（弧度，正值＝向前压）：<b>0.04 ≈ 地面的 1/4</b> —— 空中人直起来，
+	 * 与收腿配对。混合方式与 {@link #SQUAT_LEG_TILT_AIR} 完全相同（同一份 `airPoseBlend`）。
+	 */
+	public static final float SQUAT_BODY_LEAN_AIR = 0.04F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>头随上身略前低</b>（弧度，正值＝低头；0.10 rad ≈ 5.7°）。
