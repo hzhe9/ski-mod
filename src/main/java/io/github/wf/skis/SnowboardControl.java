@@ -40,7 +40,8 @@ import net.minecraft.world.phys.Vec3;
  * 第三人称 F5 下模型会一直转，但超过 90° 之后「往哪一侧落」这件事已经由符号决定了 —— 也就是说
  * <b>≥90° 的空中旋转在视觉上表现为转到极限，因为板轴是有符号轴</b>，这与限位无关（视角本来就<b>不</b>限位，
  * 头模型的 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 90° 夹的只是模型）。
- * 不要为了让「>90° 有意义」去掉符号 —— 那会同时废掉头朝向（{@link #headSide}）与回正方向。
+ * 不要为了让「>90° 有意义」去掉符号 —— 那会废掉速度回正的方向（{@link #boardSide} /
+ * {@link #alignCarveHeading}）；<b>头偏角不再读这个符号</b>（方向固定成 {@link #SNOWBOARD_HEAD_FIXED_SIDE}）。
  *
  * <p><b>视角与头模型是两件事（本轮 III）</b>：单板<b>没有视角限位</b>（{@code client/SkiViewSmoothing} 对单板
  * 不夹 —— 鼠标能转满一圈，背后也能看），但<b>头模型（渲染出来的那颗头）相对身体朝向硬夹在
@@ -96,8 +97,8 @@ public final class SnowboardControl {
 	 * <b>客户端</b>那张表：实体 id → <b>上一次判定的行进侧</b>（<b>板轴符号</b>，与 {@link #sideLocked} 的 sign
 	 * 同一套约定：+1 = 身体左轴 / -1 = 右轴）。速度的板轴分量和 A / D 都给不出方向时锁存它。
 	 *
-	 * <p>头朝向（{@link #headSide}）与速度回正（{@link #alignCarveHeading}）共用这一份判定，
-	 * 所以「头往哪边扭」和「速度往哪边掰」永远是同一侧，不会互相矛盾。
+	 * <p><b>现在只服务速度回正</b>（{@link #alignCarveHeading}）：越肩视角下的头偏角已改成固定一侧
+	 * （{@link #SNOWBOARD_HEAD_FIXED_SIDE}），不再跟这个符号跑。判定本身一点没改。
 	 *
 	 * <p>这张表是<b>幂等写值型</b>（{@code boardSide} 算出一个 ±1 再 put），不是每 tick 累加的增量，
 	 * 所以拆表时<b>不需要翻倍</b>。
@@ -173,9 +174,21 @@ public final class SnowboardControl {
 	 */
 	public static final float HEAD_MODEL_LIMIT_DEGREES = 90.0F;
 	/**
+	 * <b>越肩视角下单板头偏角的固定侧</b>：{@code +1 = 朝身体右侧}（yaw 增大，与 D 同向）、
+	 * {@code -1 = 朝左侧}（yaw 减小，与 A 同向）。
+	 *
+	 * <p><b>为什么是常量</b>：以前方向取 {@code -boardSide(...)}（旧 {@code headSide}，已删），会随实际横移
+	 * 方向 / A、D 在 ±1 之间翻 —— 转向时头在 {@code +75} 与 {@code −75}（按 W 时 ±135、按 S 时 ±60）之间
+	 * 扫过去，用户看到的就是「转向时头往某个方向移动」。现在方向钉死在<b>一侧</b>，转向只改幅度。
+	 *
+	 * <p><b>翻到左侧只需把这一个值改成 {@code -1}</b>（不要再去改 {@link #boardSide}：那条判定只服务
+	 * 速度回正，见 {@link #alignCarveHeading}）。
+	 */
+	public static final int SNOWBOARD_HEAD_FIXED_SIDE = 1;
+	/**
 	 * 越肩视角模式下，单板头相对<b>身体朝向</b>的偏角幅度：<b>默认（没按 W / S，或 W 与 S 同按）</b>
-	 * 为 {@code 75} 度。符号不在这里 —— 朝哪一侧滑就朝哪一侧（见 {@link #tickHead}）：
-	 * yaw 增大 = 向右，所以朝右滑用 {@code +75}、朝左滑用 {@code -75}。
+	 * 为 {@code 75} 度。符号不在这里 —— 方向是固定的 {@link #SNOWBOARD_HEAD_FIXED_SIDE}（默认右侧，
+	 * yaw 增大），转向只改幅度，见 {@link #tickHead}。
 	 */
 	public static final float SNOWBOARD_HEAD_NEUTRAL_DEGREES = 75.0F;
 	/**
@@ -208,8 +221,9 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>为什么需要它（本轮 II 的第二个病灶）</b>：{@code boardSide} 靠「速度 × 身体左轴」定符号，
 	 * 而<b>空中速度是冻住的</b>；身体转到 <b>90°</b>（板轴与速度垂直）时那个侧向分量正好<b>过零</b>——
-	 * 于是每一 tick 都在零附近翻符号：{@code boardSide} 翻 → {@code headSide} 翻 → {@link #tickHead} 的
-	 * 目标瞬间反 180°（视觉上就是「卡住 + 头乱摆」），{@link #alignCarveHeading} 的目标轴也跟着翻。
+	 * 于是每一 tick 都在零附近翻符号：{@link #alignCarveHeading} 的目标轴每 tick 反 180°（视觉上就是
+	 * 「卡住」），当时头偏角也读这个符号（{@link #tickHead} 的目标每 tick 反 180°＝头乱摆）——
+	 * 头那一路自本轮起改成固定一侧（{@link #SNOWBOARD_HEAD_FIXED_SIDE}），不再受这里影响。
 	 * 0.20 ≈ 满速 0.55 的 36%：翻转要求「确实已经滑到另一侧去了」，在 0 附近抖不动。
 	 * 侧向分量 <b>只用来初始化</b>（首次判定仍用 {@link #HEAD_SIDE_MIN_SPEED} 0.05）。
 	 */
@@ -690,8 +704,8 @@ public final class SnowboardControl {
 	 * 这一 tick 沿<b>板轴（身体左右轴）</b>往哪一侧走：<b>+1 = 身体左轴</b>、<b>-1 = 身体右轴</b> ——
 	 * 就是 {@link #sideLocked} 的 {@code sign}，也是单板实际的行进方向（单板横着滑，板轴就是行进方向）。
 	 *
-	 * <p><b>只此一处判定</b>：头朝向（{@link #headSide}）与速度回正（{@link #alignCarveHeading}）都走它，
-	 * 所以「头往哪边扭」与「速度往哪边掰」永远是同一侧；另写一套就会互相矛盾（头朝右、速度却朝左拽）。
+	 * <p><b>只此一处判定，且现在只服务速度回正</b>（{@link #alignCarveHeading} 的目标板轴）：越肩视角下的
+	 * 头偏角自本轮起方向固定（{@link #SNOWBOARD_HEAD_FIXED_SIDE}），不再读这里 —— 这条判定本身一行未改。
 	 *
 	 * <p>判定顺序：① <b>实际横移方向</b> —— 水平速度投到身体左轴 {@link #sideLocked} 上，
 	 * 分量 ≥ {@link #HEAD_SIDE_MIN_SPEED} 就用它（往身体左侧滑 → +1）；
@@ -701,7 +715,8 @@ public final class SnowboardControl {
 	 * <p><b>已判定之后换边要更强的分量（滞后，本轮 II）</b>：反向分量得涨到
 	 * {@link #HEAD_SIDE_SWITCH_MIN_SPEED} 0.20 才允许翻符号。原来只要 0.05 就翻，而空中速度是冻住的 ——
 	 * 身体转到 90°（板轴与速度垂直）时那个侧向分量<b>正好过零</b>，于是 {@code boardSide} 每 tick 在
-	 * 零附近翻符号，{@link #headSide} 跟着翻，{@link #tickHead} 的目标每 tick 反 180°（「卡在 90° 还抖」）。
+	 * 零附近翻符号，{@link #alignCarveHeading} 的目标轴每 tick 反 180°（「卡在 90° 还抖」）。当时的头偏角
+	 * 也读它，所以才跟着跳；现在头那一路固定一侧（{@link #SNOWBOARD_HEAD_FIXED_SIDE}）。
 	 * 现在侧向分量只用于<b>初始化</b>，过零不再改判。
 	 */
 	public static int boardSide(Entity entity, Input input) {
@@ -732,23 +747,14 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * 头朝哪一侧：<b>+1 = 朝身体右侧（yaw 增大，与 D 同向）</b>、<b>-1 = 朝左侧（yaw 减小）</b>。
-	 *
-	 * <p>就是 {@link #boardSide} 反过来（板轴在身体左侧 → 头朝左看）—— 判定不在这里另写一份，
-	 * 否则头朝向与速度回正的方向会各说各话。
-	 */
-	public static int headSide(Entity entity, Input input) {
-		return -boardSide(entity, input);
-	}
-
-	/**
 	 * 越肩视角下推进单板头的偏角（客户端每 tick 对本地玩家调一次）：目标 =
-	 * {@link #headSide} × {@link #headMagnitude}，当前值按「比例 {@link #HEAD_OFFSET_LERP} ＋ 单步上限
-	 * {@link #HEAD_OFFSET_MAX_STEP_DEGREES}」趋近目标。
+	 * {@link #SNOWBOARD_HEAD_FIXED_SIDE} × {@link #headMagnitude}（<b>方向固定一侧</b>，默认右侧 / yaw 增大），
+	 * 当前值按「比例 {@link #HEAD_OFFSET_LERP} ＋ 单步上限 {@link #HEAD_OFFSET_MAX_STEP_DEGREES}」趋近目标。
 	 *
-	 * <p>比例项让快到位时自动变慢（不会在目标附近一顿一顿），限幅项把 <b>210°</b> 的左右翻转压成匀速扫过，
-	 * 中途经过 <b>0°（正前方）</b> —— 所以看到的是「头从右边慢慢扭到左边」，不是瞬间翻面。
-	 * 幅度变化（75↔135、75↔60）幅度小，只吃比例项，也是渐进的。
+	 * <p><b>方向不再跟横移方向翻</b>：以前目标是 {@code headSide(...) × headMagnitude(...)}，{@code headSide}
+	 * 随实际横移方向 / A、D 在 ±1 之间翻，于是转向时头在 +75 与 −75（按 W 时 ±135、按 S 时 ±60）之间扫过 ——
+	 * 用户看到的「转向时头往某个方向动」就是它。现在只剩<b>幅度</b>随按键变（75 / 135 / 60），方向恒为常量，
+	 * 所以越过 0° 的那一段 210° 大扫动不会再有（幅度切换仍由比例项 / 限幅项平滑推进，不会瞬跳）。
 	 *
 	 * <p>首次调用（表里没这个实体）直接取目标值：刚穿板 / 刚开越肩时不做一段无意义的入场扫动。
 	 */
@@ -756,7 +762,7 @@ public final class SnowboardControl {
 		int entityId = entity.getId();
 		boolean clientSide = entity.level().isClientSide();   // 带 Entity 的调用点直接取端
 		IdMap<Float> offsets = table(HEAD_OFFSET_CLIENT, HEAD_OFFSET_SERVER, clientSide);
-		float target = headSide(entity, input) * headMagnitude(input);
+		float target = SNOWBOARD_HEAD_FIXED_SIDE * headMagnitude(input);
 		float current = offsets.getOrDefault(entityId, target);
 		float step = Mth.clamp((target - current) * HEAD_OFFSET_LERP,
 				-HEAD_OFFSET_MAX_STEP_DEGREES, HEAD_OFFSET_MAX_STEP_DEGREES);

@@ -182,10 +182,11 @@ public class SkisClient implements ClientModInitializer {
 			// 单板：yBodyRotO 故意不覆盖 —— baseTick 每 tick 把它记成「上一 tick 的 yBodyRot」，
 			// 留着它第三人称里身体的转动才是插值过去的（覆盖掉就会每 tick 跳 2°）。
 		}
-		// ——— 越肩视角：头模型朝横移方向 ———
+		// ——— 越肩视角：头模型固定朝身体右侧 ———
 		// 相机自由后「视角」不再代表朝向，头改跟身体走：双板 = 正前方（身体朝向 + 0），
-		// 单板 = 身体朝向 + 带符号的头偏角（朝哪侧滑就朝哪侧；幅度 75 / 前倾 90 / 后倾 60，
-		// 翻转与幅度变化都由 SnowboardControl.tickHead 平滑推进，不瞬跳）。
+		// 单板 = 身体朝向 + 固定一侧的头偏角（方向常量 SNOWBOARD_HEAD_FIXED_SIDE = +1，朝右；
+		// 幅度 75 / 前倾 135 / 后倾 60 仍按键变，翻转与幅度变化都由 SnowboardControl.tickHead 平滑推进，
+		// 不瞬跳 —— 方向不再随横移方向左右翻）。
 		// 只写本地玩家（别人的头不该被本机的越肩状态改造）；
 		// yHeadRotO 不写成等于当前值 —— 原版 tickHeadTurn 每 tick 会把它记成上一 tick 的头朝向，
 		// 留着插值头才是平滑转过去的，覆盖成同值会硬跳。
