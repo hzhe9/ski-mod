@@ -77,45 +77,36 @@ public final class AlpineSkiControl {
 	/** 残余偏角小于它就当成对齐（防抖，不要每 tick 无限逼近）。 */
 	private static final float VIEW_TURN_MIN_DEGREES = 0.5F;
 
-	// ---------------------------------------------------------------- 转向侧倾 / 外侧腿外伸（纯观感）
+	// ---------------------------------------------------------------- 转向侧倾（纯观感，只动上半身）
 
 	/**
-	 * <b>双板转向时上身侧倾的角度</b>（度）：向左转（A）上身向左倾、向右转（D）向右倾，取这个幅度。
-	 * <b>12°</b> 是「看得出在压刃、又不像要摔倒」的档；想更夸张改 18、想只微微一动改 8。
+	 * <b>双板转向时上身侧倾的角度</b>（度）：这一 tick 身体<b>向右转</b>就向右倾、<b>向左转</b>就向左倾，
+	 * 取这个幅度。<b>12°</b> 是「看得出在压刃、又不像要摔倒」的档；想更夸张改 18、想只微微一动改 8。
 	 *
-	 * <p><b>为什么是「倾」而不是整人连板一起转</b>：整人 + 板一起绕脚底转（单板 W / S 那条
-	 * {@code EntityTiltMixin} 的路）在双板上会让<b>板与雪鞋往地里缴</b> —— 双板的两块板是平贴地面的，
-	 * 只能是<b>上身相对下半身</b>倾。所以这里只驱动 {@code HumanoidModel} 的部件：
-	 * 躯干 {@code body} / 头 {@code head} 绕<b>腰</b>侧倾，腿只转挂在靴口上的大腿子部件
-	 * （脚底 / 雪鞋 / 板面因此一个都不动）。
+	 * <p><b>只倾上半身，下半身一点不动</b>（用户 2026-11-18 定：「上半身做的很好，下半身修改，改为不动」）：
+	 * 整人 + 板一起绕脚底转（单板 W / S 那条 {@code EntityTiltMixin} 的路）在双板上会让
+	 * <b>板与雪鞋往地里缴</b> —— 双板的两块板是平贴地面的，只能是<b>上身相对下半身</b>倾。
+	 * 所以这里只驱动 {@code HumanoidModel} 的躯干 {@code body} / 头 {@code head} / 两支手臂（绕<b>腰</b>刚性侧倾）；
+	 * 大腿仍然只绕靴口前屈 {@code SkiStance.SQUAT_LEG_TILT}（跳跃那一趟换成 {@code SQUAT_LEG_TILT_AIR}），
+	 * <b>完全不因转向而变</b> —— 曾经那套「外侧腿外伸 20° + 该腿前屈减半」已删除。
 	 *
 	 * <p>渲染侧的符号推导见 {@code HumanoidModelMixin#skis$applyUpperBodyRoll}。
 	 */
 	public static final float TURN_ROLL_DEGREES = 12.0F;
 
 	/**
-	 * <b>双板转向时外侧腿外摆的角度</b>（度）：向左转时<b>右腿</b>向右侧伸出、向右转时<b>左腿</b>向左侧伸出
-	 * （外侧腿＝与转向相反那一侧）。<b>20°</b>。
+	 * <b>「这一 tick 身体真的转了」的死区</b>（度 / tick，<b>0.25</b>）：本 tick 的 {@code bodyYaw} 与上一 tick
+	 * 那个值的差、经 {@link Mth#wrapDegrees} 折回后取绝对值，超过它才给侧倾目标，否则目标 0（回站姿）。
 	 *
-	 * <p><b>转的是大腿子部件（{@code SkiStance.THIGH_PART}）的 {@code zRot}</b>，它的枢轴在<b>靴口</b>
-	 * （模型 y=18），所以靴口以下（雪鞋 / 脚底 / 板面）一点不动 —— 那条腿「依旧踩在地面上」；
-	 * 唯一会动的是大腿的上端（髋那一头），它向外甩出去，读起来就是「腿伸直往外撑」。
-	 * 20° 时上端横向外移 {@code 6 × sin20° ≈ 2.05} 单位（0.13 格）。
+	 * <p><b>为什么是 0.25</b>：远低于本类最小的转向速率 —— A / D 是 {@link #TURN_RATE_DEGREES} 4.0°/tick、
+	 * 按 W 追视角是 {@link #VIEW_TURN_RATE_DEGREES} 4.8°/tick（两者叠起来 8.8°/tick），真在转的每一 tick 都远超它；
+	 * 而浮点末位噪声、{@link #ensureLocked} 的幂等写入都远低于它，不会让躯干抖。
 	 */
-	public static final float TURN_OUTWARD_LEG_DEGREES = 20.0F;
+	private static final float TURN_LEAN_MIN_STEP_DEGREES = 0.25F;
 
 	/**
-	 * <b>外伸那条腿的前屈角系数</b>：外侧腿的大腿前屈角从站姿的 {@code SQUAT_LEG_TILT}
-	 * （-0.26 rad，空中 -0.19）收到这个比例 —— <b>0.5 ＝ 一半</b>，读起来就是「这条腿伸直了」。
-	 *
-	 * <p>另一条腿（弯内侧）仍然保持完整的站姿前屈角，所以两条腿一屈一伸，出来的是「压刃」而不是「劈叉」。
-	 * 1.0 ＝ 不做这一项（两条腿屈得一样），0 ＝ 完全伸直。
-	 */
-	public static final float TURN_OUTWARD_LEG_BEND_SCALE = 0.5F;
-
-	/**
-	 * 侧倾 / 外伸系数每 tick 向目标靠拢的比例（<b>0.35</b>）：约 6 tick 到 88%、第 7 tick 收尾
-	 * （{@link #TURN_LEAN_EPSILON}）。按下 A / D 的那一刻不会硬抽一下。
+	 * 侧倾系数每 tick 向目标靠拢的比例（<b>0.35</b>）：约 6 tick 到 88%、第 7 tick 收尾
+	 * （{@link #TURN_LEAN_EPSILON}）。所以身体刚开始转的那一下不会硬抽，转向结束时躯干先回正再停。
 	 *
 	 * <p>这是<b>比例型</b>、且<b>只在客户端跑</b>（`SkisClient` 每 tick 一次、渲染侧读），单机里也只有一次写入 ——
 	 * 所以按「表按端拆分」的口径<b>不翻倍</b>。
@@ -126,15 +117,33 @@ public final class AlpineSkiControl {
 	private static final float TURN_LEAN_EPSILON = 0.05F;
 
 	/**
-	 * 实体 id → 转向侧倾 / 外侧腿外伸的<b>平滑系数</b>（{@code +1} ＝ 正在向左转（A）、
-	 * {@code -1} ＝ 正在向右转（D）、{@code 0} ＝ 没在转向 / 不在贴地 / 表里没记录）。
+	 * 实体 id → 转向侧倾的<b>平滑系数</b>（{@code +1} ＝ 向左倾、{@code -1} ＝ 向右倾、
+	 * {@code 0} ＝ 没在转向 / 表里没记录）。
 	 *
-	 * <p><b>为什么只有一张表（不按端拆）</b>：它只在客户端写（`SkisClient#tickAlpineLean`）、
-	 * 只在客户端读（渲染侧按 {@code AvatarRenderState.id} 取值），服务端从不碰 ——
-	 * 单机里也就只有一次写入，不存在「同一份增量被加两次」那个坑（见 {@link #table}）。
-	 * 远端玩家永远查不到（本机按键只有本机知道），渲染侧读到 0 ＝ 地面站姿。
+	 * <p><b>符号口径</b>：MC 的水平朝向是 {@code (-sin yaw, cos yaw)}，<b>yaw 增大 ＝ 向右转</b>。
+	 * 所以「上一 tick → 这一 tick 的 yaw 差 &gt; 0」＝ 这一 tick 向右转 ⇒ 系数 {@code -1}（渲染侧
+	 * {@code zRot} 取负 ＝ 向实体右侧倾）；差 &lt; 0 ⇒ {@code +1}（向左倾）。系数里 {@code +1} 始终是
+	 * 「向左倾」，与 {@code HumanoidModelMixin#skis$applyUpperBodyRoll} 的符号约定一致（正角＝向左倾）。
+	 *
+	 * <p><b>为什么这张表（和下面那张 {@link #TURN_LEAN_LAST_YAW}）不按端拆</b>：它们只在客户端写
+	 * （{@code SkisClient#tickAlpineLean}）、只在客户端读（渲染侧按 {@code AvatarRenderState.id} 取值），
+	 * 服务端从不碰 —— 单机里也就只有一次写入，不存在「同一份增量被加两次」那个坑（见 {@link #table}）。
+	 * 远端玩家永远查不到（只 tick 本机），渲染侧读到 0 ＝ 地面站姿。
 	 */
 	private static final IdMap<Float> TURN_LEAN = new IdMap<>();
+
+	/**
+	 * 实体 id → <b>上一 tick 的 body yaw</b>（{@link #BODY_YAW_CLIENT} 的那个值，只在客户端单份）。
+	 *
+	 * <p>侧倾的触发判据就是它：「本 tick 身体实际转了多少」＝ {@code bodyYaw 现在 − 它}（{@link Mth#wrapDegrees}
+	 * 折回）。<b>不看按键、也不看是否贴地</b>（用户 2026-11-18 明确要求）：A / D 转身体、按 W 追视角
+	 * （{@link #turnTowardView}）转身体，两条路都只改 {@code BODY_YAW}，所以这里比对<b>实际写入量</b>就够 ——
+	 * 视角带动身体转、以及空中照转，都会被这条判据接住。
+	 *
+	 * <p>与 {@link #TURN_LEAN} 一起在 {@link #clearTurnLean} / {@link #forgetBody} /
+	 * {@link #forgetBodyAll} 里清掉：否则脱板再穿板（yaw 可能被重锁成别的值）那一 tick 会算出一个大跳变。
+	 */
+	private static final IdMap<Float> TURN_LEAN_LAST_YAW = new IdMap<>();
 
 	/** 本 tick 的 bodyYaw 与上一次 {@link #alignTurnHeading} 相比变化小于它 → 这一 tick 没在转向。 */
 	private static final float TURN_EPS_DEGREES = 1.0E-4F;
@@ -406,8 +415,11 @@ public final class AlpineSkiControl {
 		table(TURN_HEADING_CLIENT, TURN_HEADING_SERVER, clientSide).remove(entityId);
 		table(TURN_YAW0_CLIENT, TURN_YAW0_SERVER, clientSide).remove(entityId);
 		table(TURN_LAST_YAW_CLIENT, TURN_LAST_YAW_SERVER, clientSide).remove(entityId);
-		// 侧倾系数（客户端单份，见 TURN_LEAN）：脱板 / 换板 / 换飞行立刻回站姿
+		// 侧倾系数与「上一 tick 的 body yaw」（都是客户端单份，见 TURN_LEAN / TURN_LEAN_LAST_YAW）：
+		// 脱板 / 换板 / 换飞行立刻回站姿，同时把 yaw 基准丢掉 —— 再穿板时 yaw 会被重锁成别的值，
+		// 留着旧基准会在重锁那一 tick 算出一个大跳变、躯干凭空抽一下
 		TURN_LEAN.remove(entityId);
+		TURN_LEAN_LAST_YAW.remove(entityId);
 		// 空中状态（含失控计时）只清本端那张，见 SkiAir#forgetClient 的注释
 		if (clientSide) {
 			SkiAir.forgetClient(entityId);
@@ -428,9 +440,10 @@ public final class AlpineSkiControl {
 		table(TURN_YAW0_CLIENT, TURN_YAW0_SERVER, clientSide).clear();
 		table(TURN_LAST_YAW_CLIENT, TURN_LAST_YAW_SERVER, clientSide).clear();
 		TURN_LEAN.clear();
+		TURN_LEAN_LAST_YAW.clear();
 	}
 
-	// ---------------------------------------------------------------- 转向侧倾 / 外侧腿外伸（纯观感）
+	// ---------------------------------------------------------------- 转向侧倾（纯观感）
 
 	/**
 	 * {@link #TURN_ROLL_DEGREES} 换成弧度（模型要弧度）。
@@ -444,37 +457,40 @@ public final class AlpineSkiControl {
 		return TURN_ROLL_DEGREES * Mth.DEG_TO_RAD;
 	}
 
-	/** {@link #TURN_OUTWARD_LEG_DEGREES} 换成弧度（同理，见 {@link #turnRollRadians()}）。 */
-	public static float outwardLegRadians() {
-		return TURN_OUTWARD_LEG_DEGREES * Mth.DEG_TO_RAD;
-	}
-
-	/** {@link #TURN_OUTWARD_LEG_BEND_SCALE}（同理，见 {@link #turnRollRadians()}）。 */
-	public static float outwardLegBendScale() {
-		return TURN_OUTWARD_LEG_BEND_SCALE;
-	}
-
 	/**
-	 * 客户端每 tick 推进「转向侧倾 + 外侧腿外伸」的平滑系数（<b>只对本机玩家</b>调一次）。
+	 * 客户端每 tick 推进「转向侧倾」的平滑系数（<b>只对本机玩家</b>调一次）。
 	 *
-	 * <p><b>目标只有三条判据</b>（用户口径「依旧踩在地面上」）：
+	 * <p><b>目标只看一件事：本 tick 身体实际转了多少</b>（用户 2026-11-18 改的口径 ——
+	 * 「不用判定是否在地面上，只要按了身体就倾斜；视角跟着转、模型也在转的时候，也要做出对应的
+	 * 左转右转动作，取决于模型转向方向是左还是右」）：
 	 * <ol>
-	 *   <li>A / D 按着 —— {@code sideSign(keys)}，<b>A = +1 = 左</b>、D = -1 = 右（两个都按 / 都不按 → 0）；</li>
-	 *   <li>{@code onGround} —— <b>空中目标置 0</b>：躯干回正、腿回站姿（跳起来就别再压刃）；</li>
-	 *   <li>没在摔倒失控 —— {@link SkiAir#isStunned}（沿用双板转向那条现成闸门，不另写一份）。</li>
+	 *   <li>取本 tick 的 {@code bodyYaw}（{@link #bodyYaw}，客户端那张 {@link #BODY_YAW_CLIENT}），
+	 *       与 {@link #TURN_LEAN_LAST_YAW} 里上一 tick 的值作差、{@link Mth#wrapDegrees} 折回；</li>
+	 *   <li>|差| ≥ {@link #TURN_LEAN_MIN_STEP_DEGREES}（0.25°）才算「在转」，目标取 <b>差 &gt; 0 → -1
+	 *       （向右倾）、差 &lt; 0 → +1（向左倾）</b>（yaw 增大 ＝ 向右）；否则目标 0；</li>
+	 *   <li>表里还没有上一 tick 的值（刚穿板 / 刚清表）—— 本 tick 先记基准、目标 0，下一 tick 才可能倾。</li>
 	 * </ol>
-	 * 都满足才是 ±1，否则 0；当前值按 {@link #TURN_LEAN_LERP} 向目标靠拢（比例 lerp，
-	 * 约 6 tick 到 88%、第 7 tick 吸附），所以按下 A / D 的那一刻不会硬抽。系数跨 0 换向时
-	 * （左转直接切右转）躯干先回正、腿先收回来再往另一边出去 —— 都是同一条 lerp 的自然结果。
 	 *
-	 * <p>写入的表是 {@link #TURN_LEAN}（客户端单份）；渲染侧只读它，不做任何写入。
+	 * <p><b>不再看按键、也不再要求贴地</b>：A / D 转身体、按 W 追视角（{@link #turnTowardView}）转身体，
+	 * 两条路都只改 {@code BODY_YAW}，所以空中按 A / D 照样倾、按 W 追视角也倾 —— 只要模型在转。
+	 * <b>摔倒失控不用单独判</b>：{@link #turnBody} / {@link #turnTowardView} 在 {@link SkiAir#isStunned}
+	 * 时都直接返回、不再改 {@code BODY_YAW}，差自然为 0。
 	 *
-	 * @param keys    本机这一 tick 的按键（{@code LocalPlayer#input.keyPresses}，不会为 null）
-	 * @param onGround 实体这一 tick 是否贴地
+	 * <p>当前值按 {@link #TURN_LEAN_LERP} 向目标靠拢（比例 lerp，约 6 tick 到 88%、第 7 tick 吸附），
+	 * 所以身体刚开始转的那一刻不会硬抽；停转后躯干平滑回正。写入 {@link #TURN_LEAN}（客户端单份）；
+	 * 渲染侧只读它，不做任何写入。
+	 *
+	 * @param entityId 本机玩家的实体 id
+	 * @param bodyYaw  本 tick 结束时的身体朝向（度，{@link #bodyYaw(int, float, boolean)} 客户端那份）
 	 */
-	public static void tickTurnLean(int entityId, Input keys, boolean onGround) {
-		double side = SnowboardControl.sideSign(keys);
-		float target = onGround && side != 0.0D && !SkiAir.isStunned(entityId) ? (float) side : 0.0F;
+	public static void tickTurnLean(int entityId, float bodyYaw) {
+		Float lastYaw = TURN_LEAN_LAST_YAW.put(entityId, bodyYaw);   // 同时把本 tick 的值记成下一 tick 的基准
+		float step = lastYaw == null || Float.isNaN(bodyYaw) ? 0.0F : Mth.wrapDegrees(bodyYaw - lastYaw);
+		float target = 0.0F;
+		if (Math.abs(step) >= TURN_LEAN_MIN_STEP_DEGREES) {
+			// yaw 增大 ＝ 向右转 ⇒ 系数 -1（向右倾）；减小 ⇒ +1（向左倾，与渲染侧正角＝左倾同号）
+			target = step > 0.0F ? -1.0F : 1.0F;
+		}
 		float current = TURN_LEAN.getOrDefault(entityId, 0.0F);
 		float next = current + (target - current) * TURN_LEAN_LERP;
 		if (Math.abs(target - next) < TURN_LEAN_EPSILON) {
@@ -487,14 +503,19 @@ public final class AlpineSkiControl {
 		}
 	}
 
-	/** 系数立刻归零（脱板 / 换板 / 创造飞行 / 旁观：不再有按键语义，站姿立刻回正）。 */
+	/**
+	 * 系数立刻归零（脱板 / 换板 / 创造飞行 / 旁观：模型不再转，站姿立刻回正），
+	 * <b>连「上一 tick 的 body yaw」一起清</b> —— 下一段滑行的第一 tick 重新取基准，
+	 * 不会拿停顿前那个 yaw 算出一个大跳变（换板 / 换世界时 yaw 本就会被重锁）。
+	 */
 	public static void clearTurnLean(int entityId) {
 		TURN_LEAN.remove(entityId);
+		TURN_LEAN_LAST_YAW.remove(entityId);
 	}
 
 	/**
-	 * 当前「转向侧倾 + 外侧腿外伸」的平滑系数：{@code +1} ＝ 全量向左转（A）、{@code -1} ＝ 全量向右转（D）、
-	 * {@code 0} ＝ 站姿。<b>渲染侧（{@code HumanoidModelMixin}）每帧读一次</b>，按 tick 取、不做 partialTick 插值
+	 * 当前「转向侧倾」的平滑系数：{@code +1} ＝ 全量向左倾、{@code -1} ＝ 全量向右倾、{@code 0} ＝ 站姿。
+	 * <b>渲染侧（{@code HumanoidModelMixin}）每帧读一次</b>，按 tick 取、不做 partialTick 插值
 	 * （与单板的 {@code SnowboardControl.tiltValue} 同一口径：本身是渐进量，20 Hz 已经够顺）。
 	 *
 	 * <p>表里没记录（远端玩家 / 刚穿板 / 已经回到站姿）一律 {@code 0} —— 于是「非 Avatar、远端玩家、

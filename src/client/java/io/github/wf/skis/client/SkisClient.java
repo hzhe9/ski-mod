@@ -93,7 +93,7 @@ public class SkisClient implements ClientModInitializer {
 			tickMotion(client, self);
 			// 单板：记录 W / S 的俯仰姿态（+1 前倾 / -1 后倾），模型那边读它来摆身体
 			tickAttitude(self);
-			// 双板：转向时「上身侧倾 + 外侧腿外伸」的平滑系数（模型那边按实体 id 读）
+			// 双板：转向时「上身侧倾」的平滑系数（模型那边按实体 id 读；下半身一点不动）
 			tickAlpineLean(self);
 		});
 	}
@@ -289,15 +289,20 @@ public class SkisClient implements ClientModInitializer {
 	}
 
 	/**
-	 * <b>双板：推进「转向侧倾 + 外侧腿外伸」的平滑系数</b>（只推本机玩家）。
+	 * <b>双板：推进「转向侧倾」的平滑系数</b>（只推本机玩家）。
 	 *
-	 * <p>目标＝「A / D 按着（{@code sideSign}，A = +1 = 左）＋ 贴地 ＋ 没在失控」→ ±1，其余 0；
-	 * 判据与平滑都在 {@link AlpineSkiControl#tickTurnLean(int, Input, boolean)} 里（只此一处，
-	 * 失控闸门直接复用 {@code SkiAir.isStunned}）。<b>空中目标置 0</b>：躯干回正、腿回站姿 ——
-	 * 用户口径是「那条腿依旧踩在地面上」，离地就没有这回事了。
+	 * <p>判据只有一条 —— <b>本 tick 身体实际转了多少</b>：这里读的是 {@code tickMotion} 已经改完的
+	 * 身体朝向（{@link AlpineSkiControl#bodyYaw} 客户端那份，A / D 与 W 追视角都写它），交给
+	 * {@link AlpineSkiControl#tickTurnLean(int, float)} 与上一 tick 的 yaw 作差、过死区
+	 * {@code TURN_LEAN_MIN_STEP_DEGREES} 0.25° 就取方向、再按 {@code TURN_LEAN_LERP} 平滑。
+	 * <b>不看按键、也不要求贴地</b>（用户口径：不用判定是否在地面上，只要在转就倾）；
+	 * 视角带动 / 按 W 追视角让模型转起来时同样会倾。
 	 *
-	 * <p><b>为什么只推本机</b>：按键（{@code LocalPlayer#input.keyPresses}）只有本机读得到，也没有 S2C 包，
-	 * 所以远端玩家在你屏幕上永远是地面站姿（与摆臂动画 {@code SkiState} 同一条已知限制）。
+	 * <p>调用点在 {@code registerTickHandler} 里<b>排在 {@code tickMotion} 之后</b> —— 顺序要紧：
+	 * 先转完身体、再拿转完的 yaw 算这一 tick 的增量（放在前面就会永远慢一 tick）。
+	 *
+	 * <p><b>为什么只推本机</b>：双板的 {@code BODY_YAW} 客户端那份只为本机维护（远端玩家的朝向由服务端同步），
+	 * 也没有 S2C 包，所以远端玩家在你屏幕上永远不会侧倾（与摆臂动画 {@code SkiState} 同一条已知限制）。
 	 */
 	private static void tickAlpineLean(LocalPlayer self) {
 		if (self == null) {
@@ -308,7 +313,9 @@ public class SkisClient implements ClientModInitializer {
 			AlpineSkiControl.clearTurnLean(self.getId());
 			return;
 		}
-		AlpineSkiControl.tickTurnLean(self.getId(), self.input.keyPresses, self.onGround());
+		// 传本 tick 已经转完的身体朝向（tickMotion 先跑）：增量由 tickTurnLean 自己与上一 tick 比
+		AlpineSkiControl.tickTurnLean(self.getId(),
+				AlpineSkiControl.bodyYaw(self.getId(), self.getYRot(), true));
 	}
 
 	/**

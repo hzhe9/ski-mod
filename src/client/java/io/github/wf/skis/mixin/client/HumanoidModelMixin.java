@@ -27,7 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *       （脚上的板模型用同一个量，跟着分开、平行）；同时<b>屈膝微蹲</b> ——
  *       <b>大腿</b>绕靴口翻 {@link SkiStance#SQUAT_LEG_TILT}、躯干前压 {@link SkiStance#SQUAT_BODY_LEAN}、
  *       头略低 {@link SkiStance#SQUAT_HEAD_PITCH}。<b>跳跃</b>那一趟（{@code jumpedThisAir}）腿与躯干收到
- *       {@link SkiStance#SQUAT_LEG_TILT_AIR} -0.19 / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 0.12 ——
+ *       {@link SkiStance#SQUAT_LEG_TILT_AIR} -0.15 / {@link SkiStance#SQUAT_BODY_LEAN_AIR} 0.08 ——
  *       比地面值只缩一点点；按 {@link SkiAir#airPoseBlend}(id) 混合，blend <b>只有 0 / 1</b>
  *       （判据只有「这一趟是不是跳的」，不再看离地高度、也没有渐变）。<b>非跳跃的腾空</b>（坡上滑落 /
  *       走下台阶 / 掉下去）保持<b>地面姿势</b>；落地那一 tick 立刻回地面值。</li>
@@ -137,17 +137,18 @@ public abstract class HumanoidModelMixin {
 		int entityId = state instanceof AvatarRenderState avatar ? avatar.id : -1;
 		float airBlend = entityId >= 0 ? SkiAir.airPoseBlend(entityId) : 0.0F;
 		boolean board = state.feetEquipment.getItem() == SkisMod.SNOWBOARD;
-		// 双板「转向侧倾 + 外侧腿外伸」的平滑系数（+1 左转 / -1 右转 / 0 站姿）。
+		// 双板「转向侧倾」的平滑系数（+1 向左倾 / -1 向右倾 / 0 站姿）。
 		// 只有双板读它（单板那条路一点不动）；非 Avatar / 远端玩家 / 表里没记录 → 0 ＝ 地面站姿。
 		float lean = stance && !board && entityId >= 0 ? AlpineSkiControl.turnLean(entityId) : 0.0F;
-		// 蹲行优先：蹲着的时候整段「转向姿势」都不写（躯干 / 头保持原版弯腰，腿也不外伸）。
+		// 蹲行优先：蹲着的时候整段「转向姿势」都不写（躯干 / 头保持原版弯腰）。
 		float turn = state.isCrouching ? 0.0F : lean;
 		// 上身侧倾：在腿之前把躯干那一组（body / head / 手臂）摆好。
+		// 下半身一点不动 —— 大腿只绕靴口前屈（SQUAT_LEG_TILT / 跳跃那趟的 AIR 值），不看 turn。
 		skis$applyUpperBodyRoll(self, turn * rollRadians());
 		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
 		// 同一个模型实例被所有渲染对象共用（玩家、不穿板的人），漏写一条分支就会把上一个
 		// 渲染对象留下的状态带给下一个 —— 那正是「不穿板的人腿少了一截」的来源。
-		skis$poseLegSplit(self, stance, airBlend, turn);
+		skis$poseLegSplit(self, stance, airBlend);
 		if (!stance) {
 			return;
 		}
@@ -200,7 +201,7 @@ public abstract class HumanoidModelMixin {
 		}
 
 		// 上身与头：微蹲的另外两条角度（蹲行时保持原版的弯腰与头角，整段不覆盖）。
-		// 跳跃那一趟（airBlend = 1）把腿与躯干收到更小的角度（-0.19 / 0.12，只缩一点点）；
+		// 跳跃那一趟（airBlend = 1）把腿与躯干收到更小的角度（-0.15 / 0.08，只缩一点点）；
 		// 其余腾空 airBlend = 0 ＝地面值（落地那一 tick 立刻回地面值）；蹲行优先，躯干 / 头仍保持原版。
 		// 单板按 W / S 的“整个人 + 板一起倾”不在模型里做 —— 板是独立提交的模型，只改部件它不跟，
 		// 统一在 EntityTiltMixin 里转整个 poseStack。
@@ -218,14 +219,14 @@ public abstract class HumanoidModelMixin {
 	 * {@code skipDraw} 只跳过<b>本部件自己的 cube</b>、children 照常渲染 —— 正是「藏起 12 单位的那根、
 	 * 只留 6 单位的大腿」需要的开关。
 	 */
-	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend, float turn) {
+	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend) {
 		ModelPart thigh = thighOf(self.rightLeg);
 		if (thigh != null) {
 			// 玩家模型（createMesh 加了 skis_thigh）：原版整条腿跳过自己的 cube，大腿当孩子照常画
 			self.rightLeg.skipDraw = stance;
 			self.leftLeg.skipDraw = stance;
-			poseThigh(thigh, stance, airBlend, turn, true);
-			poseThigh(thighOf(self.leftLeg), stance, airBlend, turn, false);
+			poseThigh(thigh, stance, airBlend);
+			poseThigh(thighOf(self.leftLeg), stance, airBlend);
 			if (self instanceof PlayerModel playerModel) {
 				// 外层裤腿是腿的孩子（vanilla 让它们跟着腿的位姿走），同样只跳过自己的 cube ——
 				// 别再单独给 pants 写位置 / 旋转，那会和腿差一帧
@@ -282,24 +283,12 @@ public abstract class HumanoidModelMixin {
 	 * 之间按 {@code airBlend}（0 / 1）二选一：<b>跳跃那一趟为 1</b>（起跳到落地都只是稍微收腿）；
 	 * 其余腾空（含坡上滑落 / 掉落）为 0 ＝ 地面姿势（见 {@code SkiAir.airPoseBlend}）。
 	 *
-	 * <p><b>转向时的外侧腿（{@code turn} 的符号决定是哪条）</b>：
-	 * <ul>
-	 *   <li>{@code zRot} 把大腿<b>向外甩</b> {@link AlpineSkiControl#TURN_OUTWARD_LEG_DEGREES} × |turn|；</li>
-	 *   <li>{@code xRot}（前屈角）收到 {@link AlpineSkiControl#TURN_OUTWARD_LEG_BEND_SCALE} 倍（一半），
-	 *       读起来就是这条腿「伸直了」；</li>
-	 *   <li>枢轴仍在靴口（模型 y=18），所以靴口以下（雪鞋 / 脚底 / 板面）一点不动。</li>
-	 * </ul>
-	 *
-	 * <p><b>符号推导</b>（{@code zRot} 到底往哪边甩）：
-	 * {@code ModelPart} 的位姿是 {@code T(x,y) · Rz(zRot) · …}（{@code translateAndRotate} 先 translate、
-	 * 再 {@code Quaternionf.rotationZYX(zRot, yRot, xRot)}），也就是局部点 {@code (x, y)} 映到
-	 * {@code (x·cos − y·sin, x·sin + y·cos)}。大腿的可见段在局部 {@code y ∈ [−6, 0]}（<b>−y 是朝髋向上</b>，
-	 * 因为枢轴在靴口、往上是髋），上端 {@code (0, −6)} 映射到 {@code x' = +6·sinθ} ——
-	 * <b>正 θ 把上端推到模型 +x，而模型 +x 是实体左侧</b>（右腿建在 {@code x = −2.8}）。
-	 * 所以 <b>右腿往实体右侧（−x）伸 ⇒ θ 取负</b>、左腿取正 —— 与 {@code ARM_OUTWARD_ROLL}
-	 * 「−x 侧肢体正 zRot ＝ 末端向外」是同一个约定，只是大腿的「末端」在 −y 那一头，符号因此相反。
+	 * <p><b>下半身不因转向而变</b>（用户 2026-11-18：「下半身修改，改为不动」）：大腿只有前屈
+	 * {@code xRot}，{@code zRot} 恒 0 —— 曾经那套「外侧腿 {@code zRot} 外摆 20°、前屈角减半」的
+	 * 代码与常量（{@code TURN_OUTWARD_LEG_DEGREES} / {@code TURN_OUTWARD_LEG_BEND_SCALE}）已删除，
+	 * 两条腿的姿势逐帧完全相同（越转向越不会动）。
 	 */
-	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend, float turn, boolean rightLeg) {
+	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
 		thigh.visible = stance;
 		if (!stance) {
 			// 部件是我们自己建的、只由这里写：两个角都要写到底，否则会把上一个渲染对象的姿势带下去
@@ -307,11 +296,9 @@ public abstract class HumanoidModelMixin {
 			thigh.zRot = 0.0F;
 			return;
 		}
-		float baseTilt = Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR);
-		// 外侧腿只在一侧生效：向左转（turn > 0）＝右腿出去，向右转（turn < 0）＝左腿出去
-		float outward = Mth.clamp(rightLeg ? turn : -turn, 0.0F, 1.0F);
-		thigh.xRot = baseTilt * (1.0F - outward * (1.0F - AlpineSkiControl.outwardLegBendScale()));
-		thigh.zRot = (rightLeg ? -1.0F : 1.0F) * outward * AlpineSkiControl.outwardLegRadians();
+		// 只有前屈：绕靴口（模型 y=18）翻，负角＝膝往前顶。转向不影响这一条 —— 两个角都与 turn 无关。
+		thigh.xRot = Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR);
+		thigh.zRot = 0.0F;
 	}
 
 	/** {@link AlpineSkiControl#TURN_ROLL_DEGREES} 换成弧度（侧倾是转角度、模型要弧度；走方法读，见那边的注释）。 */

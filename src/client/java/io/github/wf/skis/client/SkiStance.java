@@ -66,8 +66,9 @@ public final class SkiStance {
 	public static final float SQUAT_LEG_TILT = -0.26F;
 
 	/**
-	 * <b>空中</b>（跳跃那一趟）的大腿角度（弧度，负值＝膝往前顶）：<b>-0.19 ≈ 地面 -0.26 的 73%</b> ——
-	 * 只是「缩一点点」，不是站立（曾经收到 -0.06 ≈ 地面的 1/4，用户嫌太小：看起来像站在板上）。
+	 * <b>空中</b>（跳跃那一趟）的大腿角度（弧度，负值＝膝往前顶）：<b>-0.15 ≈ 地面 -0.26 的 58%</b> ——
+	 * 只是「缩一点点」，不是站立（曾经收到 -0.06 ≈ 地面的 1/4，用户嫌太小；-0.19 又嫌收得不够，
+	 * 2026-11-18 定 -0.15）。
 	 *
 	 * <p>地面用 {@link #SQUAT_LEG_TILT}，渲染侧（{@code HumanoidModelMixin}）按
 	 * {@code SkiAir.airPoseBlend(id)} 在两者之间 {@code Mth.lerp}。blend <b>只有 0 / 1</b>：
@@ -77,7 +78,7 @@ public final class SkiStance {
 	 * {@code AIR_POSE_BLEND_TICKS} / {@code farGroundTicks} 已删除）。
 	 * 落地那一 tick {@code jumpedThisAir} 已被落地沿清掉，所以**落地当 tick 就回地面值**。
 	 */
-	public static final float SQUAT_LEG_TILT_AIR = -0.19F;
+	public static final float SQUAT_LEG_TILT_AIR = -0.15F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>上身（躯干）前倾角</b>（弧度，正值＝向前压）。
@@ -89,11 +90,12 @@ public final class SkiStance {
 	public static final float SQUAT_BODY_LEAN = 0.16F;
 
 	/**
-	 * <b>空中</b>（跳跃那一趟）的躯干前倾角（弧度，正值＝向前压）：<b>0.12 ≈ 地面 0.16 的 75%</b> ——
-	 * 与收腿配对，只比地面直一点点（不是站立：曾经是 0.04，用户嫌缩得太小）。
+	 * <b>空中</b>（跳跃那一趟）的躯干前倾角（弧度，正值＝向前压）：<b>0.08 ＝ 地面 0.16 的一半</b> ——
+	 * 与收腿配对，比地面直一点（不是站立：曾经是 0.04，用户嫌缩得太小；0.12 又嫌压得太狠，
+	 * 2026-11-18 定 0.08）。
 	 * 混合方式与 {@link #SQUAT_LEG_TILT_AIR} 完全相同（同一份 `airPoseBlend`，只有 0 / 1）。
 	 */
-	public static final float SQUAT_BODY_LEAN_AIR = 0.12F;
+	public static final float SQUAT_BODY_LEAN_AIR = 0.08F;
 
 	/**
 	 * 穿板站姿「微蹲」之 —— <b>头随上身略前低</b>（弧度，正值＝低头；0.10 rad ≈ 5.7°）。
