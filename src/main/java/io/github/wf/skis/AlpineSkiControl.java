@@ -34,9 +34,10 @@ import net.minecraft.world.phys.Vec3;
  * 一点都不改（不然下落加速会沿转身后的新朝向叠加）。<b>与单板的 {@code SnowboardControl#alignCarveHeading}
  * 完全独立</b>（各一套表、各一个方法，互相不借用）。
  *
- * <p><b>视角</b>：鼠标转，但相对锁定的身体朝向最多左右各 {@link #VIEW_LIMIT_DEGREES} 度
- * （与单板同一个限位、同一套实现，见 {@code client/SkiViewSmoothing}）。没顶到限位时视角留在世界坐标里
- * 不动（身体在下面转）；顶到之后头被身体拖着走。
+ * <p><b>视角</b>：<b>不限位</b>（与单板同一套，见 {@code client/SkiViewSmoothing}）—— 鼠标能转满一圈、背后也能看，
+ * 视角在世界坐标里不动、身体在下面转。限的只是<b>头模型</b>：渲染出来的那颗头相对身体朝向硬夹在
+ * ±{@code HEAD_MODEL_LIMIT_DEGREES} 90°（{@link SnowboardControl#headModelOffset}，两块板共用同一套无状态现算）。
+ * 曾经有一条 {@code VIEW_LIMIT_DEGREES} 把<b>视角</b>夹在身体左右各 90°，用户 2026-11-18 要求改成单板那套之后已删除。
  */
 public final class AlpineSkiControl {
 	/** <b>客户端</b>那张表：实体 id → 双板的身体朝向（度）。A/D 只改它，<b>不碰视角</b>。 */
@@ -54,15 +55,8 @@ public final class AlpineSkiControl {
 	 * （＝终于和单机一致）。饱和步长型的 {@link #VIEW_TURN_RATE_DEGREES} 同理。
 	 */
 	private static final float TURN_RATE_DEGREES = 4.0F;
-	/**
-	 * <b>双板：头（视角）相对锁定身体朝向能转的最大角度</b>：左右各 {@code 90} 度，合计 180 ——
-	 * 刚好看到正侧方，背后整片都是禁区。
-	 *
-	 * <p><b>单板没有这一项</b>：单板的视角完全不限位，90° 那个数是<b>头模型</b>的夹
-	 * （{@link SnowboardControl#HEAD_MODEL_LIMIT_DEGREES}），视角继续转、模型不跟。
-	 * <b>限的是视角，不是转向</b> —— A / D 的 {@link #TURN_RATE_DEGREES} 一点没变。
-	 */
-	public static final float VIEW_LIMIT_DEGREES = 90.0F;
+	// 视角限位（VIEW_LIMIT_DEGREES 90°）已按用户 2026-11-18 的要求删除：双板视角与单板一样不限位，
+	// ±90° 只剩「头模型」的夹（SnowboardControl.HEAD_MODEL_LIMIT_DEGREES / headModelOffset），见类注释。
 
 	/**
 	 * W 时身体每 tick 朝视角方向转多少度（<b>4.8</b>°/tick ＝ 96°/s；90° 残余约 19 tick ≈ 0.9 s 对齐，
@@ -81,18 +75,35 @@ public final class AlpineSkiControl {
 
 	/**
 	 * <b>双板转向时上身侧倾的角度</b>（度）：这一 tick 身体<b>向右转</b>就向右倾、<b>向左转</b>就向左倾，
-	 * 取这个幅度。<b>12°</b> 是「看得出在压刃、又不像要摔倒」的档；想更夸张改 18、想只微微一动改 8。
+	 * 取这个幅度。<b>6.0</b>（用户 2026-11-18：「上半身侧倾幅度减半」，12.0 → 6.0）—— 看得出在压刃、
+	 * 又不会觉得人快倒了。想更夸张改 9、想只微微一动改 4。
 	 *
-	 * <p><b>只倾上半身，下半身一点不动</b>（用户 2026-11-18 定：「上半身做的很好，下半身修改，改为不动」）：
-	 * 整人 + 板一起绕脚底转（单板 W / S 那条 {@code EntityTiltMixin} 的路）在双板上会让
-	 * <b>板与雪鞋往地里缴</b> —— 双板的两块板是平贴地面的，只能是<b>上身相对下半身</b>倾。
-	 * 所以这里只驱动 {@code HumanoidModel} 的躯干 {@code body} / 头 {@code head} / 两支手臂（绕<b>腰</b>刚性侧倾）；
-	 * 大腿仍然只绕靴口前屈 {@code SkiStance.SQUAT_LEG_TILT}（跳跃那一趟换成 {@code SQUAT_LEG_TILT_AIR}），
-	 * <b>完全不因转向而变</b> —— 曾经那套「外侧腿外伸 20° + 该腿前屈减半」已删除。
+	 * <p><b>只倾上半身</b>（躯干 {@code body} / 头 {@code head} / 两支手臂绕<b>腰</b>刚性侧倾，一个
+	 * {@code poseStack} 都不碰）。<b>下半身另有一条</b>：转向时<b>外侧腿</b>整条（大腿 → 雪鞋 → 板）
+	 * 绕<b>髋</b>刚性侧倒 {@link #TURN_LEG_TILT_DEGREES}，与这里的上身侧倾是两件事、两个常量 ——
+	 * 内侧腿仍保持屈膝站姿，见 {@code HumanoidModelMixin#placeLeg} / {@code AlpineSkiModel#setLegTilt}。
 	 *
 	 * <p>渲染侧的符号推导见 {@code HumanoidModelMixin#skis$applyUpperBodyRoll}。
 	 */
-	public static final float TURN_ROLL_DEGREES = 12.0F;
+	public static final float TURN_ROLL_DEGREES = 6.0F;
+
+	/**
+	 * <b>双板转向时外侧腿整条绕髋侧倒的角度</b>（度，<b>15.0</b>）。
+	 *
+	 * <p><b>哪条腿是外侧腿</b>由 {@link #turnLean(int)} 的符号定（{@code +1} ＝ 向左转 ⇒ 右腿是外侧腿）：
+	 * 向左转时<b>整条右腿（含雪鞋与板）向右倒出去</b>，向右转反之。系数已经在
+	 * {@link #tickTurnLean} 里按 {@link #TURN_LEAN_LERP} 平滑过，这里只乘幅度、<b>不再新开一张表</b>。
+	 *
+	 * <p><b>枢轴在髋（模型 y=12），髋一点不动</b>：腿的 {@code zRot} 天然绕髋转；
+	 * {@code AlpineSkiModel} 的 {@code ski_<side>} 组枢轴也从 y=0 搬到 y=12（cube 的 y 统一减 12，
+	 * 静止时世界位置逐字不变），于是大腿 / 小腿（雪鞋）/ 板绕同一个点、同一个角转，三截保持共线。
+	 * 该腿的大腿前屈角按「1 − 侧倒系数」缩到 0（否则膝口有拐点）。
+	 *
+	 * <p>内侧腿<b>一点不动</b>（照旧屈膝站姿）；系数为 0 时两条腿的外观与原先逐字一致。
+	 * 渲染侧一律经 {@link #legTiltRadians} 读（避开跨源集常量折叠，见 {@link #turnRollRadians()}）。
+	 */
+	public static final float TURN_LEG_TILT_DEGREES = 15.0F;
+
 
 	/**
 	 * <b>「这一 tick 身体真的转了」的死区</b>（度 / tick，<b>0.25</b>）：本 tick 的 {@code bodyYaw} 与上一 tick
@@ -523,6 +534,48 @@ public final class AlpineSkiControl {
 	 */
 	public static float turnLean(int entityId) {
 		return TURN_LEAN.getOrDefault(entityId, 0.0F);
+	}
+
+	/**
+	 * {@link #TURN_LEG_TILT_DEGREES} 换成弧度（渲染侧读）。同样<b>走方法而不是读常量</b>，理由见
+	 * {@link #turnRollRadians()}：main 源集的 {@code final static float} 会被 javac 折进 client 源集的字节码。
+	 */
+	public static float turnLegTiltRadians() {
+		return TURN_LEG_TILT_DEGREES * Mth.DEG_TO_RAD;
+	}
+
+	/**
+	 * <b>某一条腿本 tick 的侧倒角</b>（弧度，<b>带符号</b>：正 ＝ 脚朝实体<b>右</b>侧倒、负 ＝ 朝左）。
+	 *
+	 * <p>{@code zRot} 的符号：模型里腿从髋<b>往下</b>长（局部 +y），{@code Rz} 把脚底 {@code (0, 12)} 映到
+	 * {@code (−12·sinθ, 12·cosθ)}，而模型 <b>+x ＝ 实体左侧</b>，所以 <b>θ &gt; 0 ⇒ 脚朝实体右侧倒</b>
+	 * （与上身侧倾正好相反：上身是头往上、θ &gt; 0 时朝左倒）。
+	 *
+	 * <p><b>只给外侧腿</b>：{@link #turnLean(int)} 系数的符号定哪条腿在外侧 —— {@code +1}（向左转）⇒
+	 * <b>右腿</b>是外侧腿、向右倒（{@code θ > 0}）；{@code -1}（向右转）⇒ 左腿、向左倒（{@code θ < 0}）。
+	 * 另一条腿恒返回 {@code 0}（保持屈膝站姿）。系数是<b>连续</b>的，转身到一半两条腿自然换身份，不会跳变。
+	 *
+	 * @param entityId 渲染对象（avatar）的实体 id；表里没记录（远端玩家 / 没穿板）返回 0
+	 * @param rightLeg {@code true} ＝ 右腿、{@code false} ＝ 左腿
+	 */
+	public static float legTiltRadians(int entityId, boolean rightLeg) {
+		float lean = turnLean(entityId);
+		float outward = Math.max(0.0F, rightLeg ? lean : -lean);
+		float radians = outward * turnLegTiltRadians();
+		// 右腿正角（脚朝右）、左腿负角（脚朝左）—— 两侧都朝「外侧」
+		return rightLeg ? radians : -radians;
+	}
+
+	/**
+	 * 该腿的大腿前屈角要乘的比例（<b>0…1</b>）：侧倒多少就收掉多少屈膝，全倒时收到 0（膝口没有拐点，
+	 * 大腿 / 小腿 / 脚在一条直线上）。
+	 *
+	 * <p>内侧腿（系数 0）恒 {@code 1.0F} —— 屈膝站姿逐字不变；没在转向时两条腿都是 {@code 1.0F}，
+	 * 外观与改前完全一致。
+	 */
+	public static float legBendScale(int entityId, boolean rightLeg) {
+		float lean = turnLean(entityId);
+		return 1.0F - Math.max(0.0F, rightLeg ? lean : -lean);
 	}
 
 	// ---------------------------------------------------------------- 参数

@@ -165,7 +165,8 @@ public final class SnowboardControl {
 	 *
 	 * <p><b>单板的视角本身没有限位</b>（{@code client/SkiViewSmoothing} 对单板不夹）—— 用户口径：
 	 * 「只把头<b>模型</b>固定在左右 90 度，视角还能继续转，头不跟着转」。
-	 * 与双板 {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90°（那一条限的是<b>视角</b>，不是头模型）各自独立。
+	 * 用户 2026-11-18 把双板也改成这套口径之后，两块板<b>都</b>是「视角不限位、只夹头模型」——
+	 * 双板原先那条限<b>视角</b>的 {@code VIEW_LIMIT_DEGREES} 已删除，这里这个常量是两块板共用的一份。
 	 *
 	 * <p><b>夹之前必须先折</b>（见 {@link #headModelOffset}）：入参是任意大的角度（转几圈就是几百度），
 	 * 先 {@code Mth.wrapDegrees} 折到 (−180°, 180°] 再 {@code Mth.clamp}。夹在<b>未折叠</b>的连续累加量上

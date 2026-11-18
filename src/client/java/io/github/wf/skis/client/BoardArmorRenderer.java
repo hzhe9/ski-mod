@@ -52,6 +52,8 @@ public class BoardArmorRenderer implements net.fabricmc.fabric.api.client.render
 		if (slot != EquipmentSlot.FEET) {
 			return;
 		}
+		// 双板的「外侧腿侧倒」不在这里写：submitModel 只是排队，setupAnim 由刷队列时按 state 调，
+		// 角在 AlpineSkiModel#setupAnim 里落到 ski_<side> 组上（见那边的注释）。
 		collector.order(0).submitModel(
 				this.boardModel,
 				state,

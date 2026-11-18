@@ -102,8 +102,8 @@ public class SkisClient implements ClientModInitializer {
 	 * 每个玩家这一 tick 的运动结算（远端玩家只写朝向、不写速度）。
 	 */
 	private static void tickMotion(Minecraft client, LocalPlayer self) {
-		// 双板：A / D 只转**身体**（AlpineSkiControl.BODY_YAW），W 时身体再朝视角追 4.8°/tick；视角由鼠标转、并被限在身体 ±90°
-		// （client/SkiViewSmoothing 的单一 headOffset 状态，原 client/SkiSteering 已删）。
+		// 双板：A / D 只转**身体**（AlpineSkiControl.BODY_YAW），W 时身体再朝视角追 4.8°/tick；视角由鼠标转、
+		// **不限位**（与单板同一套，client/SkiViewSmoothing 的单一 headOffset 状态；原 client/SkiSteering 已删）。
 		for (Player player : client.level.players()) {
 			tickPlayerMotion(player, self);
 		}
@@ -162,7 +162,7 @@ public class SkisClient implements ClientModInitializer {
 			}
 		} else {
 			// ——— 双板：A / D 转身体 4.0°/tick，W 再朝视角方向补 4.8°/tick ———
-			// 视角本身仍由鼠标管（限位见 SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
+			// 视角本身仍由鼠标管、**不限位**（client/SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
 			AlpineSkiControl.ensureLocked(player.getId(), player.getYRot(), true);
 			AlpineSkiControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys), true);
 			// 越肩视角下跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）
@@ -189,6 +189,7 @@ public class SkisClient implements ClientModInitializer {
 		// 单板 = 身体朝向 + 头偏角 —— 方向随滑行方向左右（SnowboardControl.headSide = -boardSide：
 		// 往左滑脸正对左、往右滑脸正对右），幅度固定 90°（SNOWBOARD_HEAD_DEGREES，不再随 W / S 变）；
 		// 换边那 180° 由 SnowboardControl.tickHead 平滑扫过 0°（不瞬跳）。
+		// 越肩下双板头仍 = 身体朝向（现状），不跟视角（相机自由，视角没有意义）。
 		// 只写本地玩家（别人的头不该被本机的越肩状态改造）；
 		// yHeadRotO 不写成等于当前值 —— 原版 tickHeadTurn 每 tick 会把它记成上一 tick 的头朝向，
 		// 留着插值头才是平滑转过去的，覆盖成同值会硬跳。
@@ -199,8 +200,9 @@ public class SkisClient implements ClientModInitializer {
 			}
 			if (ShoulderSurfingCompat.isActive()) {
 				player.setYHeadRot(yaw + (board ? SnowboardControl.headOffset(player.getId(), true) : 0.0F));
-			} else if (board && !player.isPassenger() && !player.isSleeping()) {
-				// ——— 原版第三人称：<b>头模型</b>硬夹在 ±90°，视角（yRot / 相机）继续自由转 ———
+			} else if (!player.isPassenger() && !player.isSleeping()) {
+				// ——— 原版第三人称：<b>头模型</b>硬夹在 ±90°，视角（yRot / 相机）不限位、继续自由转 ———
+				// <b>两块板同一套</b>（用户 2026-11-18：双板改成单板那套「视角不限位、头模型 ±90°」）。
 				// yHeadRot 是「头模型」的唯一来源（LivingEntityRenderer#extractRenderState 把它经
 				// wrapDegrees(yHeadRot − yBodyRot) 塞进 render state 的 yRot → HumanoidModel 的 head.yRot）。
 				// 不写这一句时原版 tickHeadTurn 每 tick 把 yHeadRot 抄成 yRot：视角转多少头就转多少（无限位）。

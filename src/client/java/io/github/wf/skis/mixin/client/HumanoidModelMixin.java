@@ -51,6 +51,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 腿本身仍是原版的位置（{@code y} 恒 12、{@code yScale} 恒 1.0，一律不写），所以脚底与板面始终对齐。
  *
  * <p>游泳 / 鞘翅 / 骑乘时保持原版姿势。
+ *
+ * <p><b>双板转向时的两条姿态</b>（用户 2026-11-18）：① 上半身（躯干 / 头 / 两臂）绕腰侧倾
+ * {@code AlpineSkiControl.TURN_ROLL_DEGREES}（6°）；② <b>外侧腿整条</b>绕<b>髋</b>侧倒
+ * {@code AlpineSkiControl.TURN_LEG_TILT_DEGREES}（15°）—— 腿 {@code zRot} 是这个角、该腿的大腿前屈按
+ * 「1 − 系数」收掉（膝口没有拐点），雪鞋与板由 {@code AlpineSkiModel} 用**同一个角**一起转
+ * （那一组的枢轴也在髋 y=12）。哪条腿是外侧腿由 {@code turnLean} 的符号定，系数连续、转身到一半自然换边。
+ * 内侧腿保持屈膝站姿；系数为 0（不转向 / 单板 / 远端玩家）时外观与改前逐字一致。
  */
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
@@ -142,26 +149,32 @@ public abstract class HumanoidModelMixin {
 		float lean = stance && !board && entityId >= 0 ? AlpineSkiControl.turnLean(entityId) : 0.0F;
 		// 蹲行优先：蹲着的时候整段「转向姿势」都不写（躯干 / 头保持原版弯腰）。
 		float turn = state.isCrouching ? 0.0F : lean;
+		// 外侧腿：整条（大腿 → 雪鞋 → 板）绕髋侧倒（双板专属，与上身侧倾<b>同一个系数、同一个开关</b>）。
+		// 单板 / 蹲行 / 非 avatar → 0；内侧腿恒 0（屈膝站姿一字不改）。
+		boolean legTilt = stance && !board && !state.isCrouching && entityId >= 0;
+		float rightTilt = legTilt ? AlpineSkiControl.legTiltRadians(entityId, true) : 0.0F;
+		float leftTilt = legTilt ? AlpineSkiControl.legTiltRadians(entityId, false) : 0.0F;
+		float rightBend = legTilt ? AlpineSkiControl.legBendScale(entityId, true) : 1.0F;
+		float leftBend = legTilt ? AlpineSkiControl.legBendScale(entityId, false) : 1.0F;
 		// 上身侧倾：在腿之前把躯干那一组（body / head / 手臂）摆好。
-		// 下半身一点不动 —— 大腿只绕靴口前屈（SQUAT_LEG_TILT / 跳跃那趟的 AIR 值），不看 turn。
 		skis$applyUpperBodyRoll(self, turn * rollRadians());
 		// 腿的开关（skipDraw / 大腿 visible / 护甲腿 visible）**每一帧两个方向都写到底**：
 		// 同一个模型实例被所有渲染对象共用（玩家、不穿板的人），漏写一条分支就会把上一个
 		// 渲染对象留下的状态带给下一个 —— 那正是「不穿板的人腿少了一截」的来源。
-		skis$poseLegSplit(self, stance, airBlend);
+		skis$poseLegSplit(self, stance, airBlend, rightTilt, leftTilt, rightBend, leftBend);
 		if (!stance) {
 			return;
 		}
 
 		if (board) {
 			// 单板：与双板同一套站姿 —— 两腿平行、向外岔开（横向偏移与 SnowboardModel 的鞋位同值，
-			// 否则脚会与鞋错开）；屈膝在上面的 skis$poseLegSplit 里绕靴口做。
-			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD);
-			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD);
+			// 否则脚会与鞋错开）；屈膝在上面的 skis$poseLegSplit 里绕靴口做。侧倒只给双板，这里恒 0。
+			placeLeg(self.rightLeg, -SkiStance.BOARD_LEG_SPREAD, 0.0F);
+			placeLeg(self.leftLeg, SkiStance.BOARD_LEG_SPREAD, 0.0F);
 		} else {
-			// 双板：两腿只横向拉开、保持平行
-			placeLeg(self.rightLeg, -SkiStance.legOffsetX());
-			placeLeg(self.leftLeg, SkiStance.legOffsetX());
+			// 双板：两腿只横向拉开、保持平行；外侧腿再绕**髋**侧倒（内侧腿 0，照旧屈膝）
+			placeLeg(self.rightLeg, -SkiStance.legOffsetX(), rightTilt);
+			placeLeg(self.leftLeg, SkiStance.legOffsetX(), leftTilt);
 		}
 
 		// 手臂：拿滑雪杖的那只手播一次撑杖、另一只手按板块摆固定姿势（见下面 freeArmXrot / freeArmRoll：
@@ -219,14 +232,21 @@ public abstract class HumanoidModelMixin {
 	 * {@code skipDraw} 只跳过<b>本部件自己的 cube</b>、children 照常渲染 —— 正是「藏起 12 单位的那根、
 	 * 只留 6 单位的大腿」需要的开关。
 	 */
-	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend) {
+	private void skis$poseLegSplit(HumanoidModel<?> self, boolean stance, float airBlend,
+			float rightTilt, float leftTilt, float rightBend, float leftBend) {
+		if (!stance) {
+			// 侧倒角必须写回 0：模型实例被所有渲染对象共用，留着上一个穿板玩家的角度会让
+			// 不穿板的人腿歪着（与 skipDraw / thigh.visible 同一条纪律：两个方向都写到底）
+			self.rightLeg.zRot = 0.0F;
+			self.leftLeg.zRot = 0.0F;
+		}
 		ModelPart thigh = thighOf(self.rightLeg);
 		if (thigh != null) {
 			// 玩家模型（createMesh 加了 skis_thigh）：原版整条腿跳过自己的 cube，大腿当孩子照常画
 			self.rightLeg.skipDraw = stance;
 			self.leftLeg.skipDraw = stance;
-			poseThigh(thigh, stance, airBlend);
-			poseThigh(thighOf(self.leftLeg), stance, airBlend);
+			poseThigh(thigh, stance, airBlend, rightBend);
+			poseThigh(thighOf(self.leftLeg), stance, airBlend, leftBend);
 			if (self instanceof PlayerModel playerModel) {
 				// 外层裤腿是腿的孩子（vanilla 让它们跟着腿的位姿走），同样只跳过自己的 cube ——
 				// 别再单独给 pants 写位置 / 旋转，那会和腿差一帧
@@ -283,12 +303,15 @@ public abstract class HumanoidModelMixin {
 	 * 之间按 {@code airBlend}（0 / 1）二选一：<b>跳跃那一趟为 1</b>（起跳到落地都只是稍微收腿）；
 	 * 其余腾空（含坡上滑落 / 掉落）为 0 ＝ 地面姿势（见 {@code SkiAir.airPoseBlend}）。
 	 *
-	 * <p><b>下半身不因转向而变</b>（用户 2026-11-18：「下半身修改，改为不动」）：大腿只有前屈
-	 * {@code xRot}，{@code zRot} 恒 0 —— 曾经那套「外侧腿 {@code zRot} 外摆 20°、前屈角减半」的
-	 * 代码与常量（{@code TURN_OUTWARD_LEG_DEGREES} / {@code TURN_OUTWARD_LEG_BEND_SCALE}）已删除，
-	 * 两条腿的姿势逐帧完全相同（越转向越不会动）。
+	 * <p><b>外侧腿在转向侧倒时把前屈收掉</b>：{@code bendScale}（{@code AlpineSkiControl#legBendScale}）
+	 * ＝ {@code 1 − 侧倒系数}，全倒时前屈为 0 —— 否则膝口有一个拐点，大腿与前倾后的小腿（雪鞋）、
+	 * 板不在一条线上（用户口径：「大腿、小腿和脚保持着一条倾斜线上」）。
+	 * {@code zRot} 仍<b>只在这里写 0</b>：腿的侧倒是<b>腿本身</b>的 {@code zRot}（绕髋，见 {@code placeLeg}），
+	 * 不是大腿绕靴口那一转 —— 两个枢轴分工不同，别混。
+	 *
+	 * <p>内侧腿 / 没在转向时 {@code bendScale = 1}，角度与改前逐字相同。
 	 */
-	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend) {
+	private static void poseThigh(ModelPart thigh, boolean stance, float airBlend, float bendScale) {
 		thigh.visible = stance;
 		if (!stance) {
 			// 部件是我们自己建的、只由这里写：两个角都要写到底，否则会把上一个渲染对象的姿势带下去
@@ -296,8 +319,8 @@ public abstract class HumanoidModelMixin {
 			thigh.zRot = 0.0F;
 			return;
 		}
-		// 只有前屈：绕靴口（模型 y=18）翻，负角＝膝往前顶。转向不影响这一条 —— 两个角都与 turn 无关。
-		thigh.xRot = Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR);
+		// 只有前屈：绕靴口（模型 y=18）翻，负角＝膝往前顶。侧倒越满，前屈收得越多（收满 = 0）。
+		thigh.xRot = Mth.lerp(airBlend, SkiStance.SQUAT_LEG_TILT, SkiStance.SQUAT_LEG_TILT_AIR) * bendScale;
 		thigh.zRot = 0.0F;
 	}
 
@@ -394,14 +417,18 @@ public abstract class HumanoidModelMixin {
 	 * <p>屈膝<b>不在这里</b>：腿本身仍是原版那条（枢轴恒在 {@link #LEG_PIVOT_Y}（12）、{@code yScale} 恒 1.0），
 	 * 角度归零是为了让「髋 → 靴口」这一段保持竖直；蹲的观感全由挂在它下面的大腿子部件
 	 * （{@link #poseThigh}）绕靴口翻出来 —— 这样脚底永远在板面上，膝是唯一被顶出去的东西。
+	 *
+	 * <p>{@code zRot} 是<b>转向时外侧腿整条的侧倒角</b>（弧度，绕髋；内侧腿传 0）。
+	 * 它和 {@code AlpineSkiModel#setLegTilt} 写进 {@code ski_<side>} 组的角是<b>同一个值</b> ——
+	 * 腿与「雪鞋 + 板」绕同一个髋点、同一个角转，三截才共线（髋 {@code y} 仍恒 12，不因侧倒移位）。
 	 */
-	private static void placeLeg(ModelPart leg, float x) {
+	private static void placeLeg(ModelPart leg, float x, float zRot) {
 		leg.x = x;
 		leg.y = LEG_PIVOT_Y;
 		leg.z = 0.0F;
 		leg.xRot = 0.0F;
 		leg.yRot = 0.0F;
-		leg.zRot = 0.0F;
+		leg.zRot = zRot;
 	}
 
 }

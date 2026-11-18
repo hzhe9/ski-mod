@@ -7,27 +7,29 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 
 /**
- * <b>视角限位（只对双板生效；单板不限位）</b>：双板的头（视角）相对锁定的身体朝向最多左右各
- * {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90 度。
+ * <b>视角的每帧记账 + 帧间插值（两块板同一套：<u>视角不限位</u>）</b>。
  *
- * <p><b>单板不再限位（本轮 III）</b>：用户口径是「只把头<b>模型</b>夹在左右 90°，视角还能继续转」——
- * 所以这里对单板<b>不夹</b>（{@link #limit} 返回无穷大）。单板这颗头模型<b>不读这里的状态</b>：
+ * <p><b>视角不限位</b>（用户 2026-11-18 把双板也改成单板那套口径：「视角移动改为类似单板，头部模型的左右范围
+ * 是 ±90°，但是视角的转向没有限制」）：鼠标能转满一圈、背后也能看 —— 这里对两块板<b>都不夹</b>
+ * （双板原先那条 {@code AlpineSkiControl.VIEW_LIMIT_DEGREES} 90° 已删除）。±90° 只服务<b>头模型</b>：
  * {@code client/SkisClient} 每 tick 用「当前视 yaw − 身体朝向」现算、先 {@code Mth.wrapDegrees} 折叠、
- * 再夹 ±{@code HEAD_MODEL_LIMIT_DEGREES}（见 {@code SnowboardControl#headModelOffset}）。
- * 上一版把这个 {@code headOffset}（当时是<b>不折叠</b>的连续累加量）直接夹了写进 {@code yHeadRot}，
+ * 再夹 ±{@code HEAD_MODEL_LIMIT_DEGREES}（见 {@code SnowboardControl#headModelOffset}，两块板共用同一套）。
+ * 上一版把这里的 {@code headOffset}（当时是<b>不折叠</b>的连续累加量）直接夹了写进 {@code yHeadRot}，
  * 转几圈后累加量到 495 / 585…，夹出来恒为上限、自己又回不到真实夹角 —— 头模型就被<b>永久冻在背后</b>。
- * 无状态的现算是那条回归的修法；这里的 {@code headOffset} 现在<b>只服务于视角本身</b>，而且每帧折回
- * (−180°, 180°]，连「漂到几百度」这个前提都不再成立。
+ * 无状态的现算是那条回归的修法；这里的 {@code headOffset} 现在<b>只服务于视角本身</b>。
  *
- * <p><b>状态只有一个</b>：{@code headOffset}（视角相对身体朝向的偏角，度）。两个入口改的都是<b>同一个标量</b>、
- * 夹的也是同一个限位，所以结构上不可能互相拉回：
+ * <p><b>状态只有一个</b>：{@code headOffset}（视角相对身体朝向的偏角，度）。两个入口改的都是<b>同一个标量</b>，
+ * 所以结构上不可能互相拉回：
  * <ul>
  *   <li>{@code mixin/client/SkiHeadLimitMixin}（{@code Entity#turn} 的 HEAD / TAIL —— 鼠标每帧的入口）：
- *       把这一帧真正转过的角度记进 {@code headOffset} 并夹一次，<b>只撤掉超出限位的那一点</b>；</li>
+ *       把这一帧真正转过的角度记进 {@code headOffset}（不夹，只折回整圈）；</li>
  *   <li>{@link #frame}（{@code Camera#alignWithEntity} 的 HEAD，每帧一次）：先把「身体这一帧转了多少」从
- *       {@code headOffset} 里扣掉（没饱和时视角留在世界坐标里不动、只听鼠标），再用
+ *       {@code headOffset} 里扣掉（视角留在世界坐标里不动、只听鼠标），再用
  *       {@code 插值后的身体朝向 + headOffset} 作目标写一次 yaw —— <b>整个模组唯一一处按帧写视角</b>。</li>
  * </ul>
+ *
+ * <p><b>每帧都折回 (−180°, 180°]</b>：视角不限位之后 {@code headOffset} 是「转几圈就是几百度」的累加量；
+ * 折掉整圈对写入的 yaw 完全等价（差值本身就是被 wrap 过的），但状态不会漂到几百度。
  *
  * <p><b>为什么必须每帧做</b>：原版 {@code Entity#getViewYRot(float)} 本来是插值的
  * （{@code Mth.rotLerp(partial, yRotO, yRot)}），<b>但 {@code LocalPlayer#getViewYRot(float)} 把它覆盖掉了：
@@ -49,7 +51,7 @@ import net.minecraft.util.Mth;
  */
 public final class SkiViewSmoothing {
 	/** 写视角的容差（度）：残差比它还小就不动 yaw —— 别为 1e-4 的浮点误差每帧都写一次。 */
-	private static final float LIMIT_EPSILON = 0.01F;
+	private static final float VIEW_EPSILON = 0.01F;
 
 	/** 上一 tick 的身体朝向（本段插值的起点）。 */
 	private static float bodyPrev;
@@ -59,13 +61,13 @@ public final class SkiViewSmoothing {
 	private static float bodyRender = Float.NaN;
 	/** 上一帧用的基准（算「身体这一帧转了多少」）。 */
 	private static float renderLast = Float.NaN;
-	/** <b>唯一限位状态</b>：视角相对身体朝向的偏角（度；双板夹在 ±limit 内，单板每帧折回 (−180°, 180°]）。 */
+	/** <b>唯一的偏角状态</b>：视角相对身体朝向的角度（度；每帧折回 (−180°, 180°]，<b>不夹</b>）。 */
 	private static float headOffset = Float.NaN;
-	/** 插值 / 限位状态是否有效（脱板、骑乘、换板、换世界都要重新起算）。 */
+	/** 插值状态是否有效（脱板、骑乘、换板、换世界都要重新起算）。 */
 	private static boolean tracked;
 	/** 正在跟踪哪个玩家。 */
 	private static int trackedId = Integer.MIN_VALUE;
-	/** 跟踪的是不是单板（决定取哪份限位常量、哪张身体朝向表）。 */
+	/** 跟踪的是不是单板（决定读哪张身体朝向表 —— 两块板的视角都不限位）。 */
 	private static boolean trackedSnowboard;
 	/** {@code Entity#turn} 的 HEAD 记下的、转之前的 yaw（TAIL 用它算这一帧真正转了多少）。 */
 	private static float turnStart = Float.NaN;
@@ -88,9 +90,8 @@ public final class SkiViewSmoothing {
 		}
 		if (ShoulderSurfingCompat.isActive()) {
 			// ——— 越肩视角：相机完全自由 ———
-			// 限位、插值、每帧写视角全部停手（也不改 yRot / yHeadRot），否则会和对面模组的相机打架。
-			// reset() 顺手清状态：退出越肩后下一次 frame 走「初次接手」分支，
-			// 按当时的视角重新起算 headOffset（并夹一次），限位是干净重启的。
+			// 插值、每帧写视角全部停手（也不改 yRot / yHeadRot），否则会和对面模组的相机打架。
+			// reset() 顺手清状态：退出越肩后下一次 frame 走「初次接手」分支，按当时的视角重新起算 headOffset。
 			reset();
 			return;
 		}
@@ -100,13 +101,12 @@ public final class SkiViewSmoothing {
 				: AlpineSkiControl.bodyYaw(player.getId(), player.getYRot(), true);
 
 		if (!tracked || trackedId != player.getId() || trackedSnowboard != snowboard) {
-			// 刚穿板 / 换了另一块板 / 换了玩家：从当前视角接手，夹一次，避免视角跳变
+			// 刚穿板 / 换了另一块板 / 换了玩家：从当前视角接手，避免视角跳变
 			bodyPrev = bodyNow;
 			bodyLast = bodyNow;
 			bodyRender = bodyNow;
 			renderLast = bodyNow;
-			headOffset = Mth.clamp(Mth.wrapDegrees(player.getYRot() - bodyNow),
-					-limit(snowboard), limit(snowboard));
+			headOffset = Mth.wrapDegrees(player.getYRot() - bodyNow);
 			tracked = true;
 			trackedId = player.getId();
 			trackedSnowboard = snowboard;
@@ -115,23 +115,16 @@ public final class SkiViewSmoothing {
 			bodyLast = bodyNow;
 		}
 		bodyRender = bodyPrev + Mth.wrapDegrees(bodyNow - bodyPrev) * partialTick;
-		float limit = limit(snowboard);
 
-		// 身体这一帧转了多少，就从 offset 里扣掉多少 —— 没饱和时视角留在世界坐标里不动（只听鼠标）；
-		// 饱和后 offset 被夹住，视角就只能跟着身体走（「头被身体拖着走」，而且是一帧一小步）。
+		// 身体这一帧转了多少，就从 offset 里扣掉多少 —— 视角留在世界坐标里不动（只听鼠标），
+		// 身体在下面按 tick 转、这里按帧插值，镜头于是平滑地搭在同一个基准上。
 		float bodyStep = Mth.wrapDegrees(bodyRender - renderLast);
 		renderLast = bodyRender;
-		headOffset = Mth.clamp(headOffset - bodyStep, -limit, limit);
-		if (snowboard) {
-			// 单板 limit 是 ∞，上面那一步等于没夹 —— 兜底把偏角折回 (−180°, 180°]，状态就不可能再漂到
-			// 几百度。视图目标是 {@code bodyRender + headOffset}、只经下面对 {@code wrapDegrees} 的取差消费，
-			// 折掉整圈对 yaw 的写入完全等价（差值本身就是被 wrap 过的）。
-			headOffset = Mth.wrapDegrees(headOffset);
-		}
+		headOffset = Mth.wrapDegrees(headOffset - bodyStep);
 
 		// ——— 整个模组里唯一一处「按帧写视角」 ———
 		float correction = Mth.wrapDegrees(bodyRender + headOffset - player.getYRot());
-		if (Math.abs(correction) > LIMIT_EPSILON) {
+		if (Math.abs(correction) > VIEW_EPSILON) {
 			turnView(player, correction);
 		}
 	}
@@ -142,11 +135,10 @@ public final class SkiViewSmoothing {
 	}
 
 	/**
-	 * {@code Entity#turn} 的 TAIL：鼠标这一帧真正转过的角度记进 {@link #headOffset} 并夹一次，
-	 * <b>只撤掉超出限位的那一点</b>，其余照旧由鼠标生效 —— 所以顶到限位后往回转会立刻响应，没有死区。
+	 * {@code Entity#turn} 的 TAIL：这一帧鼠标真正转过的角度记进 {@link #headOffset}。
 	 *
-	 * <p>这里刻意<b>不</b>拿身体朝向当基准把 yRot 重新夹一遍：那正是旧设计「两处各夹一次、基准差一帧」的来源
-	 * （鼠标那次按上一帧的 bodyRender 夹、本帧相机那次按本帧的夹），于是每帧来回拉。
+	 * <p><b>不限位、不撤任何角度</b>：只把累加量折回 (−180°, 180°]，鼠标转多少视角就转多少（两块板同一套）。
+	 * 视角是否还搭在身体朝向的基准上由 {@link #frame} 每帧对齐 —— 这里不动 yRot。
 	 */
 	public static void turnEnd(LocalPlayer player) {
 		if (!tracked || Float.isNaN(turnStart)) {
@@ -157,13 +149,7 @@ public final class SkiViewSmoothing {
 		if (applied == 0.0F) {
 			return;
 		}
-		float limit = limit(trackedSnowboard);
-		float raw = headOffset + applied;
-		float clamped = Mth.clamp(raw, -limit, limit);
-		headOffset = clamped;
-		if (clamped != raw) {
-			turnView(player, clamped - raw);
-		}
+		headOffset = Mth.wrapDegrees(headOffset + applied);
 	}
 
 	/** 脱板 / 骑乘 / 换世界 / 换板时清状态：下一次 {@link #frame} 会按当时的视角重新起算。 */
@@ -176,11 +162,6 @@ public final class SkiViewSmoothing {
 		turnStart = Float.NaN;
 	}
 
-	/** 这块板的视角限位：<b>双板 90°；单板不限位</b>（见类注释的「单板不再限位」）。 */
-	private static float limit(boolean snowboard) {
-		return snowboard ? Float.POSITIVE_INFINITY : AlpineSkiControl.VIEW_LIMIT_DEGREES;
-	}
-
 	/**
 	 * 转视角一个「增量」，<b>四个朝向字段一起挪同样的量</b>：
 	 * {@code yRot}（朝向本体）+ {@code yRotO}（上一 tick 的朝向＝帧间插值起点）+
@@ -189,7 +170,7 @@ public final class SkiViewSmoothing {
 	 * <p>只动 {@code yRot} 的话 {@code yRotO} 会拖在后面（原版 {@code Entity#turn} 是两者同加），
 	 * 任何走 {@code getYRot(partial)} / {@code Mth.rotLerp} 的地方（乘客分支、第三人称模型）都会被拖慢。
 	 *
-	 * <p>两个调用点都用它：{@link #frame} 的每帧目标补正、{@link #turnEnd} 的越界撤除。
+	 * <p>调用点只有 {@link #frame} 的每帧目标补正（视角不限位之后不再有「越界撤除」那条）。
 	 */
 	public static void turnView(LocalPlayer player, float degrees) {
 		if (degrees == 0.0F || !Float.isFinite(degrees)) {
