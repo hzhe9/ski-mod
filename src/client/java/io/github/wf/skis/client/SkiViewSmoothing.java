@@ -11,10 +11,13 @@ import net.minecraft.util.Mth;
  * {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90 度。
  *
  * <p><b>单板不再限位（本轮 III）</b>：用户口径是「只把头<b>模型</b>夹在左右 135°，视角还能继续转」——
- * 所以这里对单板<b>不夹</b>（{@link #limit} 返回无穷大），{@code headOffset} 变成一个<b>连续累加</b>的偏角
- * （可以超过 ±180、绕整圈），{@link #viewOffsetDegrees()} 把它交出去，由
- * {@code SnowboardControl.headModelOffset} 夹在 ±{@code HEAD_MODEL_LIMIT_DEGREES} 再写进 {@code yHeadRot}。
- * 夹在<b>连续量</b>上是关键：渲染侧拿到的 {@code wrapDegrees(head − body)} 会绕圈，在 180° 处掉头。
+ * 所以这里对单板<b>不夹</b>（{@link #limit} 返回无穷大）。单板这颗头模型<b>不读这里的状态</b>：
+ * {@code client/SkisClient} 每 tick 用「当前视 yaw − 身体朝向」现算、先 {@code Mth.wrapDegrees} 折叠、
+ * 再夹 ±{@code HEAD_MODEL_LIMIT_DEGREES}（见 {@code SnowboardControl#headModelOffset}）。
+ * 上一版把这个 {@code headOffset}（当时是<b>不折叠</b>的连续累加量）直接夹了写进 {@code yHeadRot}，
+ * 转几圈后累加量到 495 / 585…，夹出来恒为 135、自己又回不到真实夹角 —— 头模型就被<b>永久冻在背后</b>。
+ * 无状态的现算是那条回归的修法；这里的 {@code headOffset} 现在<b>只服务于视角本身</b>，而且每帧折回
+ * (−180°, 180°]，连「漂到几百度」这个前提都不再成立。
  *
  * <p><b>状态只有一个</b>：{@code headOffset}（视角相对身体朝向的偏角，度）。两个入口改的都是<b>同一个标量</b>、
  * 夹的也是同一个限位，所以结构上不可能互相拉回：
@@ -56,7 +59,7 @@ public final class SkiViewSmoothing {
 	private static float bodyRender = Float.NaN;
 	/** 上一帧用的基准（算「身体这一帧转了多少」）。 */
 	private static float renderLast = Float.NaN;
-	/** <b>唯一限位状态</b>：视角相对身体朝向的偏角（度，已夹在 ±limit 内）。 */
+	/** <b>唯一限位状态</b>：视角相对身体朝向的偏角（度；双板夹在 ±limit 内，单板每帧折回 (−180°, 180°]）。 */
 	private static float headOffset = Float.NaN;
 	/** 插值 / 限位状态是否有效（脱板、骑乘、换板、换世界都要重新起算）。 */
 	private static boolean tracked;
@@ -119,6 +122,12 @@ public final class SkiViewSmoothing {
 		float bodyStep = Mth.wrapDegrees(bodyRender - renderLast);
 		renderLast = bodyRender;
 		headOffset = Mth.clamp(headOffset - bodyStep, -limit, limit);
+		if (snowboard) {
+			// 单板 limit 是 ∞，上面那一步等于没夹 —— 兜底把偏角折回 (−180°, 180°]，状态就不可能再漂到
+			// 几百度。视图目标是 {@code bodyRender + headOffset}、只经下面对 {@code wrapDegrees} 的取差消费，
+			// 折掉整圈对 yaw 的写入完全等价（差值本身就是被 wrap 过的）。
+			headOffset = Mth.wrapDegrees(headOffset);
+		}
 
 		// ——— 整个模组里唯一一处「按帧写视角」 ———
 		float correction = Mth.wrapDegrees(bodyRender + headOffset - player.getYRot());
@@ -170,17 +179,6 @@ public final class SkiViewSmoothing {
 	/** 这块板的视角限位：<b>双板 90°；单板不限位</b>（见类注释的「单板不再限位」）。 */
 	private static float limit(boolean snowboard) {
 		return snowboard ? Float.POSITIVE_INFINITY : AlpineSkiControl.VIEW_LIMIT_DEGREES;
-	}
-
-	/**
-	 * <b>视角相对身体朝向的连续偏角</b>（度；还没接手时 {@code NaN}）。
-	 *
-	 * <p>单板没有视角限位，所以这个值<b>可以超过 ±180</b>（转几圈就是几百度，一路累加），
-	 * 头模型那道硬夹正是靠它保持连续 —— 见 {@code SnowboardControl.headModelOffset}。
-	 * 双板那边它恒在 ±90 内（限位夹着），调用方不读。
-	 */
-	public static float viewOffsetDegrees() {
-		return tracked ? headOffset : Float.NaN;
 	}
 
 	/**

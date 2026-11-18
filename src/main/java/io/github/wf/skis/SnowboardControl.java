@@ -161,13 +161,14 @@ public final class SnowboardControl {
 	 * <b>渲染头（头模型）相对身体朝向的硬上限</b>（度，左右各一份）：头模型最多扭到 <b>135°</b>，
 	 * 视角再过也停在 135（<b>不掉头、不回抽、不再跟</b>）。
 	 *
-	 * <p><b>单板的视角本身没有限位</b>（{@code client/SkiViewSmoothing} 对单板不夹，{@link #headModelOffset}
-	 * 收的是<b>连续</b>偏角）—— 用户口径：「只把头<b>模型</b>固定在左右 135 度，视角还能继续转，头不跟着转」。
+	 * <p><b>单板的视角本身没有限位</b>（{@code client/SkiViewSmoothing} 对单板不夹）—— 用户口径：
+	 * 「只把头<b>模型</b>固定在左右 135 度，视角还能继续转，头不跟着转」。
 	 * 与双板 {@link AlpineSkiControl#VIEW_LIMIT_DEGREES} 90°（那一条限的是<b>视角</b>，不是头模型）各自独立。
 	 *
-	 * <p><b>为什么必须夹在「连续的偏角」上、而不是 render state 里那个 {@code wrapDegrees(head−body)}</b>：
-	 * 后者恒在 (−180°, 180°]，视角转到 170° 时头停在 135，再转到 190° 就变成 −170 → 夹出来是 −135 ——
-	 * 头会<b>瞬间掉到另一侧</b>。夹在连续量上就没有这个问题（190 → 仍是 135）。
+	 * <p><b>夹之前必须先折</b>（见 {@link #headModelOffset}）：入参是任意大的角度（转几圈就是几百度），
+	 * 先 {@code Mth.wrapDegrees} 折到 (−180°, 180°] 再 {@code Mth.clamp}。夹在<b>未折叠</b>的连续累加量上
+	 * 是本轮回归的根因 —— 累加量过 135 之后被钉死在 135，而它本身不会再回到真实夹角，
+	 * 于是转完一圈要反向转回去整整一圈才「解冻」（用户看到的是「头朝背后、怎么转都不动」）。
 	 */
 	public static final float HEAD_MODEL_LIMIT_DEGREES = 135.0F;
 	/**
@@ -770,27 +771,38 @@ public final class SnowboardControl {
 	}
 
 	/**
-	 * <b>头模型（渲染出来的头）相对身体朝向的 yaw</b>（度）：把<b>连续的</b>视角偏角硬夹在
-	 * ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°。
+	 * <b>头模型（渲染出来的头）相对身体朝向的 yaw</b>（度）：把视角相对身体朝向的偏角
+	 * <b>先折到 (−180°, 180°]、再夹到 ±{@link #HEAD_MODEL_LIMIT_DEGREES} 135°</b>。
 	 *
 	 * <p>调用点：{@code client/SkisClient} 每 tick 对本机玩家写 {@code yHeadRot = 身体朝向 + 本方法(...)}，
-	 * 且<b>只在非越肩视角下</b>（越肩下头朝横移方向，另有一套）。渲染侧拿到的就是
+	 * 入参是<b>当场算出来的</b> {@code wrapDegrees(当前视 yaw − 身体朝向)}，且<b>只在非越肩视角 / 非乘客 /
+	 * 非睡眠</b>时写（越肩下头朝横移方向，另有一套）。渲染侧拿到的就是
 	 * {@code wrapDegrees(yHeadRot − yBodyRot)}（{@code LivingEntityRenderer#extractRenderState} 的
 	 * {@code state.yRot}），落进 {@code HumanoidModel#setupAnim} 的 {@code head.yRot}。
 	 *
-	 * <p><b>为什么夹这里、而不是在渲染层夹 {@code state.yRot}</b>：那边已经是 {@code wrapDegrees} 之后的
-	 * (−180°, 180°]，视角过 180° 时会跳到 −170 那一侧，夹出来是 −135 —— 头会<b>掉头</b>。这里的入参是
-	 * {@code SkiViewSmoothing} 那个<b>不绕圈</b>的偏角（0 → 170 → 190 → … 一直累加），夹在它上面
-	 * 才能「转过 135° 之后停在 135 不动」。
+	 * <p><b>无状态是硬要求</b>：这个角度<b>不能</b>拿跨 tick 的累加量来夹。上一版把
+	 * {@code SkiViewSmoothing} 那个「不绕圈」的连续偏角直接夹在 ±135 上，结果是：转过一圈后累加量
+	 * 已经是 495、585…，夹出来恒为 135，而累加量自己不会回到真实夹角 —— 头模型看上去「朝背后 + 跟身体
+	 * 冻在一起」，玩家必须反向转回整整 {@code 累加量 − 135} 度（几圈）才解冻。改成每 tick 从
+	 * 「当前视 yaw − 身体朝向」重算、先折后夹，就没有任何跨 tick 状态可以漂。
 	 *
-	 * @param viewOffsetDegrees 视角相对身体朝向的连续偏角（度，可以 &gt; 180 / &lt; −180）
+	 * <p><b>先折后夹的代价（可接受）</b>：视角正对背后那一瞬（相对角 ±180°）头模型从 +135 翻到 −135 ——
+	 * 那是「头最多只能扭 135°」这条规则的必然结果，也只发生在<b>背后</b>这一点；其余角度下模型都
+	 * 严格等于折叠后的相对角，转到哪跟到哪。正好 180° 归到 +180（夹成 +135），免得 {@code wrapDegrees}
+	 * 的 {@code [-180, 180)} 把它判成 −180 → −135。
+	 *
+	 * @param viewOffsetDegrees 视角相对身体朝向的偏角（度；任意大小都行，转几圈就是几百度，内部先折）
 	 * @return 头模型相对身体朝向的 yaw（度，恒在 ±135）
 	 */
 	public static float headModelOffset(float viewOffsetDegrees) {
 		if (!Float.isFinite(viewOffsetDegrees)) {
-			return viewOffsetDegrees;   // 还没接手（NaN）：调用方自己跳过，别把 NaN 写进朝向
+			return viewOffsetDegrees;   // 非有限值（NaN / ∞）：调用方自己跳过，别把它写进朝向
 		}
-		return Mth.clamp(viewOffsetDegrees, -HEAD_MODEL_LIMIT_DEGREES, HEAD_MODEL_LIMIT_DEGREES);
+		float relative = Mth.wrapDegrees(viewOffsetDegrees);   // (-180, 180]
+		if (relative == -180.0F) {
+			relative = 180.0F;          // 正好半圈：算正面朝后（夹成 +135），不判成 -180
+		}
+		return Mth.clamp(relative, -HEAD_MODEL_LIMIT_DEGREES, HEAD_MODEL_LIMIT_DEGREES);
 	}
 
 	/** 给定 yaw 的前方（水平单位向量）；yaw = 0 时朝 +z，与 {@link GlideSteering} 的约定一致。 */
