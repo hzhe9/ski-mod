@@ -116,6 +116,19 @@ public final class AlpineSkiControl {
 	private static final float TURN_LEAN_MIN_STEP_DEGREES = 0.25F;
 
 	/**
+	 * <b>侧倾系数的「满量程」参考转角</b>（度 / tick，<b>4.0</b>）：本 tick 的转角除以它、
+	 * 夹在 {@code [-1, +1]} 就是侧倾目标（带符号的<b>模长系数</b>）—— 转得越多倾得越狠。
+	 *
+	 * <p><b>为什么是 4.0</b>：A / D 单独按一档正好是 {@link #TURN_RATE_DEGREES} 4.0°/tick ⇒ 系数顶满 ±1
+	 * （6° 上身侧倾 / 15° 外侧腿侧倒，与旧「只要有转就顶满」的手感一致）；按 W 追视角 {@link #VIEW_TURN_RATE_DEGREES}
+	 * 4.8°/tick 也被夹到 ±1；两键叠加 8.8°/tick 封顶；W 追视角收尾（残余小、步长按剩余角缩）时系数自然渐退。
+	 *
+	 * <p><b>与 {@link #TURN_RATE_DEGREES} 同值但不合并</b>：一个是身体的<b>转向速率</b>（改它模型转速就变），
+	 * 一个是<b>倾角的参考值</b>（改它只改「同样的转速倾多少」，不碰转速）。想更敏感就调小、更迟钝就调大。
+	 */
+	private static final float TURN_LEAN_RATE_REF_DEGREES = 4.0F;
+
+	/**
 	 * 侧倾系数每 tick 向目标靠拢的比例（<b>0.35</b>）：约 6 tick 到 88%、第 7 tick 收尾
 	 * （{@link #TURN_LEAN_EPSILON}）。所以身体刚开始转的那一下不会硬抽，转向结束时躯干先回正再停。
 	 *
@@ -128,13 +141,15 @@ public final class AlpineSkiControl {
 	private static final float TURN_LEAN_EPSILON = 0.05F;
 
 	/**
-	 * 实体 id → 转向侧倾的<b>平滑系数</b>（{@code +1} ＝ 向左倾、{@code -1} ＝ 向右倾、
-	 * {@code 0} ＝ 没在转向 / 表里没记录）。
+	 * 实体 id → 转向侧倾的<b>平滑系数</b>（带符号，{@code +1} ＝ 全量向左倾、{@code -1} ＝ 全量向右倾、
+	 * {@code 0} ＝ 没在转向 / 表里没记录；中间值是「转得没那么急」）。
 	 *
 	 * <p><b>符号口径</b>：MC 的水平朝向是 {@code (-sin yaw, cos yaw)}，<b>yaw 增大 ＝ 向右转</b>。
-	 * 所以「上一 tick → 这一 tick 的 yaw 差 &gt; 0」＝ 这一 tick 向右转 ⇒ 系数 {@code -1}（渲染侧
-	 * {@code zRot} 取负 ＝ 向实体右侧倾）；差 &lt; 0 ⇒ {@code +1}（向左倾）。系数里 {@code +1} 始终是
+	 * 所以「上一 tick → 这一 tick 的 yaw 差 &gt; 0」＝ 这一 tick 向右转 ⇒ 系数为<b>负</b>（渲染侧
+	 * {@code zRot} 取负 ＝ 向实体右侧倾）；差 &lt; 0 ⇒ <b>正</b>（向左倾）。系数里正号始终是
 	 * 「向左倾」，与 {@code HumanoidModelMixin#skis$applyUpperBodyRoll} 的符号约定一致（正角＝向左倾）。
+	 * <b>模长</b>按转角线性：{@code clamp(|差| / TURN_LEAN_RATE_REF_DEGREES, 0, 1)} —— 上身侧倾与外侧腿侧倒
+	 * 都跟着这个比例走。
 	 *
 	 * <p><b>为什么这张表（和下面那张 {@link #TURN_LEAN_LAST_YAW}）不按端拆</b>：它们只在客户端写
 	 * （{@code SkisClient#tickAlpineLean}）、只在客户端读（渲染侧按 {@code AvatarRenderState.id} 取值），
@@ -477,8 +492,10 @@ public final class AlpineSkiControl {
 	 * <ol>
 	 *   <li>取本 tick 的 {@code bodyYaw}（{@link #bodyYaw}，客户端那张 {@link #BODY_YAW_CLIENT}），
 	 *       与 {@link #TURN_LEAN_LAST_YAW} 里上一 tick 的值作差、{@link Mth#wrapDegrees} 折回；</li>
-	 *   <li>|差| ≥ {@link #TURN_LEAN_MIN_STEP_DEGREES}（0.25°）才算「在转」，目标取 <b>差 &gt; 0 → -1
-	 *       （向右倾）、差 &lt; 0 → +1（向左倾）</b>（yaw 增大 ＝ 向右）；否则目标 0；</li>
+	 *   <li>|差| ≥ {@link #TURN_LEAN_MIN_STEP_DEGREES}（0.25°）才算「在转」，目标取
+	 *       <b>{@code -clamp(差 / TURN_LEAN_RATE_REF_DEGREES, -1, +1)}</b> —— 带符号的<b>模长系数</b>：
+	 *       差 &gt; 0（yaw 增大 ＝ 向右）→ 负（向右倾）、差 &lt; 0 → 正（向左倾），转得越多绝对值越大、
+	 *       单 tick 转角到 {@link #TURN_LEAN_RATE_REF_DEGREES}（4.0°）就顶满；没超过死区 → 0；</li>
 	 *   <li>表里还没有上一 tick 的值（刚穿板 / 刚清表）—— 本 tick 先记基准、目标 0，下一 tick 才可能倾。</li>
 	 * </ol>
 	 *
@@ -499,8 +516,8 @@ public final class AlpineSkiControl {
 		float step = lastYaw == null || Float.isNaN(bodyYaw) ? 0.0F : Mth.wrapDegrees(bodyYaw - lastYaw);
 		float target = 0.0F;
 		if (Math.abs(step) >= TURN_LEAN_MIN_STEP_DEGREES) {
-			// yaw 增大 ＝ 向右转 ⇒ 系数 -1（向右倾）；减小 ⇒ +1（向左倾，与渲染侧正角＝左倾同号）
-			target = step > 0.0F ? -1.0F : 1.0F;
+			// 转角归一成 ±1 内的连续模长系数；yaw 增大 ＝ 向右转 ⇒ 取负（向右倾），与渲染侧正角＝左倾同号
+			target = -Mth.clamp(step / TURN_LEAN_RATE_REF_DEGREES, -1.0F, 1.0F);
 		}
 		float current = TURN_LEAN.getOrDefault(entityId, 0.0F);
 		float next = current + (target - current) * TURN_LEAN_LERP;
@@ -525,7 +542,8 @@ public final class AlpineSkiControl {
 	}
 
 	/**
-	 * 当前「转向侧倾」的平滑系数：{@code +1} ＝ 全量向左倾、{@code -1} ＝ 全量向右倾、{@code 0} ＝ 站姿。
+	 * 当前「转向侧倾」的平滑系数：{@code +1} ＝ 全量向左倾、{@code -1} ＝ 全量向右倾、
+	 * 中间值 ＝ 按本 tick 转角比例倾（{@code TURN_LEAN_RATE_REF_DEGREES} 4.0°/tick 顶满）、{@code 0} ＝ 站姿。
 	 * <b>渲染侧（{@code HumanoidModelMixin}）每帧读一次</b>，按 tick 取、不做 partialTick 插值
 	 * （与单板的 {@code SnowboardControl.tiltValue} 同一口径：本身是渐进量，20 Hz 已经够顺）。
 	 *
