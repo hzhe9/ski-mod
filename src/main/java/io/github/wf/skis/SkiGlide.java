@@ -204,8 +204,11 @@ public final class SkiGlide {
 		if (side != 0.0D) {
 			AlpineSkiControl.turnBody(player.getId(), player.getYRot(), side, false);
 		}
-		// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛
-		if (input != null && input.forward()) {
+		// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛。
+		// <b>A / D 有输入就不追视角</b>：追视角 4.8°/tick > A / D 的 4.0°/tick，两个一起写同一张
+		// BODY_YAW 会互相抵消 / 反向（「按着 W 时 D 不起作用」），W 的前进不受影响 —— 口径与客户端
+		// SkisClient 那一处相同，理由写在 AlpineSkiControl#turnTowardView 的 javadoc。
+		if (input != null && input.forward() && side == 0.0D) {
 			AlpineSkiControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), false);
 		}
 	}

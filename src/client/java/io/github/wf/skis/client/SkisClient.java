@@ -162,11 +162,18 @@ public class SkisClient implements ClientModInitializer {
 			}
 		} else {
 			// ——— 双板：A / D 转身体 4.0°/tick，W 再朝视角方向补 4.8°/tick ———
-			// 视角本身仍由鼠标管、**不限位**（client/SkiViewSmoothing），这里只写身体朝向，与服务端同一条规则
+			// 视角本身仍由鼠标管（第三人称不限位、第一人称 ±90°，见 client/SkiViewSmoothing），
+			// 这里只写身体朝向，与服务端同一条规则
 			AlpineSkiControl.ensureLocked(player.getId(), player.getYRot(), true);
 			AlpineSkiControl.turnBody(player.getId(), player.getYRot(), SnowboardControl.sideSign(keys), true);
-			// 越肩视角下跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）
-			if (keys != null && keys.forward() && !ShoulderSurfingCompat.isActive()) {
+			// <b>W 与 A / D 同时按：两个都生效</b> —— W 照旧前进（前后分量一点都不清），只是这一 tick
+			// <b>不追视角</b>。追视角是 4.8°/tick，比 A / D 的 4.0°/tick 还大：两个一起写同一张
+			// BODY_YAW 时，视角偏角换个符号就把 A / D 抵消掉、甚至反着转（「按着 W 时 D 不起作用」）。
+			// 闸门只有这一条口径（服务端 SkiGlide 同一处照抄，说明见 AlpineSkiControl#turnTowardView）。
+			// 越肩视角下也跳过：相机一自由，按住 W 身体就会追着相机转（越肩那边自己会转视角）。
+			if (keys != null && keys.forward()
+					&& SnowboardControl.sideSign(keys) == 0.0D
+					&& !ShoulderSurfingCompat.isActive()) {
 				AlpineSkiControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), true);
 			}
 			// yaw 必须在 turnTowardView 之后取

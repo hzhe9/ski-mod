@@ -21,6 +21,8 @@ import net.minecraft.world.phys.Vec3;
  * <p><b>按 W 时身体朝视角转</b>：{@link #turnTowardView} 每 tick 把身体朝视角方向拨
  * {@link #VIEW_TURN_RATE_DEGREES} 度（限幅、不越过目标）——<b>转的是身体，视角在世界坐标里仍然不动</b>，
  * 与 A / D 转身体是同一种事，位移只跟身体前方走。
+ * <b>A / D 有输入的那一 tick 不追视角</b>（口径见 {@link #turnTowardView} 的 javadoc）：W 与 A / D 同时按
+ * 两个都要生效 —— W 照旧前进，转向交给 A / D；追视角 4.8°/tick 比 A / D 的 4.0°/tick 大，一起写会互相抵消。
  *
  * <p><b>落地对齐</b>：贴地且没按 S 时，把<b>速度方向</b>朝身体前方每 tick 掰
  * {@link #ALIGN_DEGREES_PER_TICK} 度（{@link #shouldAlignOnGround} / {@link #alignVelocity}，
@@ -407,6 +409,14 @@ public final class AlpineSkiControl {
 	 * 「视角相对身体」的偏角因此每 tick 收窄 {@link #VIEW_TURN_RATE_DEGREES} 度，
 	 * 由 {@code client/SkiViewSmoothing} 的 {@code headOffset -= bodyStep} 自动收敛。
 	 * 残余偏角小于 {@link #VIEW_TURN_MIN_DEGREES} 就不动（防抖）。
+	 *
+	 * <p><b>A / D 有输入的那一 tick 不许调本方法</b>（闸门在<b>调用点</b>：{@code SkisClient} 与 {@code SkiGlide}
+	 * 各一处，判 {@code SnowboardControl.sideSign(keys) == 0}）。这是「W 与 A / D 同时按，两个都要生效」的
+	 * <b>唯一</b>修法 —— 之前按 W 时身体追视角，追的步长 {@link #VIEW_TURN_RATE_DEGREES} 4.8°/tick
+	 * <b>大于</b> A / D 的 {@link #TURN_RATE_DEGREES} 4.0°/tick，两者写同一张 {@code BODY_YAW}：
+	 * 视角偏角 {@code δ = 视 − 身体} 换个符号，追视角那一项就把 A / D 的那一项抵消掉（|δ| ≥ 4.8 时甚至反号，
+	 * 按 D 反而往左转）—— 用户看到的就是「按着 W 时 A / D 只生效一个 / 不起作用」。
+	 * <b>输入本身一个字都不动</b>：W 的前后分量照旧交给原版（照旧前进），A / D 照旧转身体。
 	 *
 	 * <p>客户端与服务端各跑一次同一条规则（顺序：先 A / D 的 {@link #turnBody}，再这里），各写自己那张表。
 	 *
