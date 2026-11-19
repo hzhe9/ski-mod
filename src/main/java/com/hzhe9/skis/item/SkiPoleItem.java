@@ -13,16 +13,17 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 滑雪杖：右键撑杖点地——向前推进并轻微上抬。
- * 已经在滑行（脚下有水平速度）时推进更远，即「滑得越快，撑得越远」。
+ * Ski Pole: right-click to plant the pole on the ground — pushes forward with a slight lift.
+ * While already gliding (horizontal velocity underfoot) the push carries further:
+ * the faster you glide, the further the pole pushes you.
  */
 public class SkiPoleItem extends Item {
-	private static final int COOLDOWN_TICKS = 16;      // 0.8 秒
+	private static final int COOLDOWN_TICKS = 16;      // 0.8 seconds
 	private static final double PUSH_GLIDING = 0.85D;
 	private static final double PUSH_IDLE = 0.45D;
 	private static final double LIFT_GLIDING = 0.32D;
 	private static final double LIFT_IDLE = 0.22D;
-	/** 判定「正在滑行」的水平速度平方阈值。 */
+	/** Squared horizontal velocity threshold for "currently gliding". */
 	private static final double GLIDING_MOTION_SQR = 0.010D;
 
 	public SkiPoleItem(Properties properties) {
@@ -50,14 +51,14 @@ public class SkiPoleItem extends Item {
 					SoundEvents.SNOW_BREAK, SoundSource.PLAYERS,
 					0.7F, gliding ? 1.7F : 1.2F);
 			player.sendOverlayMessage(Component.literal(gliding
-					? "§b[滑雪杖] §f撑杖加速！"
-					: "§b[滑雪杖] §7撑杖点地推进"));
+					? "§b[Ski Pole] §fPushed off — accelerating!"
+					: "§b[Ski Pole] §7Pushed off the ground"));
 		}
 
 		return InteractionResult.SUCCESS;
 	}
 
-	/** 正在滑行 = 脚下有水平速度（不再依赖速度药水效果）。 */
+	/** Gliding = there is horizontal velocity underfoot (no longer relies on a speed potion effect). */
 	private static boolean isGliding(Player player) {
 		return player.getDeltaMovement().horizontalDistanceSqr() > GLIDING_MOTION_SQR;
 	}

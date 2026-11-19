@@ -11,11 +11,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 双保险：直接从 {@code Player#playStepSound} 下手。
+ * Second safety net: hook {@code Player#playStepSound} directly.
  *
- * <p>{@link EntityStepSoundMixin} 已经让「踩到方块」这个事件不再触发（连 PresenceFootsteps
- * 挂在 walkingStepSound 上的钩子一起哑），这里再把 Player 的脚步方法本身关掉，
- * 覆盖任何其他调用路径。
+ * <p>{@link EntityStepSoundMixin} already stops the "stepped on a block" event from firing (silencing the
+ * PresenceFootsteps hook on walkingStepSound along with it); here the Player step-sound method itself is
+ * turned off as well, covering any other call path.
  */
 @Mixin(Player.class)
 public abstract class PlayerStepSoundMixin {

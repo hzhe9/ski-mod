@@ -10,8 +10,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * 脚部装备的自定义外观（Fabric ArmorRenderer）：
- * 装了 skis 模组的滑雪板就走这里，渲染自带的雪鞋 + 板身模型，不再用原版护甲层贴图。
+ * Custom appearance for the foot equipment (Fabric ArmorRenderer): a ski board from the skis mod is
+ * rendered here with its own boot + board body model instead of the vanilla armor layer texture.
  */
 public class SkiArmorRenderer implements net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer {
 	private final SkiBoardModel skiModel;

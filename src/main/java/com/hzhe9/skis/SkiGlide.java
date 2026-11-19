@@ -11,10 +11,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 穿着滑雪板站在雪 / 冰上时的滑行惯性：每 0.5 秒检查一次，正在移动就沿移动方向补一点推进，
- * 做出「滑」的手感。
+ * Gliding inertia while wearing the skis and standing on snow / ice: checked every 0.5 seconds;
+ * if the player is moving, a bit of push is added along the movement direction to give the
+ * "sliding" feel.
  *
- * <p>不给任何药水效果（早先那版的速度 buff 已按需求去掉）。
+ * <p>No potion effects are applied (the speed buff of the earlier version was removed on request).
  */
 public final class SkiGlide {
 	private static final int REFRESH_INTERVAL_TICKS = 10;
@@ -45,7 +46,7 @@ public final class SkiGlide {
 		}
 	}
 
-	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面。 */
+	/** Snow surface = the block underfoot (or at the body position) is in the snow / ice tags. */
 	private static boolean isOnSnowOrIce(ServerLevel level, ServerPlayer player) {
 		BlockPos standing = player.blockPosition();
 		BlockState below = level.getBlockState(standing.below());

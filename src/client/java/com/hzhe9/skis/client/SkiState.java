@@ -4,19 +4,21 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 滑行姿态要用的玩家状态，按实体 id 存放：
+ * Player state used by the gliding stance, stored per entity id:
  * <ul>
- *   <li>{@code onGround}：由 {@code ClientTickEvents.END_CLIENT_TICK} 每 tick 从真实实体读一次；</li>
- *   <li>{@code lastStroke}：离地前最后一帧的划动幅度（跨帧记忆，滞空时用它停住姿势）。</li>
+ *   <li>{@code onGround}: read once per tick from the real entity by {@code ClientTickEvents.END_CLIENT_TICK};</li>
+ *   <li>{@code lastStroke}: the stroke amplitude of the last frame before take-off (remembered across frames,
+ *       used to freeze the pose in the air).</li>
  * </ul>
  *
- * <p>为什么不挂在渲染状态上：实体渲染状态实例是每帧重建的，写在它上面的字段既留不住跨帧值，
- * 也不保证 {@code setupAnim} 看到的就是写入的那个实例（之前就是这里出问题——
- * 离地判定一直读到默认值“在地面”，于是手臂在空里继续按行走动画摆）。
+ * <p>Why it is not hung on the render state: entity render state instances are rebuilt every frame, so fields
+ * written on them neither keep their value across frames nor are guaranteed to be the same instance that
+ * {@code setupAnim} sees (that is exactly where this went wrong before — the airborne check kept reading the
+ * default "on ground" value, so the arms kept swinging with the walking animation in mid-air).
  */
 public final class SkiState {
 	private static final int MAX_ENTRIES = 512;
-	/** 连续接触地面这么多 tick（0.25 秒）才恢复摆臂——落地即起跳的“一瞬接触”不算。 */
+	/** Arms only resume swinging after this many consecutive ground ticks (0.25 s) — a momentary touch when jumping right after landing does not count. */
 	private static final int GROUND_TICKS_TO_RESUME = 5;
 
 	private static final Map<Integer, Boolean> ON_GROUND = new ConcurrentHashMap<>();
@@ -35,28 +37,28 @@ public final class SkiState {
 		ON_GROUND.put(entityId, onGround);
 	}
 
-	/** 没有记录时按“在地面”处理（不影响未穿滑雪板的情况）。 */
+	/** Without a record, treat it as "on ground" (does not affect players without skis). */
 	public static boolean onGround(int entityId) {
 		return ON_GROUND.getOrDefault(entityId, Boolean.TRUE);
 	}
 
-	/** 稳定落地：已连续接触地面达到阈值。落地后立刻起跳（只碰到一瞬）返回 false。 */
+	/** Stable landing: ground contact has reached the threshold. Returns false when jumping right after landing (touched only for an instant). */
 	public static boolean stablyGrounded(int entityId) {
 		return GROUNDED_TICKS.getOrDefault(entityId, 0) >= GROUND_TICKS_TO_RESUME;
 	}
 
-	/** 落地时每帧记录幅度并返回它。 */
+	/** While on the ground, record the amplitude every frame and return it. */
 	public static float rememberStroke(int entityId, float stroke) {
 		LAST_STROKE.put(entityId, stroke);
 		return stroke;
 	}
 
-	/** 滞空时取回离地前最后一帧的幅度（没有记录就退回传进来的值）。 */
+	/** While airborne, recall the amplitude of the last frame before take-off (falls back to the passed-in value when nothing is recorded). */
 	public static float recallStroke(int entityId, float fallback) {
 		return LAST_STROKE.getOrDefault(entityId, fallback);
 	}
 
-	/** 实体走得多了就整体清一次，避免长期积累。 */
+	/** Clear everything once too many entities have been seen, to avoid accumulating over time. */
 	public static void prune() {
 		if (ON_GROUND.size() > MAX_ENTRIES) {
 			ON_GROUND.clear();

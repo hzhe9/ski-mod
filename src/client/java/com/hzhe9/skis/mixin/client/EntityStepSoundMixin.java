@@ -12,15 +12,17 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
- * 穿着滑雪板时不发脚步音效（滑行不该有脚步声）。
+ * No step sound while wearing the ski board (gliding should not sound like walking).
  *
- * <p>掐的是 {@code Entity#vibrationAndSoundEffectsFromBlock} 里对 {@code walkingStepSound} 的调用，
- * 而不是那个方法本身：PresenceFootsteps 是在 {@code walkingStepSound} 的 HEAD 注入
- * （cancel 原版音效、改放自己的脚步声），所以只有让这个调用根本不发生，
- * 才能把原版脚步和 PresenceFootsteps 的脚步声一起静音。
+ * <p>This targets the call to {@code walkingStepSound} inside
+ * {@code Entity#vibrationAndSoundEffectsFromBlock} rather than the method itself: PresenceFootsteps
+ * injects at the HEAD of {@code walkingStepSound} (cancelling the vanilla sound and playing its own
+ * footstep instead), so only by keeping this call from happening at all can both the vanilla footsteps
+ * and the PresenceFootsteps sounds be silenced.
  *
- * <p>用 MixinExtras 的 {@code @WrapOperation}（加载器自带），它比 {@code @Redirect} 好在：
- * 保留原调用入口可随时 {@code original.call(...)}，不需要 {@code @Shadow} 私有方法。
+ * <p>It uses MixinExtras' {@code @WrapOperation} (bundled with the loader), which beats
+ * {@code @Redirect} because the original call site stays available for {@code original.call(...)} at
+ * any time and no {@code @Shadow} private method is needed.
  */
 @Mixin(Entity.class)
 public abstract class EntityStepSoundMixin {

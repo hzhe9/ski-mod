@@ -16,7 +16,8 @@ public class SkisClient implements ClientModInitializer {
 				SkisMod.MODERN_SKI
 		);
 
-		// 每 tick 从真实实体记录「是否在地面」——渲染状态每帧重建，不能依赖它做离地判定
+		// Record "on ground" from the real entity every tick — the render state is rebuilt every
+		// frame, so it must not be relied on for the airborne check
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (client.level == null) {
 				return;

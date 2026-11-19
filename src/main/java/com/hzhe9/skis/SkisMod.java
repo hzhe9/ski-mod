@@ -26,11 +26,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 现代滑雪板 / 滑雪杖（26.2 Fabric）。
+ * Modern Skis / Ski Pole (26.2 Fabric).
  *
- * <p>滑雪板：装备在脚部（靴子槽）——右键从手里穿上；穿着站在雪/冰上自动进入滑行状态
- * （速度加成 + 一点前冲惯性），逻辑见 {@link SkiGlide}。
- * <p>滑雪杖：拿在手里的实体长杖，右键撑杖点地向前推进。
+ * <p>Skis: equipped in the feet slot (boots) — right-click to put them on from the hand; wearing
+ * them while standing on snow/ice automatically enters the gliding state (movement speed bonus plus
+ * a bit of forward inertia), see {@link SkiGlide} for the logic.
+ * <p>Ski Pole: a physical long pole held in the hand; right-click to plant it and push forward.
  */
 public class SkisMod implements ModInitializer {
 	public static final String MOD_ID = "skis";
@@ -39,7 +40,7 @@ public class SkisMod implements ModInitializer {
 	public static final ResourceKey<Item> MODERN_SKI_KEY = itemKey("modern_ski");
 	public static final ResourceKey<Item> SKI_POLE_KEY = itemKey("ski_pole");
 
-	/** 脚部外观资源：assets/skis/equipment/modern_ski.json（人形护甲层贴图）。 */
+	/** Foot appearance asset: assets/skis/equipment/modern_ski.json (humanoid armor layer texture). */
 	public static final ResourceKey<EquipmentAsset> SKI_EQUIPMENT_ASSET =
 			ResourceKey.create(EquipmentAssets.ROOT_ID, Identifier.fromNamespaceAndPath(MOD_ID, "modern_ski"));
 
@@ -73,10 +74,10 @@ public class SkisMod implements ModInitializer {
 			output.accept(new ItemStack(SKI_POLE), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
 		});
 
-		LOGGER.info("[skis] 现代滑雪板（脚部装备）/ 滑雪杖（手持实体）已加载");
+		LOGGER.info("[skis] Modern Skis (foot equipment) / Ski Pole (held item) loaded");
 	}
 
-	/** 判断物品栈是不是我们的滑雪板（26.2 的 ItemStack 只剩 is(Predicate)，直接比物品实例）。 */
+	/** Checks whether the stack is our ski board (26.2's ItemStack only has is(Predicate), so compare item instances directly). */
 	public static boolean isModernSki(ItemStack stack) {
 		return stack.getItem() == MODERN_SKI;
 	}

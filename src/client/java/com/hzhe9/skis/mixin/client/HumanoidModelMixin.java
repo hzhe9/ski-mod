@@ -14,36 +14,41 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 穿着滑雪板时的姿态：
+ * Stance while wearing the ski board:
  *
  * <ul>
- *   <li>双腿：取消走路摆腿、不做外撇，只把左右腿各向外平移 {@link SkiStance#LEG_SPREAD}
- *       （脚上的板模型用同一个量，跟着分开、平行）；</li>
- *   <li>双臂：同相在体前划动（撑杖 / 划船感），幅度跟移动速度；</li>
- *   <li><b>滞空</b>：手臂停在离地前最后一帧的姿势不动（不摆、也不回默认位），落地后继续摆；</li>
- *   <li>身体：轻微前倾。</li>
+ *   <li>Legs: no walking leg swing and no splay — the left and right legs are only translated
+ *       outwards by {@link SkiStance#LEG_SPREAD} (the board model on the feet uses the same
+ *       amount, so it separates with them and stays parallel);</li>
+ *   <li>Arms: stroke in front of the body in the same phase (pole pushing / rowing feel), with the
+ *       amplitude following the movement speed;</li>
+ *   <li><b>Airborne</b>: the arms hold the pose of the last frame before leaving the ground (no
+ *       swinging, no return to the default pose) and resume swinging after landing;</li>
+ *   <li>Body: a slight forward lean.</li>
  * </ul>
  *
- * 「是否在地面」不读渲染状态，而是 {@link SkiState}（客户端 tick 每 tick 从真实实体记录）——
- * 渲染状态实例每帧重建，挂在它上面的字段不保证被 setupAnim 看到（这是之前在两种表现之间来回跳的根因）。
+ * "On ground" is not read from the render state but from {@link SkiState} (the client tick records it
+ * from the real entity every tick) — render state instances are rebuilt every frame, and fields hung on
+ * them are not guaranteed to be seen by setupAnim (this was the root cause of the earlier flip-flopping
+ * between the two behaviours).
  *
- * 游泳 / 鞘翅 / 骑乘时保持原版姿势。
+ * Swimming / elytra / riding keep the vanilla pose.
  */
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
-	/** 屈膝角度（弧度）。 */
+	/** Knee bend angle (radians). */
 	private static final float GLIDE_KNEE_BEND = 0.08F;
-	/** 腿部枢轴的原始高度。 */
+	/** Original height of the leg pivot. */
 	private static final float LEG_PIVOT_Y = 12.0F;
-	/** 手臂划动中心（体前抬起角，越负抬得越高）。 */
+	/** Arm stroke centre (lift angle in front of the body; the more negative, the higher the lift). */
 	private static final float ROW_CENTER = -0.70F;
-	/** 手臂划动幅度。 */
+	/** Arm stroke amplitude. */
 	private static final float ROW_AMPLITUDE = 0.95F;
-	/** 划动频率（乘在 walkAnimationPos 上，越小越慢）。 */
+	/** Stroke frequency (multiplied onto walkAnimationPos; smaller is slower). */
 	private static final float ROW_PHASE = 0.4F;
-	/** 滑行前倾。 */
+	/** Gliding forward lean. */
 	private static final float GLIDE_LEAN = 0.05F;
-	/** 手臂向外的滚转角（正负对称，保证两根滑雪杖平行、不向内倾斜）。 */
+	/** Outward roll of the arms (symmetric in sign, keeping the two ski poles parallel and not tilting inwards). */
 	private static final float ARM_OUTWARD_ROLL = 0.10F;
 
 	@Inject(method = "setupAnim", at = @At("TAIL"))
@@ -57,11 +62,12 @@ public abstract class HumanoidModelMixin {
 
 		HumanoidModel<?> self = (HumanoidModel<?>) (Object) this;
 
-		// 双腿：只横向拉开、保持平行
+		// Legs: spread sideways only, kept parallel
 		placeLeg(self.rightLeg, -SkiStance.legOffsetX());
 		placeLeg(self.leftLeg, SkiStance.legOffsetX());
 
-		// 双臂：同相划动；滞空或“刚落地还没站稳”时沿用离地前最后一帧的幅度（停住）
+		// Arms: stroke in phase; while airborne or "just landed and not yet stable", reuse the
+		// amplitude of the last frame before take-off (frozen)
 		if (!state.isUsingItem) {
 			float amplitude = Mth.clamp(state.walkAnimationSpeed, 0.0F, 1.0F) / Math.max(0.5F, state.speedValue);
 			float stroke = Mth.cos(state.walkAnimationPos * ROW_PHASE) * ROW_AMPLITUDE * amplitude;
@@ -72,20 +78,21 @@ public abstract class HumanoidModelMixin {
 			}
 			self.rightArm.xRot = ROW_CENTER + stroke;
 			self.leftArm.xRot = ROW_CENTER + stroke;
-			// 手端稍稍向外（正负对称）→ 垂下来的两根杖是平行线，不会向内倾、穿到腿上
+			// Hands tilt slightly outwards (symmetric) → the two hanging poles are parallel lines that
+			// do not tilt inwards or clip into the legs
 			self.rightArm.yRot = 0.0F;
 			self.leftArm.yRot = 0.0F;
 			self.rightArm.zRot = ARM_OUTWARD_ROLL;
 			self.leftArm.zRot = -ARM_OUTWARD_ROLL;
 		}
 
-		// 身体前倾（潜行时保持原版的弯腰）
+		// Forward lean of the body (keep the vanilla crouch bend while sneaking)
 		if (!state.isCrouching) {
 			self.body.xRot = GLIDE_LEAN;
 		}
 	}
 
-	/** 把一条腿摆到「向外平移后的位置」，朝向全部归零（平行）。 */
+	/** Places one leg at the "outward-translated position" with all rotations zeroed (parallel). */
 	private static void placeLeg(ModelPart leg, float x) {
 		leg.x = x;
 		leg.y = LEG_PIVOT_Y;

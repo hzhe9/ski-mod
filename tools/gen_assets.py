@@ -1,26 +1,27 @@
-"""生成 skis 模组的全部贴图与模型贴图。
+"""Generates every texture and model texture for the skis mod.
 
-产物：
-  assets/skis/textures/item/modern_ski.png                      物品图标（滑雪板，平面 16x16）
-  assets/skis/textures/item/ski_pole.png                        滑雪杖 3D 模型贴图（64x64，三个 UV 分区）
-  assets/skis/textures/entity/ski_board.png                     脚上模型贴图：雪鞋 + 板身 + 板头（128x32）
-  assets/skis/textures/entity/equipment/humanoid/modern_ski.png 原版护甲层贴图（备用，128x32 的旧方案）
-  assets/skis/icon.png                                          mod 图标
+Outputs:
+  assets/skis/textures/item/modern_ski.png                        item icon (ski board, flat 16x16)
+  assets/skis/textures/item/ski_pole.png                          ski pole 3D model texture (64x64, three UV regions)
+  assets/skis/textures/entity/ski_board.png                       on-foot model texture: boot + board body + tip (128x32)
+  assets/skis/textures/entity/equipment/humanoid/modern_ski.png   vanilla armor layer texture (fallback, the old 128x32 scheme)
+  assets/skis/icon.png                                            mod icon
 
-模型 UV 约定：模型 JSON / CubeListBuilder 里的 uv 以 16 为单位（与原版一致），
-64x64 贴图上一个 UV 单位 = 4 像素。滑雪杖三个分区：
-  杖身 u 0-4   v 0-8      -> 像素 (0,0)-(16,32)
-  握把 u 6-10  v 0-4      -> 像素 (24,0)-(40,16)
-  挡雪盘 u 12-16 v 0-4    -> 像素 (48,0)-(64,16)
+Model UV convention: uv values in the model JSON / CubeListBuilder are in units of 16 (same as
+vanilla), so one UV unit on a 64x64 texture is 4 pixels. The three ski pole regions are:
+  shaft  u 0-4   v 0-8    -> pixels (0,0)-(16,32)
+  grip   u 6-10  v 0-4    -> pixels (24,0)-(40,16)
+  basket u 12-16 v 0-4    -> pixels (48,0)-(64,16)
 
-ski_board.png 用的是 CubeListBuilder 的自动 UV 布局，所以各面落在固定位置：
-  雪鞋 box(4,6,4) @texOffs(0,0)    -> 占 (0,0)-(16,10)
-  板身 box(3,1,22) @texOffs(20,0)  -> 占 (20,0)-(70,23)，其中板面=up(42,0,3x22)、板底=down(45,0,3x22)、侧面=第 22 行
-  板头 box(3,1,2) @texOffs(20,24)  -> 占 (20,24)-(30,28)
+ski_board.png uses CubeListBuilder's automatic UV layout, so each face lands at a fixed position:
+  boot  box(4,6,4) @texOffs(0,0)    -> occupies (0,0)-(16,10)
+  board box(3,1,22) @texOffs(20,0)  -> occupies (20,0)-(70,23), where the board top = up(42,0,3x22), the base = down(45,0,3x22) and the sides = row 22
+  tip   box(3,1,2) @texOffs(20,24)  -> occupies (20,24)-(30,28)
 
-脚部护甲层贴图以原版 iron.png 的靴子像素为模板（只保留靴子用到的 texel 再重上色）。
+The foot armor layer texture uses the boot pixels of vanilla iron.png as a template
+(keeping only the texels the boot actually uses, then recolouring them).
 
-用法: python tools/gen_assets.py
+Usage: python tools/gen_assets.py
 """
 import io
 import os
@@ -35,24 +36,24 @@ TEX_ENTITY = os.path.join(ASSETS, "textures", "entity")
 TEX_ARMOR = os.path.join(TEX_ENTITY, "equipment", "humanoid")
 ICON = os.path.join(ASSETS, "icon.png")
 
-# loom 缓存的 26.2 客户端 jar —— 里面有人形护甲层贴图可作模板
+# Loom-cached 26.2 client jar — it contains the humanoid armor layer texture we use as a template
 VANILLA_JAR = os.path.join(
     os.path.expanduser("~"), ".gradle", "caches", "fabric-loom", "26.2", "minecraft-client.jar"
 )
 
-# 配色
-BODY = (32, 40, 48, 255)          # 石墨黑
-ACCENT = (41, 196, 255, 255)      # 现代青
-TIP = (240, 248, 255, 255)        # 板头白
+# Palette
+BODY = (32, 40, 48, 255)          # graphite black
+ACCENT = (41, 196, 255, 255)      # modern cyan
+TIP = (240, 248, 255, 255)        # tip white
 BINDING = (200, 210, 218, 255)
-BASE = (228, 236, 244, 255)       # 板底
-SHAFT = (198, 208, 216, 255)      # 铝合金杖身
+BASE = (228, 236, 244, 255)       # board base
+SHAFT = (198, 208, 216, 255)      # aluminium shaft
 SHAFT_HI = (235, 242, 249, 255)
 GRIP = (36, 40, 45, 255)
 GRIP_HI = (86, 94, 104, 255)
 BASKET = (255, 138, 40, 255)
 BASKET_DK = (196, 90, 16, 255)
-BOOT = (26, 38, 54, 255)          # 雪鞋
+BOOT = (26, 38, 54, 255)          # boot
 BOOT_HI = (58, 88, 120, 255)
 BOOT_BUCKLE = (206, 214, 222, 255)
 ARMOR_DARK = (30, 44, 62, 255)
@@ -77,7 +78,7 @@ def fill(img, x0, y0, x1, y1, color):
 
 
 def modern_ski():
-    """物品图标：一对平行斜放的滑雪板，板身青色条纹，板头白色。"""
+    """Item icon: a pair of parallel, diagonally placed ski boards, cyan stripes on the body, white tips."""
     img = blank()
     length = 11
     for offset in (0, 3):
@@ -94,7 +95,7 @@ def modern_ski():
 
 
 def pole_texture():
-    """滑雪杖 3D 模型贴图：64x64，杖身 / 握把 / 挡雪盘三个 UV 分区。"""
+    """Ski pole 3D model texture: 64x64, three UV regions for shaft / grip / basket."""
     img = blank(64, 64)
     fill(img, 0, 0, 16, 32, SHAFT)
     fill(img, 4, 0, 7, 32, SHAFT_HI)
@@ -109,33 +110,33 @@ def pole_texture():
 
 
 def ski_board():
-    """脚上模型贴图（128x32）：雪鞋 + 板身 + 上翘板头，按 CubeListBuilder 自动 UV 分区。"""
+    """On-foot model texture (128x32): boot + board body + upturned tip, split by CubeListBuilder's automatic UVs."""
     img = blank(128, 32)
 
-    # 雪鞋：box(4,6,4) @texOffs(0,0) -> (0,0)-(16,10)
+    # Boot: box(4,6,4) @texOffs(0,0) -> (0,0)-(16,10)
     fill(img, 0, 0, 16, 10, BOOT)
-    fill(img, 0, 1, 16, 3, BOOT_HI)          # 鞋口一圈
-    fill(img, 0, 7, 16, 9, BOOT_HI)          # 脚踝处
-    for x in range(1, 16, 5):                # 卡扣
+    fill(img, 0, 1, 16, 3, BOOT_HI)          # cuff ring
+    fill(img, 0, 7, 16, 9, BOOT_HI)          # ankle area
+    for x in range(1, 16, 5):                # buckles
         put(img, x, 4, BOOT_BUCKLE)
         put(img, x + 1, 4, BOOT_BUCKLE)
 
-    # 板身：box(3,1,22) @texOffs(20,0) -> up(42,0,3x22) / down(45,0,3x22) / 侧面在第 22 行
-    fill(img, 42, 0, 45, 22, BODY)           # 板面（up）
-    fill(img, 42, 0, 45, 5, TIP)             # 前段板头区
-    fill(img, 43, 5, 44, 22, ACCENT)         # 板面中线
-    fill(img, 45, 0, 48, 22, BASE)           # 板底（down）
-    fill(img, 20, 22, 70, 23, BASE)          # 板侧一圈
-    fill(img, 20, 22, 42, 23, TIP)           # 前段侧面
+    # Board body: box(3,1,22) @texOffs(20,0) -> up(42,0,3x22) / down(45,0,3x22) / sides on row 22
+    fill(img, 42, 0, 45, 22, BODY)           # board top (up)
+    fill(img, 42, 0, 45, 5, TIP)             # front tip region
+    fill(img, 43, 5, 44, 22, ACCENT)         # board centre line
+    fill(img, 45, 0, 48, 22, BASE)           # board base (down)
+    fill(img, 20, 22, 70, 23, BASE)          # board side ring
+    fill(img, 20, 22, 42, 23, TIP)           # front side section
 
-    # 板头上翘：box(3,1,2) @texOffs(20,24) -> (20,24)-(30,28)
+    # Upturned tip: box(3,1,2) @texOffs(20,24) -> (20,24)-(30,28)
     fill(img, 20, 24, 30, 28, TIP)
     fill(img, 22, 24, 25, 26, ACCENT)
     return img
 
 
 def armor_layer():
-    """旧方案备用：取原版 iron.png 的靴子像素作模板，重上色。"""
+    """Fallback for the old scheme: take the boot pixels of vanilla iron.png as a template and recolour them."""
     with zipfile.ZipFile(VANILLA_JAR) as jar:
         data = jar.read("assets/minecraft/textures/entity/equipment/humanoid/iron.png")
     vanilla = Image.open(io.BytesIO(data)).convert("RGBA")
@@ -159,7 +160,7 @@ def armor_layer():
 
 
 def mod_icon():
-    """128x128 mod 图标：深色渐变底 + 放大的滑雪板。"""
+    """128x128 mod icon: dark gradient background + an enlarged ski board."""
     size = 128
     icon = Image.new("RGBA", (size, size), (18, 28, 40, 255))
     for y in range(size):

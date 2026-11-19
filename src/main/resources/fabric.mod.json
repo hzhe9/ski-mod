@@ -3,7 +3,7 @@
 	"id": "skis",
 	"version": "${version}",
 	"name": "Modern Skis",
-	"description": "现代滑雪板与滑雪杖：右键起滑冲刺、撑杖推进。简易测试版。",
+	"description": "Ski boards and ski poles: right-click to start gliding, push with the pole to accelerate.",
 	"authors": [
 		"hzhe9"
 	],

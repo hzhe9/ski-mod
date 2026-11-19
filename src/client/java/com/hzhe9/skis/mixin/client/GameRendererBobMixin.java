@@ -13,11 +13,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 穿着滑雪板时取消走路的镜头晃动（bobView）。
+ * Cancels the walking camera bob (bobView) while wearing the ski board.
  *
- * <p>vanilla 的行走晃动是 GameRenderer#bobView 用 CameraRenderState 里的
- * {@code backwardsInterpolatedWalkDistance} / {@code bob}（来自玩家行走距离）算出来的；
- * 滑行时整段取消，画面就不会再一颠一颠。
+ * <p>The vanilla walk bob is computed in GameRenderer#bobView from
+ * {@code backwardsInterpolatedWalkDistance} / {@code bob} in the CameraRenderState (both derived from the
+ * player's walk distance); cancelling the whole section while gliding keeps the view from bobbing up and down.
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererBobMixin {

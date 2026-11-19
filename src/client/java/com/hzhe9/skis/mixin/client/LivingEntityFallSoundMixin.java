@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 穿着滑雪板落地时不发落地声（{@code LivingEntity#playBlockFallSound} 就是那声闷响）。
+ * No landing sound while wearing the ski board ({@code LivingEntity#playBlockFallSound} is that dull thud).
  */
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityFallSoundMixin {

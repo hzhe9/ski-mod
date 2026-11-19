@@ -14,13 +14,15 @@ import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.resources.Identifier;
 
 /**
- * 脚上真正看得见的滑雪装备：雪鞋（包住小腿下段）+ 板身 + 上翘板头。
+ * The ski gear actually visible on the feet: boot (wrapping the lower shin) + board body + upturned tip.
  *
- * <p>坐标系沿用玩家模型（1 单位 = 1/16 格，脚底在 y=24，模型正前方是 -z），
- * 板面画在 y 23~24（贴着鞋底），板长 22 单位（约 1.37 格）向前伸 14 单位。
+ * <p>The coordinate system follows the player model (1 unit = 1/16 block, the sole is at y=24,
+ * the model faces -z); the board surface is drawn at y 23~24 (flush with the boot sole), the board is
+ * 22 units long (about 1.37 blocks) and extends 14 units forward.
  *
- * <p>左右两组的横向位置取自 {@link SkiStance}——和 {@code HumanoidModelMixin} 平移双腿用的是同一个值，
- * 所以脚分开时板跟着一起分开，两块板保持平行、中间留间隔（不做任何外撇）。
+ * <p>The lateral positions of the left and right groups come from {@link SkiStance} — the same value
+ * {@code HumanoidModelMixin} uses to translate the legs, so the boards separate together with the feet,
+ * stay parallel and keep a gap between them (no outward splay at all).
  */
 public class SkiBoardModel extends Model<HumanoidRenderState> {
 	public static final ModelLayerLocation LAYER =
@@ -28,7 +30,7 @@ public class SkiBoardModel extends Model<HumanoidRenderState> {
 	public static final Identifier TEXTURE =
 			Identifier.fromNamespaceAndPath(SkisMod.MOD_ID, "textures/entity/ski_board.png");
 
-	private static final float BOARD_TOP = 23.0F; // 板面（鞋底在 24）
+	private static final float BOARD_TOP = 23.0F; // board surface (boot sole is at 24)
 
 	public SkiBoardModel(ModelPart root) {
 		super(root, RenderTypes::entityCutout);
@@ -44,15 +46,15 @@ public class SkiBoardModel extends Model<HumanoidRenderState> {
 
 	private static void addSki(PartDefinition root, String side, float x) {
 		PartDefinition ski = root.addOrReplaceChild("ski_" + side, CubeListBuilder.create(), PartPose.offset(x, 0.0F, 0.0F));
-		// 雪鞋：包住小腿下段
+		// Boot: wraps the lower part of the shin
 		ski.addOrReplaceChild("boot_" + side,
 				CubeListBuilder.create().texOffs(0, 0).addBox(-2.0F, 18.0F, -2.0F, 4.0F, 6.0F, 4.0F),
 				PartPose.ZERO);
-		// 板身：宽 3、厚 1、长 22；靴子在中点偏后（前 12.5 / 后 9.5 ≈ 前 57%，贴近现实安装位置）
+		// Board body: 3 wide, 1 thick, 22 long; the boot sits behind the midpoint (12.5 front / 9.5 back ≈ 57% front, close to a real mounting position)
 		ski.addOrReplaceChild("board_" + side,
 				CubeListBuilder.create().texOffs(20, 0).addBox(-1.5F, BOARD_TOP, -12.5F, 3.0F, 1.0F, 22.0F),
 				PartPose.ZERO);
-		// 板头上翘
+		// Upturned tip
 		ski.addOrReplaceChild("tip_" + side,
 				CubeListBuilder.create().texOffs(20, 24).addBox(-1.5F, 22.3F, -14.5F, 3.0F, 1.0F, 2.0F),
 				PartPose.ZERO);
