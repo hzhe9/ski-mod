@@ -1,0 +1,189 @@
+"""生成 skis 模组的全部贴图与模型贴图。
+
+产物：
+  assets/skis/textures/item/modern_ski.png                      物品图标（滑雪板，平面 16x16）
+  assets/skis/textures/item/ski_pole.png                        滑雪杖 3D 模型贴图（64x64，三个 UV 分区）
+  assets/skis/textures/entity/ski_board.png                     脚上模型贴图：雪鞋 + 板身 + 板头（128x32）
+  assets/skis/textures/entity/equipment/humanoid/modern_ski.png 原版护甲层贴图（备用，128x32 的旧方案）
+  assets/skis/icon.png                                          mod 图标
+
+模型 UV 约定：模型 JSON / CubeListBuilder 里的 uv 以 16 为单位（与原版一致），
+64x64 贴图上一个 UV 单位 = 4 像素。滑雪杖三个分区：
+  杖身 u 0-4   v 0-8      -> 像素 (0,0)-(16,32)
+  握把 u 6-10  v 0-4      -> 像素 (24,0)-(40,16)
+  挡雪盘 u 12-16 v 0-4    -> 像素 (48,0)-(64,16)
+
+ski_board.png 用的是 CubeListBuilder 的自动 UV 布局，所以各面落在固定位置：
+  雪鞋 box(4,6,4) @texOffs(0,0)    -> 占 (0,0)-(16,10)
+  板身 box(3,1,22) @texOffs(20,0)  -> 占 (20,0)-(70,23)，其中板面=up(42,0,3x22)、板底=down(45,0,3x22)、侧面=第 22 行
+  板头 box(3,1,2) @texOffs(20,24)  -> 占 (20,24)-(30,28)
+
+脚部护甲层贴图以原版 iron.png 的靴子像素为模板（只保留靴子用到的 texel 再重上色）。
+
+用法: python tools/gen_assets.py
+"""
+import io
+import os
+import zipfile
+
+from PIL import Image
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS = os.path.join(ROOT, "src", "main", "resources", "assets", "skis")
+TEX_ITEM = os.path.join(ASSETS, "textures", "item")
+TEX_ENTITY = os.path.join(ASSETS, "textures", "entity")
+TEX_ARMOR = os.path.join(TEX_ENTITY, "equipment", "humanoid")
+ICON = os.path.join(ASSETS, "icon.png")
+
+# loom 缓存的 26.2 客户端 jar —— 里面有人形护甲层贴图可作模板
+VANILLA_JAR = os.path.join(
+    os.path.expanduser("~"), ".gradle", "caches", "fabric-loom", "26.2", "minecraft-client.jar"
+)
+
+# 配色
+BODY = (32, 40, 48, 255)          # 石墨黑
+ACCENT = (41, 196, 255, 255)      # 现代青
+TIP = (240, 248, 255, 255)        # 板头白
+BINDING = (200, 210, 218, 255)
+BASE = (228, 236, 244, 255)       # 板底
+SHAFT = (198, 208, 216, 255)      # 铝合金杖身
+SHAFT_HI = (235, 242, 249, 255)
+GRIP = (36, 40, 45, 255)
+GRIP_HI = (86, 94, 104, 255)
+BASKET = (255, 138, 40, 255)
+BASKET_DK = (196, 90, 16, 255)
+BOOT = (26, 38, 54, 255)          # 雪鞋
+BOOT_HI = (58, 88, 120, 255)
+BOOT_BUCKLE = (206, 214, 222, 255)
+ARMOR_DARK = (30, 44, 62, 255)
+ARMOR_MID = (46, 74, 104, 255)
+ARMOR_BOARD = (226, 238, 248, 255)
+ARMOR_ACCENT = (41, 196, 255, 255)
+
+
+def blank(w=16, h=16):
+    return Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+
+def put(img, x, y, color):
+    if 0 <= x < img.size[0] and 0 <= y < img.size[1]:
+        img.putpixel((x, y), color)
+
+
+def fill(img, x0, y0, x1, y1, color):
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            put(img, x, y, color)
+
+
+def modern_ski():
+    """物品图标：一对平行斜放的滑雪板，板身青色条纹，板头白色。"""
+    img = blank()
+    length = 11
+    for offset in (0, 3):
+        x0, y0 = 2 + offset, 14
+        for t in range(length):
+            x, y = x0 + t, y0 - t
+            color = TIP if t >= length - 2 else BODY
+            put(img, x, y, color)
+            put(img, x, y + 1, color)
+            if t in (2, 6) and color is BODY:
+                put(img, x, y, ACCENT)
+        put(img, x0 + 5, y0 - 5, BINDING)
+    return img
+
+
+def pole_texture():
+    """滑雪杖 3D 模型贴图：64x64，杖身 / 握把 / 挡雪盘三个 UV 分区。"""
+    img = blank(64, 64)
+    fill(img, 0, 0, 16, 32, SHAFT)
+    fill(img, 4, 0, 7, 32, SHAFT_HI)
+    fill(img, 24, 0, 40, 16, GRIP)
+    fill(img, 24, 4, 40, 7, GRIP_HI)
+    fill(img, 24, 11, 40, 13, GRIP_HI)
+    fill(img, 48, 0, 64, 16, BASKET)
+    for y in range(0, 16, 3):
+        for x in range(48, 64, 3):
+            put(img, x + (y // 3) % 3, y, BASKET_DK)
+    return img
+
+
+def ski_board():
+    """脚上模型贴图（128x32）：雪鞋 + 板身 + 上翘板头，按 CubeListBuilder 自动 UV 分区。"""
+    img = blank(128, 32)
+
+    # 雪鞋：box(4,6,4) @texOffs(0,0) -> (0,0)-(16,10)
+    fill(img, 0, 0, 16, 10, BOOT)
+    fill(img, 0, 1, 16, 3, BOOT_HI)          # 鞋口一圈
+    fill(img, 0, 7, 16, 9, BOOT_HI)          # 脚踝处
+    for x in range(1, 16, 5):                # 卡扣
+        put(img, x, 4, BOOT_BUCKLE)
+        put(img, x + 1, 4, BOOT_BUCKLE)
+
+    # 板身：box(3,1,22) @texOffs(20,0) -> up(42,0,3x22) / down(45,0,3x22) / 侧面在第 22 行
+    fill(img, 42, 0, 45, 22, BODY)           # 板面（up）
+    fill(img, 42, 0, 45, 5, TIP)             # 前段板头区
+    fill(img, 43, 5, 44, 22, ACCENT)         # 板面中线
+    fill(img, 45, 0, 48, 22, BASE)           # 板底（down）
+    fill(img, 20, 22, 70, 23, BASE)          # 板侧一圈
+    fill(img, 20, 22, 42, 23, TIP)           # 前段侧面
+
+    # 板头上翘：box(3,1,2) @texOffs(20,24) -> (20,24)-(30,28)
+    fill(img, 20, 24, 30, 28, TIP)
+    fill(img, 22, 24, 25, 26, ACCENT)
+    return img
+
+
+def armor_layer():
+    """旧方案备用：取原版 iron.png 的靴子像素作模板，重上色。"""
+    with zipfile.ZipFile(VANILLA_JAR) as jar:
+        data = jar.read("assets/minecraft/textures/entity/equipment/humanoid/iron.png")
+    vanilla = Image.open(io.BytesIO(data)).convert("RGBA")
+    vpx = vanilla.load()
+
+    img = blank(64, 32)
+    for y in range(16, 32):
+        for x in range(0, 16):
+            if vpx[x, y][3] == 0:
+                continue
+            if y >= 31:
+                color = ARMOR_BOARD
+            elif y == 30:
+                color = ARMOR_ACCENT
+            elif y in (28, 29):
+                color = ARMOR_MID
+            else:
+                color = ARMOR_DARK
+            put(img, x, y, color)
+    return img
+
+
+def mod_icon():
+    """128x128 mod 图标：深色渐变底 + 放大的滑雪板。"""
+    size = 128
+    icon = Image.new("RGBA", (size, size), (18, 28, 40, 255))
+    for y in range(size):
+        shade = 18 + int(28 * (y / size))
+        for x in range(size):
+            icon.putpixel((x, y), (shade // 2, shade, min(255, shade + 40), 255))
+    icon.alpha_composite(modern_ski().resize((96, 96), Image.NEAREST), (16, 16))
+    return icon
+
+
+def main():
+    for d in (TEX_ITEM, TEX_ENTITY, TEX_ARMOR):
+        os.makedirs(d, exist_ok=True)
+    outputs = {
+        os.path.join(TEX_ITEM, "modern_ski.png"): modern_ski(),
+        os.path.join(TEX_ITEM, "ski_pole.png"): pole_texture(),
+        os.path.join(TEX_ENTITY, "ski_board.png"): ski_board(),
+        os.path.join(TEX_ARMOR, "modern_ski.png"): armor_layer(),
+        ICON: mod_icon(),
+    }
+    for path, image in outputs.items():
+        image.save(path)
+        print("written:", path, image.size)
+
+
+if __name__ == "__main__":
+    main()

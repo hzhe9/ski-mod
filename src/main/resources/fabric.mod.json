@@ -1,0 +1,33 @@
+{
+	"schemaVersion": 1,
+	"id": "skis",
+	"version": "${version}",
+	"name": "Modern Skis",
+	"description": "现代滑雪板与滑雪杖：右键起滑冲刺、撑杖推进。简易测试版。",
+	"authors": [
+		"hzhe9"
+	],
+	"license": "MIT",
+	"icon": "assets/skis/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.hzhe9.skis.SkisMod"
+		],
+		"client": [
+			"com.hzhe9.skis.client.SkisClient"
+		]
+	},
+	"mixins": [
+		{
+			"config": "skis.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

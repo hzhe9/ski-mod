@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"package": "com.hzhe9.skis.mixin.client",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"HumanoidModelMixin",
+		"EntityStepSoundMixin",
+		"GameRendererBobMixin",
+		"LivingEntityFallSoundMixin",
+		"PlayerStepSoundMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
