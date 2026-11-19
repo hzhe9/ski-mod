@@ -119,6 +119,8 @@ public class SkisClient implements ClientModInitializer {
 			// 客户端清表不能把服务端的失控 / 起跳冷却一起抹掉（见 SkiAir#forgetClient）。
 			SnowboardControl.forget(player.getId(), true);
 			AlpineSkiControl.forgetBody(player.getId(), true);
+			// 头模型的「扭头」平滑值：脱板 / 不滑行时清掉，下次穿板按当时的视角重新起算
+			HeadTurnSmoothing.forget(player.getId());
 			return;
 		}
 		// 起跳力度 / 后空翻 / 落地：空翻角度与「有没有按住空格」只有本机知道（服务端读不到这个输入），
@@ -214,13 +216,18 @@ public class SkisClient implements ClientModInitializer {
 				// wrapDegrees(yHeadRot − yBodyRot) 塞进 render state 的 yRot → HumanoidModel 的 head.yRot）。
 				// 不写这一句时原版 tickHeadTurn 每 tick 把 yHeadRot 抄成 yRot：视角转多少头就转多少（无限位）。
 				//
-				// <b>每 tick 现算，不读任何跨 tick 的偏角</b>：入参 = 当前视 yaw − 锁定身体朝向（+ 折叠 + 夹 90
+				// <b>每 tick 现算，不读任何跨 tick 的累加偏角</b>：入参 = 当前视 yaw − 锁定身体朝向（+ 折叠 + 夹 90
 				// 都在 headModelOffset 里）。上一版读 SkiViewSmoothing 的「连续累加偏角」，转几圈后那个量已经是
 				// 495 / 585…，夹出来恒为上限、且自己不会回到真实夹角 —— 头模型就永久冻在背后（用户实测的回归）。
 				// 视 yaw 与身体朝向都是这一 tick 的瞬时值，所以从 ±90 以外转回来时头当 tick 就继续跟视角。
+				//
+				// <b>唯一的例外是「翻侧」</b>：视角扫过正背后时头模型的目标从 +90 翻到 −90，旧写法一 tick 之内
+				// 横穿 180°（看上去是头一下从左甩到右）。交给 HeadTurnSmoothing：没翻侧时它逐字返回
+				// headModelOffset(...)（1:1、没有滞后），需要翻侧时按 15°/tick 从后脑绕过去（180° ≈ 12 tick）。
+				// 它返回的可能是 270 这种超圈值（= −90），所以渲染前 wrapDegrees。
 				// 骑乘 / 睡觉时整段不写，把这几个语义留给原版（睡眠的 yHeadRot 由原版管）。
-				player.setYHeadRot(yaw
-						+ SnowboardControl.headModelOffset(player.getYRot() - yaw));
+				player.setYHeadRot(yaw + Mth.wrapDegrees(
+						HeadTurnSmoothing.tick(player.getId(), yaw, player.getYRot(), board)));
 			}
 		}
 	}
@@ -345,6 +352,8 @@ public class SkisClient implements ClientModInitializer {
 		AlpineSkiControl.forgetBodyAll(true);
 		SkiAir.forgetAllClient();
 		SkiViewSmoothing.reset();
+		// 头模型「扭头」的平滑值也是按实体 id 记的：旧世界的 id 再也回不来
+		HeadTurnSmoothing.forgetAll();
 		// 板轴同步的「上一份发出去的值」也作废：新世界里本机那份轴会重新锁，必须整份重发一次
 		axisSent = false;
 	}
