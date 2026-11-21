@@ -1,4 +1,19 @@
 {
-	"item.skis.modern_ski": "Modern Skis",
-	"item.skis.ski_pole": "Ski Pole"
+  "item.skis.ski_pole": "Ski Pole",
+  "item.skis.modern_ski": "Alpine Skis",
+  "item.skis.modern_ski.wood": "Wood Grain Alpine Skis",
+  "item.skis.modern_ski.graphite": "Graphite Alpine Skis",
+  "item.skis.modern_ski.topo": "Topo Alpine Skis",
+  "item.skis.modern_ski.brushed": "Brushed Alpine Skis",
+  "item.skis.modern_ski.neon": "Neon Alpine Skis",
+  "item.skis.modern_ski.leopard": "Leopard Alpine Skis",
+  "item.skis.snowboard": "Snowboard",
+  "item.skis.snowboard.wood": "Wood Grain Snowboard",
+  "item.skis.snowboard.graphite": "Graphite Snowboard",
+  "item.skis.snowboard.topo": "Topo Snowboard",
+  "item.skis.snowboard.brushed": "Brushed Snowboard",
+  "item.skis.snowboard.neon": "Neon Snowboard",
+  "item.skis.snowboard.leopard": "Leopard Snowboard",
+  "itemGroup.skis": "Ski Gear",
+  "message.skis.no_riding": "You can't ride while wearing skis"
 }

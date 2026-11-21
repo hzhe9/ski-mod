@@ -1,69 +1,56 @@
 package com.hzhe9.skis.client;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.hzhe9.skis.util.IdMap;
 
 /**
- * Player state used by the gliding stance, stored per entity id:
- * <ul>
- *   <li>{@code onGround}: read once per tick from the real entity by {@code ClientTickEvents.END_CLIENT_TICK};</li>
- *   <li>{@code lastStroke}: the stroke amplitude of the last frame before take-off (remembered across frames,
- *       used to freeze the pose in the air).</li>
- * </ul>
+ * 变体版（右键冲刺）的客户端状态：
  *
- * <p>Why it is not hung on the render state: entity render state instances are rebuilt every frame, so fields
- * written on them neither keep their value across frames nor are guaranteed to be the same instance that
- * {@code setupAnim} sees (that is exactly where this went wrong before — the airborne check kept reading the
- * default "on ground" value, so the arms kept swinging with the walking animation in mid-air).
+ * <p>手臂**不做持续摆动**——只有右键撑杖时播放一次「摆臂」，动画由这里的倒计时驱动，
+ * 三维模型那边（HumanoidModelMixin）按剩余 tick 算出这一下划动的幅度。
+ *
+ * <p><b>只有本机玩家的 id 会被写进来</b>：触发点是本机右键（{@code SwingHooks}），没有任何 S2C 包，
+ * 所以远端玩家的摆臂是<b>看不到的</b>（模型侧也只读本机 avatar，见 {@code HumanoidModelMixin}）。
+ *
+ * <p>表用 {@link IdMap}（与其它 7 张 id 表同一套容量兜底），不是裸 {@code ConcurrentHashMap}：
+ * {@link #triggerSwing} 是右键触发的，连点 / 作弊客户端可以高频写入，得有个上限。
  */
 public final class SkiState {
-	private static final int MAX_ENTRIES = 512;
-	/** Arms only resume swinging after this many consecutive ground ticks (0.25 s) — a momentary touch when jumping right after landing does not count. */
-	private static final int GROUND_TICKS_TO_RESUME = 5;
+	/** 一次摆臂动画的时长（tick）。12 tick = 0.6 秒。 */
+	private static final int SWING_TICKS = 12;
 
-	private static final Map<Integer, Boolean> ON_GROUND = new ConcurrentHashMap<>();
-	private static final Map<Integer, Integer> GROUNDED_TICKS = new ConcurrentHashMap<>();
-	private static final Map<Integer, Float> LAST_STROKE = new ConcurrentHashMap<>();
+	/** 玩家 id → 摆臂剩余 tick。 */
+	private static final IdMap<Integer> SWING_LEFT = new IdMap<>();
 
 	private SkiState() {
 	}
 
-	public static void setOnGround(int entityId, boolean onGround) {
-		if (onGround) {
-			GROUNDED_TICKS.merge(entityId, 1, Integer::sum);
-		} else {
-			GROUNDED_TICKS.put(entityId, 0);
-		}
-		ON_GROUND.put(entityId, onGround);
+	/** 右键撑杖时调用（客户端）：开始一次摆臂。 */
+	public static void triggerSwing(int entityId) {
+		SWING_LEFT.put(entityId, SWING_TICKS);
 	}
 
-	/** Without a record, treat it as "on ground" (does not affect players without skis). */
-	public static boolean onGround(int entityId) {
-		return ON_GROUND.getOrDefault(entityId, Boolean.TRUE);
+	/** 客户端每 tick 推进动画计时；走完的条目直接移除。 */
+	public static void tick() {
+		SWING_LEFT.forEach((entityId, left) -> {
+			if (left > 1) {
+				SWING_LEFT.put(entityId, left - 1);
+			} else {
+				SWING_LEFT.remove(entityId);   // 走到 0：本条摆臂结束
+			}
+		});
 	}
 
-	/** Stable landing: ground contact has reached the threshold. Returns false when jumping right after landing (touched only for an instant). */
-	public static boolean stablyGrounded(int entityId) {
-		return GROUNDED_TICKS.getOrDefault(entityId, 0) >= GROUND_TICKS_TO_RESUME;
+	/** 换世界 / 重连 / 换维度：整表丢掉（旧 id 全部作废，别把摆臂带进新世界）。 */
+	public static void clear() {
+		SWING_LEFT.clear();
 	}
 
-	/** While on the ground, record the amplitude every frame and return it. */
-	public static float rememberStroke(int entityId, float stroke) {
-		LAST_STROKE.put(entityId, stroke);
-		return stroke;
+	/** 剩余 tick；0 表示当前没在摆臂（手臂静止）。 */
+	public static int swingLeft(int entityId) {
+		return SWING_LEFT.getOrDefault(entityId, 0);
 	}
 
-	/** While airborne, recall the amplitude of the last frame before take-off (falls back to the passed-in value when nothing is recorded). */
-	public static float recallStroke(int entityId, float fallback) {
-		return LAST_STROKE.getOrDefault(entityId, fallback);
-	}
-
-	/** Clear everything once too many entities have been seen, to avoid accumulating over time. */
-	public static void prune() {
-		if (ON_GROUND.size() > MAX_ENTRIES) {
-			ON_GROUND.clear();
-			GROUNDED_TICKS.clear();
-			LAST_STROKE.clear();
-		}
+	public static int swingTicks() {
+		return SWING_TICKS;
 	}
 }

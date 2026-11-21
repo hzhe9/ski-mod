@@ -13,18 +13,18 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Cancels the walking camera bob (bobView) while wearing the ski board.
+ * 穿着滑雪板时取消走路的镜头晃动（bobView）。
  *
- * <p>The vanilla walk bob is computed in GameRenderer#bobView from
- * {@code backwardsInterpolatedWalkDistance} / {@code bob} in the CameraRenderState (both derived from the
- * player's walk distance); cancelling the whole section while gliding keeps the view from bobbing up and down.
+ * <p>vanilla 的行走晃动是 GameRenderer#bobView 用 CameraRenderState 里的
+ * {@code backwardsInterpolatedWalkDistance} / {@code bob}（来自玩家行走距离）算出来的；
+ * 滑行时整段取消，画面就不会再一颠一颠。
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererBobMixin {
 	@Inject(method = "bobView", at = @At("HEAD"), cancellable = true)
 	private void skis$noWalkBob(CameraRenderState cameraState, PoseStack poseStack, CallbackInfo ci) {
 		LocalPlayer player = Minecraft.getInstance().player;
-		if (player != null && player.getItemBySlot(EquipmentSlot.FEET).getItem() == SkisMod.MODERN_SKI) {
+		if (player != null && SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
 			ci.cancel();
 		}
 	}

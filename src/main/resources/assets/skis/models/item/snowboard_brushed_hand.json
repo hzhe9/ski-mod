@@ -1,0 +1,7 @@
+{
+  "parent": "skis:item/snowboard_base_hand",
+  "textures": {
+    "tex": "skis:item/snowboard_brushed",
+    "particle": "skis:item/snowboard_brushed"
+  }
+}

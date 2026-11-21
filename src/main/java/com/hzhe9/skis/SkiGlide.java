@@ -1,58 +1,680 @@
 package com.hzhe9.skis;
 
+import com.hzhe9.skis.util.IdMap;
+
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Gliding inertia while wearing the skis and standing on snow / ice: checked every 0.5 seconds;
- * if the player is moving, a bit of push is added along the movement direction to give the
- * "sliding" feel.
+ * 穿着滑雪板时的滑行物理（每 tick 一次）：
  *
- * <p>No potion effects are applied (the speed buff of the earlier version was removed on request).
+ * <ul>
+ *   <li><b>滑行惯性（低摩擦）</b>：原版玩家在地面每 tick 会掉掉约 45% 的水平速度（10 tick 就基本停住），
+ *       所以这里自己维护一份“动量”，按该板的动量衰减（{@link AlpineSkiControl#momentumDecay()} /
+ *       {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）慢慢衰减，
+ *       并保证玩家速度不低于它——被撑出去、被下落加速加出来的速度能滑很久才停；</li>
+ *   <li><b>下落加速</b>：每累计下降 1 格高度就换一点水平速度（踩地滑下坡、空中掉落都算），<b>方向永远沿当前水平速度</b>
+ *       （单板也一样：不投影到身体横轴、不跟随身体朝向，空中转身后不会把速度拽向新朝向）；</li>
+ *   <li><b>重力加重</b>：穿着板时把原版重力（{@code Attributes.GRAVITY}）改成该板倍数的值 ——
+ *       真的改重力，不是每 tick 补一份向下的速度（全程生效：上升段也一起变沉，跳得更矮、落得更快）；</li>
+ *   <li><b>雪面推进</b>：在雪 / 冰上时每 0.5 秒沿移动方向补一点推进。
+ * </ul>
+ *
+ * <p><b>单板只保留“下落加速”这一条</b>：低摩擦动量不捕获玩家自己走出来的速度、也不做雪面推进，
+ * 免得平地走路 / 站坡上都会"莫名往前"。下落加速的方向<b>只沿当前水平速度</b>（不投影、不跟随身体朝向）；
+ * 只有几乎没速度时才按 A / D 的侧向，否则不给。
+ * W / S 只改姿态（前倾 / 后倾）与相机，<b>不给任何推进</b>。
+ *
+ * <p>不需要药水效果。
  */
 public final class SkiGlide {
 	private static final int REFRESH_INTERVAL_TICKS = 10;
 	private static final double MIN_MOTION_SQR = 0.008D;
 	private static final double GLIDE_PUSH = 0.055D;
 
+	/** 下落加速曲线的指数：1 = 线性、0.5 = 开方；0.7 = 略缓的边际递减（越小衰减越猛）。 */
+	private static final double FALL_GAIN_EXPONENT = 1.0D;   // 1.0 = 线性：加速只跟累计格数成正比，掉多少格换多少速度，可预期
+	/** 滑上一格台阶时扣掉多少水平速度（格/tick，0.04 ≈ 满速的 5% —— 顿一下但不至于卡住）。 */
+	private static final double STEP_UP_PENALTY = 0.04D;
+	/** 判定“上了一格台阶”的最小抬升高度（格）：半砖 / 整格都算，普通 0.6 步高不算。 */
+	private static final double STEP_UP_MIN_HEIGHT = 0.5D;
+	/**
+	 * <b>穿板时的台阶高度</b>（格）：原版玩家默认 0.6，穿板时 1.0 —— 能直接滑上 1 格高的地面。
+	 * 只在进入穿板状态那一 tick 写一次，脱板写回进入前的原值（见 {@link #enterSkiAttributes}）。
+	 */
+	private static final double SKI_STEP_HEIGHT = 1.0D;
+	/**
+	 * 每累计下落这么多格算一次，按次均匀给速度（**双板**；单板用 {@link SnowboardControl#descentStepBlocks()} 的 0.5）。
+	 *
+	 * <p>双板也按每 0.5 格结算：单次 = 0.1 × 0.5 = 0.05，
+	 * 每格总量仍是 0.1（乘 step 保证“步长细” ≠ “给得多”），只是下坡降没半格就有第一份。
+	 */
+	private static final double STEP_BLOCKS = 0.5D;
+	// 各板的滑行数值不在这里 —— 双板在 {@link AlpineSkiControl}，单板在 {@link SnowboardControl}，
+	// 两边完全独立，调一个不会动到另一个。这里只留两板共用的“物理骨架”常量。
+	/**
+	 * 撞到方块（横向碰撞）时的额外衰减，避免一直顶着墙滑。
+	 *
+	 * <p><b>两板口径不同</b>：<b>单板</b>只在连续撞墙 ≥ {@link #MOMENTUM_HIT_TICKS_BEFORE_DECAY}
+	 * tick 时才生效 —— 坡面上一次 {@code horizontalCollision} 很常见（贴面滑、蹭台阶边），
+	 * 单 tick 就砍半会让整段弯回不来，真正「顶着墙」才该止损；<b>而且正在 carve 的 tick 整段豁免</b>
+	 * （门槛与非 carve 的贴墙硬滑都保留）：转弯本身每 tick 把速度扫过方块面，连续贴面是常态而不是硬顶墙，
+	 * 见 {@code applyMomentum} 里 A-3 那段。双板仍是撞一下即砍
+	 * （不看 {@link #HIT_TICKS}，{@code horizontalCollision} 为真就乘本值）。
+	 */
+	private static final double MOMENTUM_DECAY_ON_HIT = 0.5D;
+	/**
+	 * 连续撞墙多少 tick 之后才按 {@link #MOMENTUM_DECAY_ON_HIT} 砍半（3 tick ＝ 0.15 s）。
+	 * <b>只对单板生效</b>；双板撞一下即砍，不看这个门槛。
+	 */
+	private static final int MOMENTUM_HIT_TICKS_BEFORE_DECAY = 3;
+	/** 动量低于这个值就丢掉。 */
+	private static final double MOMENTUM_MIN = 0.02D;
+
+	/** 玩家实体 id → 上一 tick 的 Y。 */
+	private static final IdMap<Double> LAST_Y = new IdMap<>();
+	/** 玩家实体 id → 已累计但还没结算的下落高度。 */
+	private static final IdMap<Double> DESCEND_ACCUM = new IdMap<>();
+	/** 玩家实体 id → 当前滑行动量（水平速度）。 */
+	private static final IdMap<Double> MOMENTUM = new IdMap<>();
+	/** 玩家实体 id → <b>连续撞墙的 tick 数</b>（撞一下 +1、不撞清零），只有单板拿它当门槛，见 {@link #MOMENTUM_DECAY_ON_HIT}。 */
+	private static final IdMap<Integer> HIT_TICKS = new IdMap<>();
+
+	/**
+	 * 玩家实体 id → <b>进入穿板状态前</b> {@code STEP_HEIGHT} 的 base 值。
+	 *
+	 * <p>这是「我们改过这个人的属性」的标记：<b>在表里＝当前处于穿板状态</b>（进出各写一次属性，
+	 * 而不是每 tick 覆盖）。脱板时把记下来的原值写回去，而不是写死 0.6 / 默认值 —— 见 {@link #enterSkiAttributes}。
+	 */
+	private static final IdMap<Double> PRE_STEP_HEIGHT = new IdMap<>();
+	/** 玩家实体 id → <b>进入穿板状态前</b> {@code GRAVITY} 的 base 值（脱板还原用）。 */
+	private static final IdMap<Double> PRE_GRAVITY = new IdMap<>();
+	/** 玩家实体 id → 上一次真正写进 {@code GRAVITY} 的 base 值（值没变就不重写，避免抹掉别人的修改）。 */
+	private static final IdMap<Double> APPLIED_GRAVITY = new IdMap<>();
+
 	private SkiGlide() {
 	}
 
 	public static void register() {
-		ServerTickEvents.END_LEVEL_TICK.register(SkiGlide::onLevelTick);
+		// ——— 起跳：必须在实体 tick 之前 ———
+		// 原版是「这一 tick 写速度（jumpFromGround）→ 这一 tick 立刻位移（travel）」。服务端一旦 hurtMarked，
+		// ServerEntity#sendChanges 就把整个 Entity 打包成 ClientboundSetEntityMotionPacket 发给玩家本人，
+		// 客户端 Entity#lerpMotion 是**整份覆盖** deltaMovement。滑行时下面那些写速度的分支几乎每 tick 都
+		// hurtMarked，所以只要服务端这一 tick 自己没跳，包里带的就是「下落速度」，会把客户端在实体 tick 里
+		// 写的起跳冲量抹掉（穿板按空格"没反应"）。放在 START_SERVER_TICK：服务端在同一 tick 的最前面起跳，
+		// 它发出去的包带的就是起跳速度。
+		ServerTickEvents.START_SERVER_TICK.register(server -> {
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				if (!isSkiing(player)) {
+					continue;   // 没穿板 / 创造飞行 / 载具上：原版跳跃（或不跳）不管
+				}
+				// 服务端读不到「本 tick 有没有按住空格」，只能用客户端同步上来的上一份输入
+				Input input = player.getLastClientInput();
+				SkiAir.tryJump(player, SkiAir.tuning(player), input != null && input.jump(), player.onGround());
+			}
+		});
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				tickPlayer(player);
+			}
+		});
+
+		// 断线：这个 id 的所有表都丢掉（含「进入穿板前的属性原值」，理由见 forgetPlayer）
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+				forgetPlayer(handler.getPlayer().getId()));
 	}
 
-	private static void onLevelTick(ServerLevel level) {
-		if (level.getGameTime() % REFRESH_INTERVAL_TICKS != 0L) {
+	/** 服务端每 tick 每个玩家一次：兜底下车 → 起跳后的物理 → 该板自己的转向 → 动量。 */
+	private static void tickPlayer(ServerPlayer player) {
+		// 兜底：已经在车上 / 生物上，再右键穿上板 —— 新上车那一侧由 EntityStartRidingMixin 拦，
+		// 已经在骑的这一侧只能靠「每 tick 检查一次，穿板就下车」。放在 isSkiing 早退之前：
+		// 骑乘时 isSkiing 本来就是 false（见下面那个方法），不能等它。
+		if (player.isPassenger() && SkisMod.isSkiFeet(player.getItemBySlot(EquipmentSlot.FEET))) {
+			player.stopRiding();
+		}
+		if (!isSkiing(player)) {
+			// 属性只在「刚脱板」这一 tick 还原一次（边沿），不是每 tick 写 —— 每 tick 无条件
+			// setBaseValue 会把别的模组 / 药水对 STEP_HEIGHT / GRAVITY 的修改永久抹掉。
+			exitSkiAttributes(player);
+			forgetPhysics(player.getId());
+			SnowboardControl.forget(player.getId(), false);
+			AlpineSkiControl.forgetBody(player.getId(), false);
+			// 空中状态 / 失控计时由上面两个 forget 清各自那一端（这里传 false ＝ 只清服务端的表）
 			return;
 		}
-		for (ServerPlayer player : level.players()) {
-			ItemStack feet = player.getItemBySlot(EquipmentSlot.FEET);
-			if (!SkisMod.isModernSki(feet) || !isOnSnowOrIce(level, player)) {
-				continue;
-			}
-			Vec3 motion = player.getDeltaMovement();
-			if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
-				Vec3 direction = new Vec3(motion.x, 0.0D, motion.z).normalize();
-				player.addDeltaMovement(direction.scale(GLIDE_PUSH));
-			}
+		// 起跳力度 / 后空翻 / 落地：服务端只管失控计时 —— 角度只有客户端知道（按住空格），
+		// 落地时客户端发 {@code SkiFlip} 包过来，服务端用同一份判定结算（见 {@link SkiAir#applyLanding}）
+		SkiAir.tickServer(player, SkiAir.tuning(player));
+		if (SnowboardControl.isSnowboard(player)) {
+			tickSnowboard(player);
+		} else {
+			tickSkis(player);
+		}
+		// 穿板时能直接滑上 1 格高的地面（原版玩家只能上 0.6 格）：只在进入穿板状态那一 tick 写一次
+		enterSkiAttributes(player);
+		applyGravity(player);   // 穿板时重力 ×倍数（单板 / 双板各一份，见 SnowboardControl / AlpineSkiControl）
+		trackDescent(player);
+		applyMomentum(player);
+		if (SnowboardControl.isSnowboard(player)) {
+			SnowboardControl.guardCarveSpeed(player);   // 单板：转向期间给速度下限（撞墙那一 tick 除外）
+			// 单板：整 tick 最后一个写速度的点 —— 速度方向每 tick 朝**板轴**限幅回正
+			// （只在贴地时生效 —— 空中速度方向一点都不动，落地后再朝板轴追，与双板同一条口径；
+			// 不需要在 carve 里，也没有入弯基准这种状态）。
+			// 客户端（SkisClient，只对本机玩家）跑的是同一个方法：位置是客户端权威，
+			// 客户端歪掉的方向只能由客户端自己掰回来。
+			SnowboardControl.alignCarveHeading(player, player.getLastClientInput());
+		} else {
+			// 双板：整 tick 最后一个写速度的点 —— 转向期间速度方向由「入弯方向角 + 身体累计转角」推导，
+			// 模型转多少、速度方向就转多少（上面 alignVelocity 是 9°/tick 限幅，空中 / 按 S 不跑）。
+			AlpineSkiControl.alignTurnHeading(player);
+		}
+		if (player.level().getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
+			glidePush(player);
 		}
 	}
 
-	/** Snow surface = the block underfoot (or at the body position) is in the snow / ice tags. */
-	private static boolean isOnSnowOrIce(ServerLevel level, ServerPlayer player) {
-		BlockPos standing = player.blockPosition();
+	/** 单板这一 tick 的转向：服务端这一端一律传 false（只写 / 读服务端那张表）。 */
+	private static void tickSnowboard(ServerPlayer player) {
+		// ——— 单板 ———
+		// 服务端这一端一律传 false：只写 / 读服务端那张表（客户端写它自己那张，见 SnowboardControl#table）
+		SnowboardControl.ensureLocked(player.getId(), player.getYRot(), false);
+		carve(player);
+	}
+
+	/** 双板这一 tick 的转向：A / D 转身体（4.0°/tick）；W 再朝视角方向补 4.8°/tick。视角一律不动。 */
+	private static void tickSkis(ServerPlayer player) {
+		// ——— 双板：A / D 转身体（4.0°/tick）；W 再朝视角方向补 4.8°/tick。视角一律不动 ———
+		AlpineSkiControl.ensureLocked(player.getId(), player.getYRot(), false);
+		Input input = player.getLastClientInput();
+		double side = SnowboardControl.sideSign(input);
+		if (side != 0.0D) {
+			AlpineSkiControl.turnBody(player.getId(), player.getYRot(), side, false);
+		}
+		// 顺序：先 A/D 再 W；S（后退）不触发。只转身体，视角靠 SkiViewSmoothing 收敛。
+		// <b>A / D 有输入就不追视角</b>：追视角 4.8°/tick > A / D 的 4.0°/tick，两个一起写同一张
+		// BODY_YAW 会互相抵消 / 反向（「按着 W 时 D 不起作用」），W 的前进不受影响 —— 口径与客户端
+		// SkisClient 那一处相同，理由写在 AlpineSkiControl#turnTowardView 的 javadoc。
+		if (input != null && input.forward() && side == 0.0D) {
+			AlpineSkiControl.turnTowardView(player.getId(), player.getYRot(), player.getYRot(), false);
+		}
+	}
+
+	/**
+	 * 穿着滑雪板（双板 / 单板）、且不在创造飞行 / 骑乘等状态下才算滑行。
+	 *
+	 * <p>「穿板 + 不在创造飞行」这一条是共有判据 {@link SkisMod#isSkiMotionActive}（客户端也读它，
+	 * 见 {@code ClientInputMixin} / {@code SkisClient}）—— 免得同一个条件两端各写一份之后走偏。
+	 * 这里只多一条服务端特有的「骑乘时不算」（骑乘由下面的兜底请下车）。
+	 */
+	private static boolean isSkiing(ServerPlayer player) {
+		return SkisMod.isSkiMotionActive(player) && !player.isPassenger();
+	}
+
+	/** 下落加速：比较每 tick 的 Y 变化，累计下降高度；每满 STEP_BLOCKS 格就沿当前方向加一点速度。 */
+	private static void trackDescent(ServerPlayer player) {
+		Integer id = player.getId();
+		double y = player.getY();
+
+		Double lastY = LAST_Y.put(id, y);
+		if (lastY != null) {
+			double down = lastY - y;
+			if (down > 0.0D) {
+				DESCEND_ACCUM.merge(id, down, Double::sum);
+			} else if (-down >= STEP_UP_MIN_HEIGHT && player.onGround()) {
+				stepUpPenalty(player);   // 滑上去一格：按每格 STEP_UP_PENALTY 减速
+			}
+		}
+
+		double accumulated = DESCEND_ACCUM.getOrDefault(id, 0.0D);
+		boolean board = SnowboardControl.isSnowboard(player);
+		// 结算步长按板取：两板现在同粒度 0.5 格一次（双板 STEP_BLOCKS、单板 DESCENT_STEP_BLOCKS，各自独立）
+		double step = board ? SnowboardControl.descentStepBlocks() : STEP_BLOCKS;
+		if (accumulated < step) {
+			return;
+		}
+
+		double steps = Math.floor(accumulated / step);
+		DESCEND_ACCUM.put(id, accumulated - steps * step);
+
+		// 各取各的（双板 AlpineSkiControl / 单板 SnowboardControl），互不影响
+		// 两板同一种曲线：基数 × (累计格数)^FALL_GAIN_EXPONENT
+		// 指数 < 1 时才边际递减；当前取 1（线性）—— 下坡加速不随下落距离打折，手感可预期。
+		// ⚠ 乘 step 是为了让“步长细”不等于“给得多”：总量仍是「每下降 1 格 = 基数」。
+		double cap = board ? SnowboardControl.fallGainPerTickMax() : AlpineSkiControl.fallGainPerTickMax();
+		double base = board ? SnowboardControl.fallGainPerBlock() : AlpineSkiControl.fallGainPerBlock();
+		double gain = Math.min(Math.pow(steps, FALL_GAIN_EXPONENT) * base * step, cap);
+		Vec3 direction = descentDirection(player);
+		if (direction == null) {
+			return;   // 单板：没有横向速度也没按 A / D —— 不给加速（否则就是“莫名往前”）
+		}
+		player.addDeltaMovement(direction.scale(gain));
+		MOMENTUM.merge(id, player.getDeltaMovement().horizontalDistance(), Math::max);   // 让加速出来的速度被动量托住
+		clampToMaxSpeed(player);
+		player.hurtMarked = true;   // 让客户端也吃到这份加速，不然会被客户端的移动预测抹掉
+	}
+
+	/**
+	 * <b>穿板状态开始</b>（进入边沿，每段只跑一次）：记下 {@code STEP_HEIGHT} / {@code GRAVITY} 的<b>原值</b>，
+	 * 再把台阶高度写成 {@link #SKI_STEP_HEIGHT}（26.2 里它不是 {@code setMaxUpStep}，而是属性
+	 * {@link Attributes#STEP_HEIGHT}，原版玩家默认 0.6 格）。重力交给 {@link #applyGravity}（它按贴地 / 腾空换档）。
+	 *
+	 * <p><b>为什么记原值</b>：{@code setBaseValue} 是覆盖式写入。以前每 tick 都写「脱板恢复 0.6 / 默认重力」，
+	 * 于是别的模组、药水或数据包对这两条属性的 base 值改动会被我们**永久抹掉**。现在只记一次、只还原一次，
+	 * 还的是「我们自己进来之前那个值」——别人的修改原样还在。
+	 */
+	private static void enterSkiAttributes(ServerPlayer player) {
+		Integer id = player.getId();
+		AttributeInstance step = player.getAttribute(Attributes.STEP_HEIGHT);
+		if (step != null) {
+			// putIfAbsent 返回 null ＝ 这一段刚进来：这时才记原值 + 写一次台阶高度。
+			// 之后每 tick 都会调到这里，但那两次写入都跳过了（否则还是「每 tick 覆盖式写属性」）。
+			if (PRE_STEP_HEIGHT.putIfAbsent(id, step.getBaseValue()) == null) {
+				step.setBaseValue(SKI_STEP_HEIGHT);
+			}
+		}
+		AttributeInstance gravity = player.getAttribute(Attributes.GRAVITY);
+		if (gravity != null) {
+			PRE_GRAVITY.putIfAbsent(id, gravity.getBaseValue());
+		}
+	}
+
+	/**
+	 * <b>穿板状态结束</b>（离开边沿，每段只跑一次）：把 {@link #enterSkiAttributes} 记下的原值写回去。
+	 *
+	 * <p>没记过（这一段根本没穿板 / 已经还原过）就什么都不写 —— 不再对全场玩家每 tick 无条件
+	 * {@code setBaseValue} 一次。{@link #APPLIED_GRAVITY} 一并清掉，下一段穿板重新按档写。
+	 */
+	private static void exitSkiAttributes(ServerPlayer player) {
+		Integer id = player.getId();
+		Double previousStep = PRE_STEP_HEIGHT.remove(id);
+		if (previousStep != null) {
+			AttributeInstance step = player.getAttribute(Attributes.STEP_HEIGHT);
+			if (step != null) {
+				step.setBaseValue(previousStep);
+			}
+		}
+		Double previousGravity = PRE_GRAVITY.remove(id);
+		if (previousGravity != null) {
+			AttributeInstance gravity = player.getAttribute(Attributes.GRAVITY);
+			if (gravity != null) {
+				gravity.setBaseValue(previousGravity);
+			}
+		}
+		APPLIED_GRAVITY.remove(id);
+	}
+
+	/**
+	 * <b>穿板时的重力</b>：26.2 里重力就是属性 {@link Attributes#GRAVITY}（默认 0.08 格/tick²），
+	 * 这里把它改成「原版默认 × 该板的重力倍数」（单板 {@link SnowboardControl#gravityMultiplier()}、
+	 * 双板 {@link AlpineSkiControl#gravityMultiplier()}，各自一个值）。
+	 *
+	 * <p><b>贴地 / 腾空两档</b>，按 {@code player.onGround()} 二选一：
+	 * 贴地（滑行、落地压雪）用 {@code GRAVITY_MULTIPLIER}（单 1.3 / 双 1.5，下落干脆、不发飘），
+	 * 腾空（跳跃 / 坠落）用 {@code AIR_GRAVITY_MULTIPLIER}（两板 0.9 ＝ 原版 0.072，飘一点、滞空长一点）。
+	 *
+	 * <p><b>只在值真的变了的时候写</b>（换档、换板）：{@code setBaseValue} 是覆盖式写入，每 tick 都写一遍
+	 * 会把别人对这条属性 base 值的修改抹掉。写 GRAVITY 的地方全类只有两处 —— 这里（换档时）
+	 * 与 {@link #exitSkiAttributes}（脱板还原成进入前的原值）—— 不要另加第三个写点
+	 * （本工程踩过「两处各 clamp 一次」的坑）。
+	 *
+	 * <p>原版重力在穿板时太轻（贴地下落像飘在空里），所以贴地取「比平时更快」这一档；
+	 * 空中则比原版还轻 —— 跳高表就是按空中的 0.072 反解的（起跳首 tick 仍读贴地档）。
+	 * （试过「贴地 / 腾空两态 + 前馈地形跟随」的控制器，实测贴太紧、会瞬间吸到下一格，
+	 * 已回退到这条重力方案 —— 别再自作主张加贴地控制。）
+	 */
+	private static void applyGravity(ServerPlayer player) {
+		AttributeInstance attribute = player.getAttribute(Attributes.GRAVITY);
+		if (attribute == null) {
+			return;
+		}
+		boolean board = SnowboardControl.isSnowboard(player);
+		boolean grounded = player.onGround();
+		// 贴地 → 该板的 GRAVITY_MULTIPLIER；腾空 → 该板的 AIR_GRAVITY_MULTIPLIER（两板 0.9）
+		double multiplier = grounded
+				? (board ? SnowboardControl.gravityMultiplier() : AlpineSkiControl.gravityMultiplier())
+				: (board ? SnowboardControl.airGravityMultiplier() : AlpineSkiControl.airGravityMultiplier());
+		double value = Attributes.GRAVITY.value().getDefaultValue() * multiplier;
+		Double applied = APPLIED_GRAVITY.get(player.getId());
+		if (applied != null && applied == value) {
+			return;   // 档位没变（也没换板）：值已经是这个，不必再覆盖一遍
+		}
+		attribute.setBaseValue(value);
+		APPLIED_GRAVITY.put(player.getId(), value);
+	}
+
+	/**
+	 * 滑上一格台阶的减速：每上一格扣 {@link #STEP_UP_PENALTY} 格/tick。
+	 *
+	 * <p>动量要一起扣 —— 不然下一步 {@code applyMomentum} 又用旧的动量把速度托回来，等于没减。
+	 */
+	private static void stepUpPenalty(ServerPlayer player) {
+		Integer id = player.getId();
+		Vec3 motion = player.getDeltaMovement();
+		double speed = motion.horizontalDistance();
+		if (speed > 1.0E-4D) {
+			double factor = Math.max(0.0D, (speed - STEP_UP_PENALTY) / speed);
+			player.setDeltaMovement(motion.x * factor, motion.y, motion.z * factor);
+			player.hurtMarked = true;
+		}
+		double momentum = MOMENTUM.getOrDefault(id, 0.0D) - STEP_UP_PENALTY;
+		if (momentum < MOMENTUM_MIN) {
+			MOMENTUM.remove(id);
+		} else {
+			MOMENTUM.put(id, momentum);
+		}
+	}
+
+	/** 把水平速度压到 {@link GlideSteering#maxGlideSpeed(ServerPlayer)} 以内（垂直分量不动）。 */
+	private static void clampToMaxSpeed(ServerPlayer player) {
+		// 上限按板取（单板 / 双板各自一个值）
+		Vec3 motion = player.getDeltaMovement();
+		double speed = motion.horizontalDistance();
+		double max = GlideSteering.maxGlideSpeed(player);
+		if (speed > max) {
+			double keep = max / speed;
+			player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
+		}
+	}
+
+	/**
+	 * 低摩擦滑行：维护一份动量，每 tick 按该板的动量衰减（{@link AlpineSkiControl#momentumDecay()} /
+	 * {@link SnowboardControl#momentumDecay()}，0.998 ＝ 每 tick 保留 99.8%）缓慢衰减，并保证玩家水平速度不低于它。
+	 * 玩家自己（走路/冲刺/右键冲刺）比动量快时完全不插手。
+	 */
+	private static void applyMomentum(ServerPlayer player) {
+		Integer id = player.getId();
+		Vec3 motion = player.getDeltaMovement();
+		double speed = motion.horizontalDistance();
+
+		// 撞墙累计（两板共用这条物理骨架）：撞一下 +1、不撞清零。
+		// 单 tick 就砍半会把「坡面上蹭一下」当成撞墙 —— 起弯时速度被清零一半，整段弯再也回不来。
+		// 这里只数不砍，砍不砍看下面连续多少 tick（**门槛只给单板用**，双板撞一下即砍）。
+		int hitTicks = player.horizontalCollision ? HIT_TICKS.getOrDefault(id, 0) + 1 : 0;
+		if (hitTicks > 0) {
+			HIT_TICKS.put(id, hitTicks);
+		} else {
+			HIT_TICKS.remove(id);
+		}
+
+		double momentum = MOMENTUM.getOrDefault(id, 0.0D);
+		Input keys = player.getLastClientInput();
+		boolean board = SnowboardControl.isSnowboard(player);   // true ＝ 单板
+		// 「这一 tick 在不在 carve」只算一次：分支里用它挑衰减常数，下面的撞墙减速也用它（见 A-3）。
+		// 判据与 applyCarve / guardCarveSpeed 完全同源（SnowboardControl.isCarving），不在这里另写一份。
+		boolean carving = board && SnowboardControl.isCarving(id, keys, speed);
+		// 动量先托住当前速度：两条分支原本各写一次这一句，提到分派之前（早退路径不读它，等价）
+		momentum = Math.max(momentum, speed);
+		Double decay = board
+				? applyMomentumSnowboard(player, id, motion, speed, keys, carving)
+				: applyMomentumSkis(player, id, motion, speed, momentum, keys);
+		if (decay == null) {
+			return;                                             // 刹车那一 tick 已在分支里结算并返回
+		}
+		// 分支里可能刚做过落地对齐（只改方向、不改水平速度大小）—— 重读一次，别拿陈旧值往下走
+		motion = player.getDeltaMovement();
+		speed = motion.horizontalDistance();
+
+		// 撞墙减速（两条分支各一份口径，别共用门槛）：
+		//   单板 —— 只有**连续**顶住墙（≥ MOMENTUM_HIT_TICKS_BEFORE_DECAY tick）才砍，
+		//           坡面上偶尔一次 horizontalCollision 不该被当成撞墙砍半，否则整段弯的速度回不来；
+		//           **正在 carve 时一律不砍（A-3）**：见下面那段注释；
+		//   双板 —— 撞一下即砍（与 0bbc10c 相同：horizontalCollision 为真就乘 MOMENTUM_DECAY_ON_HIT）。
+		boolean hitDecay = player.horizontalCollision
+				&& (!board || (!carving && hitTicks >= MOMENTUM_HIT_TICKS_BEFORE_DECAY));
+		// A-3：单板 carve 期间整段豁免这次砍半（门槛 3 tick 与非 carve 的贴墙硬滑都保留）。
+		// ①「撞墙」在弯里是 carve 自己造出来的：每 tick 16° 把速度扫过方块面，弧的上坡半段速度指向坡面，
+		//    连续 3 tick horizontalCollision 是转弯的常态，不是「顶着墙硬滑」；
+		// ②砍了也回不来：momentum *= 0.5 之后，下一 tick 的 `momentum = max(momentum, speed)` 拿的是
+		//    **摩擦后**的速度（雪面 0.546×入场），所以动量永远爬不回入场速度 —— 整段弯里每次撞墙都停在
+		//    0.30，一自由就跳回 0.55（0.30 ↔ 0.55 的阶跌就是这么来的），要到出弯才彻底恢复。
+		momentum *= hitDecay ? MOMENTUM_DECAY_ON_HIT : decay;
+		momentum = Math.min(momentum, GlideSteering.maxGlideSpeed(player));   // 速度上限（按板）
+
+		if (momentum < MOMENTUM_MIN) {
+			MOMENTUM.remove(id);
+			return;
+		}
+		MOMENTUM.put(id, momentum);
+
+		if (speed >= momentum) {
+			return;   // 玩家自己滑得更快，不插手
+		}
+		Vec3 direction = steerDirection(player);   // 托速度时也允许用 WASD 转向，不然会像被锁住一样
+		if (direction == null) {
+			if (motion.horizontalDistanceSqr() <= 1.0E-6D) {
+				return;
+			}
+			direction = new Vec3(motion.x, 0.0D, motion.z).normalize();   // 没输入就沿原方向托
+		}
+		player.setDeltaMovement(direction.x * momentum, motion.y, direction.z * momentum);
+		player.hurtMarked = true;
+	}
+
+	/**
+	 * 单板分支：压刃 / 换刃 / 刹车，返回本 tick 的动量衰减；已经结算并返回时为 {@code null}。
+	 *
+	 * @param carving 这一 tick 在不在 carve（调用方 {@link #applyMomentum} 已经算过，撞墙减速也要用同一个值 ——
+	 *                见那里的 A-3；这里不再重复调 {@link SnowboardControl#isCarving}，两处判定必须逐位一致）
+	 */
+	private static Double applyMomentumSnowboard(ServerPlayer player, Integer id, Vec3 motion, double speed,
+			Input keys, boolean carving) {
+		// ——— 单板 ———
+		double side = SnowboardControl.sideSign(keys);
+		// 正在转向（压着刃）时，反向侧压是「换刃转向」而不是刹车 ——
+		// 走刹车分支（不托底、动量被对齐成当前速度）的话，起弯那一下速度会被原版摩擦＋反向输入吃掉一大截
+		// （实测 0.5 → 0.165，占 67%），而且动量被清掉后整段弯都回不到原来的速度。
+		if (side != 0.0D && !carving) {
+			// 分“同向 / 反向”两种按法：
+			//   反向（向左滑时按 D）＝刹车 —— 原版横移把人往右挪、速度自然抵消，
+			//   所以这里**不覆盖玩家速度、也不托动量**，只把动量对齐到当前实际速度（否则动量会托着旧速度，反着按等于白按）；
+			//   同向（顺着滑行方向按）＝不与玩家作对，让动量**托住**已有速度 ——
+			//   否则下落加速攒出来的速度每 tick 被地面摩擦（约 ×0.55）吃掉，滑多长都只剩原版横向移动的基础速度
+			//   （症状就是：一直按住 A / D 下坡，速度叠加触发不了，一直是基础速度滑动）。
+			Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+			double along = horizontal.lengthSqr() < 1.0E-6D
+					? 0.0D
+					: horizontal.normalize().dot(SnowboardControl.sideLocked(id, player.getYRot(), 1.0D, false));
+			if (along * side <= 0.0D) {
+				MOMENTUM.put(id, speed);
+				return null;
+			}
+		}
+		// 转向期间用专门的（更小的）摩擦：转弯不该比直行还涩
+		return carving ? SnowboardControl.carveMomentumDecay() : SnowboardControl.momentumDecay();
+	}
+
+	/** 双板分支：按 S 刹车 / 落地对齐，返回本 tick 的动量衰减；刹车那一 tick 已经结算时为 {@code null}。 */
+	private static Double applyMomentumSkis(ServerPlayer player, Integer id, Vec3 motion, double speed,
+			double momentum, Input keys) {
+		// ——— 双板 ———
+		// 按 S 且还在往前滑 ＝ 刹车：动量与速度一起按 BRAKE_DECAY 衰减，方向不翻。
+		// （以前的写法把 S 也当成「想往后走」，于是高速按 S 只会把速度方向拨反，一点没减下来。）
+		boolean braking = keys != null && keys.backward() && AlpineSkiControl.isMovingForward(player);
+		if (braking) {
+			// 刹车：动量与当前速度一起按 BRAKE_DECAY 衰减，方向**不翻**
+			momentum = Math.max(momentum, speed) * AlpineSkiControl.brakeDecay();
+			Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+			if (horizontal.lengthSqr() > 1.0E-6D) {
+				double keep = momentum / horizontal.length();
+				player.setDeltaMovement(motion.x * keep, motion.y, motion.z * keep);
+				player.hurtMarked = true;
+			}
+			MOMENTUM.put(id, momentum);
+			return null;   // 刹车这一 tick 不走下面「朝视角方向重写速度」那套（否则就又拨方向了）
+		}
+		// ——— 落地对齐（只在双板分支）：A / D 转完身落地，速度方向要快速朝身体前方掰 ———
+		// 以前方向只在 speed < momentum 时经 GlideSteering.steer（STEER_RATE 0.2 的 lerp）慢慢摆，
+		// 玩家自己的速度不掉就直接 return，方向永远不跟 →「转完身落地不跟手」。
+		// 现在贴地（且没按 S、还有速度）就先掰一步方向，判定与执行都在 AlpineSkiControl。
+		if (AlpineSkiControl.shouldAlignOnGround(player, keys)) {
+			AlpineSkiControl.alignVelocity(player);
+			// 对齐只改方向、不改水平速度大小，但下面用的是 motion / speed —— 重读，别拿陈旧值往下走
+		}
+		// 没按 S（或已停下 / 在倒滑）时才走常规托底：动量原样托住速度。
+		return AlpineSkiControl.momentumDecay();
+	}
+
+	/**
+	 * 单板 carve：前倾（W）＋ 横移（A / D）→ 身体朝向朝那一侧持续转（{@link SnowboardControl#applyCarve}），
+	 * 同时沿身体前方补一点前冲力 —— 与横移合成“右前方 / 左前方”，一直按着就是在雪地上画圈。
+	 */
+	private static void carve(ServerPlayer player) {
+		// 注意：腾空时也允许「转」——但只转身体 / 模型（BODY_YAW 照常推进），速度方向一点不动，
+		// 落地后由 alignCarveHeading 朝板轴追（与双板同一条口径：空中改速度方向会把人拽偏）。
+		Input input = player.getLastClientInput();
+		double speed = player.getDeltaMovement().horizontalDistance();
+		if (SnowboardControl.applyCarve(player, input, speed) == 0.0F) {
+			return;
+		}
+		// W / S 只转向、不加力；转向过程中把已有的速度用动量托住（不然摩擦会把它吃掉）
+		MOMENTUM.merge(player.getId(), player.getDeltaMovement().horizontalDistance(), Math::max);
+		clampToMaxSpeed(player);
+		player.hurtMarked = true;
+	}
+
+	/** 雪 / 冰面上的推进：正在移动就沿移动方向补一点。 */
+	private static void glidePush(ServerPlayer player) {
+		if (SnowboardControl.isSnowboard(player) || !isOnSnowOrIce(player)) {
+			return;   // 单板不做雪面推进：那是“没人碰它自己往前”的来源之一
+		}
+		Vec3 motion = player.getDeltaMovement();
+		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
+			Vec3 direction = new Vec3(motion.x, 0.0D, motion.z).normalize();
+			player.addDeltaMovement(direction.scale(GLIDE_PUSH));
+			player.hurtMarked = true;
+		}
+	}
+
+	/**
+	 * 下落加速的方向。
+	 *
+	 * <p><b>单板：只沿当前水平速度方向</b>（{@code horizontal.normalize()}）—— <b>不投影到身体横轴、不跟随身体朝向</b>，
+	 * 所以空中转完身，这份加速只会把已有速度往长了加，不会把速度方向拽到新朝向。
+	 * 只有几乎没速度（{@code ≤ MIN_MOTION_SQR}）时才按 A / D 的侧向给（{@link SnowboardControl#sideSign}），
+	 * 没速度也没按 A / D → 不给（返回 {@code null}）。
+	 *
+	 * <p>双板照旧：有横向速度就沿当前移动方向，否则按按键 / 视线定方向。
+	 */
+	private static Vec3 descentDirection(ServerPlayer player) {
+		Vec3 motion = player.getDeltaMovement();
+		Vec3 horizontal = new Vec3(motion.x, 0.0D, motion.z);
+
+		if (SnowboardControl.isSnowboard(player)) {
+			if (horizontal.lengthSqr() > MIN_MOTION_SQR) {
+				return horizontal.normalize();        // 沿当前速度方向：不投影到身体横轴、不跟随朝向
+			}
+			double side = SnowboardControl.sideSign(player.getLastClientInput());
+			return side == 0.0D ? null : SnowboardControl.sideLocked(player.getId(), player.getYRot(), side, false);
+		}
+
+		if (horizontal.lengthSqr() > MIN_MOTION_SQR) {
+			return horizontal.normalize();
+		}
+		return steerDirection(player);
+	}
+
+	/** 加速方向：在滑行方向的基础上按玩家按键转向（两块板在空中都锁死方向）；单板可能返回 null＝不给加速。 */
+	private static Vec3 steerDirection(ServerPlayer player) {
+		Vec3 travel = travelDirection(player);
+		return travel == null ? null : GlideSteering.steer(travel, player);
+	}
+	private static Vec3 travelDirection(ServerPlayer player) {
+		Vec3 motion = player.getDeltaMovement();
+		if (motion.horizontalDistanceSqr() > MIN_MOTION_SQR) {
+			return new Vec3(motion.x, 0.0D, motion.z).normalize();
+		}
+		if (SnowboardControl.isSnowboard(player)) {
+			// 单板：**不在这里改方向** —— 没有速度就返回 null（不加力），有速度就走上面的“沿当前方向”。
+			// 这样 A / D 和 W / S 的“方向变化”是同一套机制：都靠 carve 的每 tick 旋转，
+			// 而不是按 A / D 时把速度一下子拨到侧向、按 W / S 时却慢慢转 —— 两种键位的转向手感必须一致。
+			return null;
+		}
+		Vec3 look = player.getLookAngle();
+		Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);
+		return horizontal.length() > 0.01D ? horizontal.normalize() : new Vec3(0.0D, 0.0D, 1.0D);
+	}
+
+	/** 脚下（或身位）方块属于雪 / 冰标签即为雪面（滑行、雪粒子共用这一条；落地另有更宽的判定）。 */
+	public static boolean isOnSnowOrIce(Level level, BlockPos standing) {
 		BlockState below = level.getBlockState(standing.below());
 		if (below.is(BlockTags.SNOW) || below.is(BlockTags.ICE)) {
 			return true;
 		}
 		return level.getBlockState(standing).is(BlockTags.SNOW);
+	}
+
+	/**
+	 * <b>落地用的雪面判定（比 {@link #isOnSnowOrIce} 宽）</b>：雪层只有 0.125 格高，落点很容易跨在
+	 * 雪层与它下面的石头上 —— 所以把脚底所在格、上一格、下两格都看一遍，任一是雪 / 冰就算砸在雪面上。
+	 */
+	public static boolean isSnowLanding(Level level, BlockPos standing) {
+		return isSnowOrIceAt(level, standing)
+				|| isSnowOrIceAt(level, standing.above())
+				|| isSnowOrIceAt(level, standing.below())
+				|| isSnowOrIceAt(level, standing.below(2));
+	}
+
+	private static boolean isSnowOrIceAt(Level level, BlockPos pos) {
+		var state = level.getBlockState(pos);
+		return state.is(BlockTags.SNOW) || state.is(BlockTags.ICE);
+	}
+
+	/**
+	 * 脚底到下方地面的距离（格）；往下 {@code range + 0.1} 格内探不到东西就返回一个很大的值。
+	 *
+	 * <p>客户端与服务端都能用（{@code Level#clip} 两边都有）—— 雪粒子、滑行声、落地免伤都用它。
+	 * 判定一律是「离地 ≤ range」而不是 {@code onGround}（滑下坡时人常常一两 tick 没踩着地）。
+	 * 单板的速度回正 / carve 转速度也用它：{@code SnowboardControl.isSpeedAlignable} 在
+	 * {@code onGround} 为假时按「1.0 格内且 vy ≤ 0」再判一次（兜坡面抖动）。
+	 */
+	public static double groundDistance(Entity entity, double range) {
+		Level level = entity.level();
+		Vec3 from = entity.position();
+		Vec3 to = from.add(0.0D, -(range + 0.1D), 0.0D);
+		BlockHitResult hit = level.clip(new ClipContext(from, to,
+				ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, entity));
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return Double.MAX_VALUE;
+		}
+		return from.y - hit.getLocation().y;
+	}
+
+	/** 雪面的便捷重载：用玩家自己的位置。 */
+	private static boolean isOnSnowOrIce(ServerPlayer player) {
+		return isOnSnowOrIce(player.level(), player.blockPosition());
+	}
+
+	private static void forgetPhysics(int id) {
+		LAST_Y.remove(id);
+		DESCEND_ACCUM.remove(id);
+		MOMENTUM.remove(id);
+		HIT_TICKS.remove(id);
+	}
+
+	/**
+	 * 这个 id 的一切（物理动量 ＋「进入穿板前的属性原值」）都丢掉：<b>断线</b>时调。
+	 *
+	 * <p>为什么属性原值也要丢：id 会被新玩家复用，陈旧的原值会在「新玩家脱板」那一 tick 被写回属性，
+	 * 把一个莫名其妙的数种到他身上（真正的原值早就跟着旧实体消失了）。
+	 */
+	private static void forgetPlayer(int id) {
+		forgetPhysics(id);
+		PRE_STEP_HEIGHT.remove(id);
+		PRE_GRAVITY.remove(id);
+		APPLIED_GRAVITY.remove(id);
 	}
 }

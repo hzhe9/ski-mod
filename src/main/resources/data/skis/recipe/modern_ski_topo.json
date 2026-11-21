@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    "skis:modern_ski",
+    "minecraft:paper",
+    "minecraft:iron_ingot"
+  ],
+  "result": {
+    "id": "skis:modern_ski",
+    "components": {
+      "minecraft:item_model": "skis:item/modern_ski_topo",
+      "minecraft:custom_name": {
+        "translate": "item.skis.modern_ski.topo"
+      }
+    }
+  }
+}

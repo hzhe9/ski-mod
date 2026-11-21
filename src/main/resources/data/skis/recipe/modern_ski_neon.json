@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    "skis:modern_ski",
+    "minecraft:magenta_dye",
+    "minecraft:orange_dye",
+    "minecraft:lime_dye"
+  ],
+  "result": {
+    "id": "skis:modern_ski",
+    "components": {
+      "minecraft:item_model": "skis:item/modern_ski_neon",
+      "minecraft:custom_name": {
+        "translate": "item.skis.modern_ski.neon"
+      }
+    }
+  }
+}

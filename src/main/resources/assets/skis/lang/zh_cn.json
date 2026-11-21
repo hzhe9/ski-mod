@@ -1,4 +1,19 @@
 {
-	"item.skis.modern_ski": "现代滑雪板",
-	"item.skis.ski_pole": "滑雪杖"
+  "item.skis.ski_pole": "滑雪杖",
+  "item.skis.modern_ski": "高山滑雪板",
+  "item.skis.modern_ski.wood": "高山滑雪板 · 木纹",
+  "item.skis.modern_ski.graphite": "高山滑雪板 · 石墨",
+  "item.skis.modern_ski.topo": "高山滑雪板 · 等高线",
+  "item.skis.modern_ski.brushed": "高山滑雪板 · 拉丝",
+  "item.skis.modern_ski.neon": "高山滑雪板 · 霓虹",
+  "item.skis.modern_ski.leopard": "高山滑雪板 · 豹纹",
+  "item.skis.snowboard": "滑雪单板",
+  "item.skis.snowboard.wood": "滑雪单板 · 木纹",
+  "item.skis.snowboard.graphite": "滑雪单板 · 石墨",
+  "item.skis.snowboard.topo": "滑雪单板 · 等高线",
+  "item.skis.snowboard.brushed": "滑雪单板 · 拉丝",
+  "item.skis.snowboard.neon": "滑雪单板 · 霓虹",
+  "item.skis.snowboard.leopard": "滑雪单板 · 豹纹",
+  "itemGroup.skis": "滑雪装备",
+  "message.skis.no_riding": "穿着滑雪板不能骑乘"
 }

@@ -1,9 +1,8 @@
-#
-# https://help.github.com/articles/dealing-with-line-endings/
-#
-# Linux start script should use lf
-/gradlew        text eol=lf
+# 换行交给 Git 标准策略：文本文件统一以 LF 入库，检出按平台自动处理
+*          text=auto
 
-# These are Windows script files and should use crlf
-*.bat           text eol=crlf
+# Linux 启动脚本必须 LF
+/gradlew   text eol=lf
 
+# Windows 脚本用 CRLF
+*.bat      text eol=crlf

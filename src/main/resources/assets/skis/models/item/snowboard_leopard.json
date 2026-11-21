@@ -1,0 +1,7 @@
+{
+  "parent": "skis:item/snowboard_base_gui",
+  "textures": {
+    "tex": "skis:item/snowboard_leopard",
+    "particle": "skis:item/snowboard_leopard"
+  }
+}

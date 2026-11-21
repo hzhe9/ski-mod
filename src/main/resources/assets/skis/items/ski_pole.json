@@ -1,6 +1,19 @@
 {
 	"model": {
-		"type": "minecraft:model",
-		"model": "skis:item/ski_pole"
+		"type": "minecraft:select",
+		"property": "minecraft:display_context",
+		"cases": [
+			{
+				"when": "gui",
+				"model": {
+					"type": "minecraft:model",
+					"model": "skis:item/ski_pole_gui"
+				}
+			}
+		],
+		"fallback": {
+			"type": "minecraft:model",
+			"model": "skis:item/ski_pole"
+		}
 	}
 }

@@ -1,0 +1,7 @@
+{
+  "parent": "skis:item/modern_ski_base_gui",
+  "textures": {
+    "tex": "skis:item/ski_board_brushed",
+    "particle": "skis:item/ski_board_brushed"
+  }
+}

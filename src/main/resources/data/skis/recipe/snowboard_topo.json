@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    "skis:snowboard",
+    "minecraft:paper",
+    "minecraft:iron_ingot"
+  ],
+  "result": {
+    "id": "skis:snowboard",
+    "components": {
+      "minecraft:item_model": "skis:item/snowboard_topo",
+      "minecraft:custom_name": {
+        "translate": "item.skis.snowboard.topo"
+      }
+    }
+  }
+}

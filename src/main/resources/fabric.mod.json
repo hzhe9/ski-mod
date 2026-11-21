@@ -3,10 +3,14 @@
 	"id": "skis",
 	"version": "${version}",
 	"name": "Modern Skis",
-	"description": "Ski boards and ski poles: right-click to start gliding, push with the pole to accelerate.",
+	"description": "Alpine skis, a snowboard and a ski pole with real glide physics — carve down slopes, hold momentum, brake on your edges. 6 cosmetic styles, craftable from wood, leather and a few materials.",
 	"authors": [
 		"hzhe9"
 	],
+	"contact": {
+		"sources": "https://github.com/hzhe9/ski-mod",
+		"issues": "https://github.com/hzhe9/ski-mod/issues"
+	},
 	"license": "MIT",
 	"icon": "assets/skis/icon.png",
 	"environment": "*",
@@ -20,7 +24,14 @@
 	},
 	"mixins": [
 		{
+			"config": "skis.mixins.json"
+		},
+		{
 			"config": "skis.client.mixins.json",
+			"environment": "client"
+		},
+		{
+			"config": "skis.vivid_move.mixins.json",
 			"environment": "client"
 		}
 	],

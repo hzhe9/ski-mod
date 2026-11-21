@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    "skis:snowboard",
+    "minecraft:iron_ingot",
+    "minecraft:lapis_lazuli"
+  ],
+  "result": {
+    "id": "skis:snowboard",
+    "components": {
+      "minecraft:item_model": "skis:item/snowboard_brushed",
+      "minecraft:custom_name": {
+        "translate": "item.skis.snowboard.brushed"
+      }
+    }
+  }
+}

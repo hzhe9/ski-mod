@@ -1,0 +1,14 @@
+{
+	"required": false,
+	"minVersion": "0.8",
+	"package": "com.hzhe9.skis.mixin.client.compat",
+	"compatibilityLevel": "JAVA_25",
+	"plugin": "com.hzhe9.skis.mixin.client.compat.SkisVividMoveMixinPlugin",
+	"client": [
+		"VividMoveAnimationsMixin",
+		"VividMoveAnimationControllerMixin"
+	],
+	"injectors": {
+		"defaultRequire": 0
+	}
+}

@@ -1,0 +1,7 @@
+{
+  "parent": "skis:item/modern_ski_base_hand",
+  "textures": {
+    "tex": "skis:item/ski_board_topo",
+    "particle": "skis:item/ski_board_topo"
+  }
+}

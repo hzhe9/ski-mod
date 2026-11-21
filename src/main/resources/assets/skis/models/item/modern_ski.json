@@ -1,6 +1,7 @@
 {
-	"parent": "minecraft:item/generated",
-	"textures": {
-		"layer0": "skis:item/modern_ski"
-	}
+  "parent": "skis:item/modern_ski_base_gui",
+  "textures": {
+    "tex": "skis:item/ski_board",
+    "particle": "skis:item/ski_board"
+  }
 }

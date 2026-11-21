@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"package": "com.hzhe9.skis.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"LivingEntityJumpMixin",
+		"EntityStartRidingMixin",
+		"PlayerGlideMixin",
+		"LivingEntityClimbMixin",
+		"EntitySwimMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

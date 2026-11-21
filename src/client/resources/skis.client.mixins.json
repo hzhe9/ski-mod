@@ -4,10 +4,19 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"HumanoidModelMixin",
+		"PlayerModelThighMixin",
 		"EntityStepSoundMixin",
 		"GameRendererBobMixin",
 		"LivingEntityFallSoundMixin",
-		"PlayerStepSoundMixin"
+		"PlayerStepSoundMixin",
+		"ClientInputMixin",
+		"EntityTiltMixin",
+		"CameraTiltMixin",
+		"CameraFlipMixin",
+		"CameraViewSmoothingMixin",
+		"SkiHeadLimitMixin",
+		"LocalPlayerJumpMixin",
+		"LocalPlayerBoardInputMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
