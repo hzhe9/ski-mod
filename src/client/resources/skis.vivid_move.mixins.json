@@ -1,9 +1,9 @@
 {
 	"required": false,
 	"minVersion": "0.8",
-	"package": "io.github.wf.skis.mixin.client.compat",
+	"package": "com.hzhe9.skis.mixin.client.compat",
 	"compatibilityLevel": "JAVA_25",
-	"plugin": "io.github.wf.skis.mixin.client.compat.SkisVividMoveMixinPlugin",
+	"plugin": "com.hzhe9.skis.mixin.client.compat.SkisVividMoveMixinPlugin",
 	"client": [
 		"VividMoveAnimationsMixin",
 		"VividMoveAnimationControllerMixin"

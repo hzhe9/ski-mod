@@ -5,21 +5,21 @@
 	"name": "Modern Skis",
 	"description": "Alpine skis, a snowboard and a ski pole with real glide physics — carve down slopes, hold momentum, brake on your edges. 6 cosmetic styles, craftable from wood, leather and a few materials.",
 	"authors": [
-		"WF"
+		"hzhe9"
 	],
 	"contact": {
-		"sources": "https://github.com/WF/modern-skis",
-		"issues": "https://github.com/WF/modern-skis/issues"
+		"sources": "https://github.com/hzhe9/ski-mod",
+		"issues": "https://github.com/hzhe9/ski-mod/issues"
 	},
 	"license": "MIT",
 	"icon": "assets/skis/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"io.github.wf.skis.SkisMod"
+			"com.hzhe9.skis.SkisMod"
 		],
 		"client": [
-			"io.github.wf.skis.client.SkisClient"
+			"com.hzhe9.skis.client.SkisClient"
 		]
 	},
 	"mixins": [
