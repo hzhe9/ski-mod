@@ -40,7 +40,8 @@ TEX_ENTITY = os.path.join(ASSETS, "textures", "entity")
 TEX_ARMOR = os.path.join(TEX_ENTITY, "equipment", "humanoid")
 ICON = os.path.join(ASSETS, "icon.png")
 
-# Gradle 家目录：优先环境变量（本机底座已搬到 D:\gradle），回落到默认 ~/.gradle
+# Gradle user home: prefer $GRADLE_USER_HOME, fall back to ~/.gradle.
+# The vanilla client jar is read from the Loom cache to build the texture atlas.
 GRADLE_HOME = os.environ.get("GRADLE_USER_HOME") or os.path.join(os.path.expanduser("~"), ".gradle")
 VANILLA_JAR = os.path.join(
     GRADLE_HOME, "caches", "fabric-loom", "26.2", "minecraft-client.jar"
