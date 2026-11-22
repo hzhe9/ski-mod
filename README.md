@@ -18,18 +18,16 @@
 - `minecraft:item_model` → 换物品图标 + 脚上模型贴图：图标是**真 3D 模型**（`assets/skis/models/item/<id>_<款>.json`，方块模型 `elements` 格式，**直接复用脚上那张 128x32 贴图**，不另画图）；角度由模型自己的 `display.gui.rotation` 决定
 - `minecraft:custom_name` → 翻译键 `item.skis.<id>.<款>`（中英各一份 lang，可本地化）
 
-| # | 款式 | 中文名 | 英文名 | 双板配方（无序） | 单板配方（无序） |
-|---|---|---|---|---|---|
-| 1 | wood | 高山滑雪板 · 木纹 | Wood Grain Alpine Skis | **基础款**：皮革×2 + 木板×4（`L L` / `P P` / `P P`） | **基础款**：皮革×2 + 木板×3（`L L` / `PPP`） |
-| 2 | graphite | · 石墨 | Graphite | 木纹板×1 + 煤炭×1 + 铁锭×1 | 同左（用木纹单板） |
-| 3 | topo | · 等高线 | Topo | 木纹板×1 + 纸×1 + 铁锭×1 | 同左 |
-| 4 | brushed | · 拉丝 | Brushed | 木纹板×1 + 铁锭×1 + 青金石×1 | 同左 |
-| 5 | neon | · 霓虹 | Neon | 木纹板×1 + 洋红/橙/黄绿染料各×1 | 同左 |
-| 6 | leopard | · 豹纹 | Leopard | 木纹板×1 + 皮革×1 + 墨囊×1 | 同左 |
+| # | 款式 | 中文名 | 英文名 |
+|---|---|---|---|
+| 1 | wood | 高山滑雪板 · 木纹 | Wood Grain Alpine Skis |
+| 2 | graphite | · 石墨 | Graphite |
+| 3 | topo | · 等高线 | Topo |
+| 4 | brushed | · 拉丝 | Brushed |
+| 5 | neon | · 霓虹 | Neon |
+| 6 | leopard | · 豹纹 | Leopard |
 
-基础款是有序合成（两种板原料相同，靠**图案**区分）；5 个衍生款是无序合成，消耗一块木纹板 + 材料。
-因为任何款式的板都算 `skis:modern_ski` / `skis:snowboard`，**已做好的其他款式也能再改款**（换款式不亏材料）。
-滑雪杖：铁粒×1 + 木棍×2（`I` / `S` / `S`，一次出 2 根）。
+款式只是外观，数值完全相同。合成配方不在 README 维护：游戏内配方书直接可查（13 条配方都带解锁 advancement，拿到材料就解锁），模组页另配合成图。任何款式的板都算 `skis:modern_ski` / `skis:snowboard`，所以已做好的板能反复改款、不亏材料。
 
 ## 操作（穿着板时）
 
